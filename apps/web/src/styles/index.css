@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply antialiased;
+  }
+  h1, h2, h3, .font-display {
+    @apply font-serif tracking-tight;
+  }
+}

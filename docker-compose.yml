@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: precifica_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: precifica
+      POSTGRES_PASSWORD: precifica
+      POSTGRES_DB: precifica_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - precifica_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U precifica"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: precifica_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  precifica_pg_data:

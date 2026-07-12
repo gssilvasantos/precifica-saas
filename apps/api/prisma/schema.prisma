@@ -1,0 +1,1466 @@
+// Schema do banco de dados — organizado por bounded context via Postgres
+// schemas (Prisma multiSchema). Ver docs/platform-architecture.md, seção 6,
+// para o racional de adotar isso agora, antes da primeira migration real.
+//
+// identity                 -> Identity & Access (Tenant, User)
+// catalog                  -> Catalog (Product, Supplier, TaxProfile, CatalogSettings)
+// logistics_intelligence   -> Logistics Intelligence (LogisticsSettings)
+// marketplace_intelligence -> Marketplace Intelligence (ver docs/marketplace-intelligence-architecture.md)
+// integration_ops          -> infraestrutura genérica de sincronização externa
+//                             (ProviderSyncSchedule/Log/Health), extraída do
+//                             marketplace_intelligence na Etapa 5 porque o
+//                             ERP Integration precisa do mesmo mecanismo
+//                             (docs/erp-integration-architecture.md, seção 5).
+// erp_integration          -> ERP Integration + conexão Nuvemshop (ver docs/erp-integration-architecture.md)
+// channel_integration       -> Vínculo SKU x anúncio/produto em cada canal de venda
+//                              (ChannelListing) — populado pelo erp-integration
+//                              (hoje: Nuvemshop; amanhã: ML/Shopee), consumido
+//                              pelo Pricing Intelligence.
+// competition_intelligence -> Radar de concorrência (ver docs/competition-intelligence-architecture.md).
+//                             Separa deliberadamente histórico append-only
+//                             (CompetitorOfferSnapshot, para Analytics) do
+//                             read-model enxuto que o Pricing Engine consulta
+//                             (CompetitiveOpportunity) — mesma disciplina de
+//                             ErpSyncChangeEvent (latest-state) vs. eventos
+//                             de domínio (histórico), só que aqui os dois
+//                             lados viraram tabelas físicas distintas porque
+//                             o volume de leitura de concorrência é maior.
+// financial_intelligence  -> DRE + Contas a Receber (FixedExpense, ReceivableRecord)
+//                             — ver docs/financial-intelligence-architecture.md.
+//                             Deliberadamente um bounded context PRÓPRIO, não
+//                             uma extensão de catalog: DRE/fluxo de caixa é
+//                             sobre a saúde financeira do NEGÓCIO como um
+//                             todo (despesas recorrentes, repasses de
+//                             marketplace), não sobre o cadastro de produto.
+// orders                   -> Hub de pedidos multicanal (Order, OrderItem) —
+//                             ver docs/orders-architecture.md. Status
+//                             unificado (worklist estilo Olist); cada canal
+//                             traz seu próprio vocabulário de status, mapeado
+//                             para os 6 estágios canônicos no PRÓPRIO adapter
+//                             (nunca no orquestrador genérico).
+// logistics_fulfillment    -> Hub de Provas (auditoria de saída de estoque) +
+//                             Full Fulfillment (Sprint 24, ver
+//                             docs/logistics-fulfillment-architecture.md).
+//                             Bounded context PRÓPRIO, distinto de
+//                             logistics_intelligence (que só calcula peso
+//                             cubado/de cobrança — nunca teve conceito de
+//                             depósito ou movimentação de estoque). Unifica
+//                             o despacho de varejo e o despacho para os CDs
+//                             do Full atrás da MESMA garantia: nenhuma
+//                             movimentação em StockLedgerEntry existe sem um
+//                             StockMovementAuditEvent já APROVADO com mídia
+//                             anexada. Sprint 27 (Pick & Pack) estendeu este
+//                             mesmo schema com StockMovementAuditEventItem
+//                             (checklist de bipagem) e VideoCaptureSession
+//                             (captura de vídeo em chunks) — ver
+//                             docs/pick-pack-architecture.md.
+// promotion_intelligence  -> Motor de Cálculo de Margem para promoções
+//                             (Sprint 26, ver docs/promotion-intelligence-architecture.md).
+//                             Bounded context PRÓPRIO: valida a viabilidade
+//                             de uma promoção ANTES dela existir de
+//                             verdade, reaproveitando MarketplaceRule
+//                             (fee) e CatalogSettings (política fiscal) —
+//                             nunca duplica nenhum dos dois.
+// Próximo schema (a criar quando o módulo existir): analytics.
+// pricing_intelligence já existe como PRIMEIRA FATIA (simulador de margem
+// Nuvemshop) — ver seção do módulo mais abaixo.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+// Deploy Demo (Render + Supabase) — ver docs/deploy-render-supabase-r2.md.
+// `url` é a connection string do POOLER do Supabase (PgBouncer, modo
+// Transaction, porta 6543) — usada em runtime pela aplicação, que abre/fecha
+// conexões a cada requisição. `directUrl` é a connection DIRETA (porta 5432),
+// usada só por `prisma migrate`/`prisma db push` — DDL transacional e
+// advisory locks não funcionam de forma confiável atrás do PgBouncer em modo
+// Transaction. Em dev local (docker-compose), as duas variáveis apontam para
+// o mesmo Postgres — não há pooler local, então `DIRECT_URL` pode ser igual
+// a `DATABASE_URL` sem problema.
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  schemas   = ["identity", "catalog", "logistics_intelligence", "marketplace_intelligence", "integration_ops", "erp_integration", "channel_integration", "competition_intelligence", "financial_intelligence", "orders", "logistics_fulfillment", "promotion_intelligence"]
+}
+
+enum UserRole {
+  ADMIN // acesso total, inclusive regras de margem mínima e integrações
+  PRICING_EDITOR // pode editar produtos, margens e estratégias de repricing
+  VIEWER // apenas leitura (dashboard e relatórios)
+
+  @@schema("identity")
+}
+
+// Tenant = a conta de um vendedor/empresa. Toda tabela de negócio terá
+// tenantId e será sempre filtrada por ele — mecanismo central de isolamento
+// multi-tenant (docs/platform-architecture.md, seção 2).
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  document  String? // CNPJ, opcional no cadastro inicial
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@map("tenants")
+  @@schema("identity")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  email        String
+  passwordHash String
+  role         UserRole @default(VIEWER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Único por tenant, não globalmente: duas contas diferentes podem ter
+  // um usuário com o mesmo e-mail (ex.: um contador que atende várias lojas).
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+  @@schema("identity")
+}
+
+model Supplier {
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  contact      String? // telefone/e-mail livre no MVP
+  leadTimeDays Int?
+  paymentTerms String? // condição de pagamento, texto livre no MVP
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  products Product[]
+
+  @@index([tenantId])
+  @@map("suppliers")
+  @@schema("catalog")
+}
+
+enum TaxRegime {
+  SIMPLES_NACIONAL
+  LUCRO_PRESUMIDO
+  LUCRO_REAL
+  MEI
+  OUTRO
+
+  @@schema("catalog")
+}
+
+// Simplificação consciente (PRD, seções 3 e 9): não calcula ICMS-ST por
+// estado nem faixa progressiva do Simples Nacional. Guarda uma alíquota
+// estimada, reutilizável entre produtos.
+model TaxProfile {
+  id               String    @id @default(uuid())
+  tenantId         String
+  name             String // ex.: "Simples Nacional - Anexo I"
+  regime           TaxRegime
+  estimatedRatePct Float // alíquota estimada total (%), aplicada sobre o preço de venda
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  products Product[]
+
+  @@index([tenantId])
+  @@map("tax_profiles")
+  @@schema("catalog")
+}
+
+// Fonte de um produto: cadastro manual (dono é a Precifica, todo campo
+// editável) ou espelhado de um ERP externo (dono é o ERP para os campos
+// físicos/comerciais — ver docs/erp-integration-architecture.md, seção 2).
+// Union type de string no domínio; enum nominal aqui, mesmo padrão do resto
+// do schema.
+enum ProductSourceSystem {
+  MANUAL
+  ERP_OLIST
+
+  @@schema("catalog")
+}
+
+model Product {
+  id               String      @id @default(uuid())
+  tenantId         String
+  skuCode          String
+  name             String
+  internalCategory String?
+  supplierId       String?
+  supplier         Supplier?   @relation(fields: [supplierId], references: [id])
+  taxProfileId     String?
+  taxProfile       TaxProfile? @relation(fields: [taxProfileId], references: [id])
+
+  // Vínculo opcional com a embalagem cadastrada (Packaging Intel). Quando
+  // presente: (a) o custo de aquisição efetivo usado pelo Pricing
+  // Intelligence passa a ser costPrice + Packaging.costPrice — ver
+  // ProductCatalogReader (shared/contracts/); (b) as dimensões/peso da
+  // EMBALAGEM usadas no cálculo de peso cubado vêm de Packaging, não dos
+  // campos lengthCm/widthCm/heightCm/packagingWeightKg abaixo — ver
+  // domain/shipping-dimensions-resolver.ts. Nunca um campo travado por
+  // sourceSystem (mesma razão do autoRepricingEnabled): é uma decisão
+  // logística/estratégica da Precifica, não um fato espelhado do ERP.
+  packagingId String?
+  packaging   Packaging? @relation(fields: [packagingId], references: [id])
+
+  // Sprint 26 (Motor de Margem de Promoções) — quando true, packagingId
+  // acima deixa de significar "embalagem individual" e passa a significar
+  // "Embalagem de Agrupamento" (Packaging.purpose = GROUPING) deste kit:
+  // reaproveita o mesmo vínculo, sem campo novo, mesmo racional de qualquer
+  // outra extensão econômica de entidade nesta base (ver
+  // docs/promotion-intelligence-architecture.md). Default false: um
+  // produto normal continua interpretando packagingId como hoje.
+  isKit Boolean @default(false)
+
+  costPrice Decimal @db.Decimal(12, 2) // custo do produto (sem embalagem) — ver Packaging acima para o custo efetivo
+
+  // --- Margens (PRD, seção 1.2: dois campos, não um) ---
+  desiredMarginPct Float // margem desejada (%) — define o preço ideal
+  minimumMarginPct Float // margem mínima aceitável (%) — define o preço mínimo, piso de segurança
+
+  // Modo operação do PricingStrategist (docs/pricing-intelligence-architecture.md,
+  // seção 7): false = PricingDecisionService só calcula e loga a sugestão;
+  // true = dispara PRICE_UPDATE_DISPATCHER automaticamente quando reage a um
+  // sinal de concorrência. Default false de propósito — automação de preço
+  // real é opt-in por SKU, nunca ligada por padrão. Não é campo travado por
+  // sourceSystem (ver product-ownership-rules.ts): é estratégia de
+  // precificação da Precifica, não um fato físico do produto, então
+  // continua editável mesmo em produtos espelhados do ERP.
+  autoRepricingEnabled Boolean @default(false)
+
+  // --- Fatos físicos brutos (Catalog é dono, exceto quando sourceSystem = ERP_OLIST) ---
+  weightKg          Float // peso do produto sem embalagem
+  packagingWeightKg Float @default(0) // peso da embalagem
+  packedWeightKg    Float // = weightKg + packagingWeightKg
+
+  lengthCm Float
+  widthCm  Float
+  heightCm Float
+
+  // --- Calculados pelo Logistics Intelligence via porta ShippingWeightCalculator ---
+  // (docs/platform-architecture.md, seção 10.1) — Catalog só persiste o resultado.
+  cubicWeightKg    Float
+  shippingWeightKg Float
+
+  // --- Estoque e proveniência (Etapa 5 — ver docs/erp-integration-architecture.md, seção 2) ---
+  stockQuantity Int @default(0) // não existia antes do ERP Integration revelar a lacuna
+
+  // Preço de venda que está hoje no Olist — puramente informativo, não tem
+  // relação com o motor de precificação da Precifica (que calcula o próprio
+  // preço ideal/mínimo). Fica só para comparação/auditoria na UI.
+  erpSalePrice Decimal? @db.Decimal(12, 2)
+
+  // URLs finais servidas pela Precifica (mirror local ou, depois, S3/R2) —
+  // nunca a URL original do Olist direto na cara do usuário (shared/contracts/file-storage.port.ts).
+  photoUrls String[] @default([])
+
+  sourceSystem ProductSourceSystem @default(MANUAL)
+  externalId   String? // id do produto no sistema de origem (ex.: id do Olist) — null quando MANUAL
+  lastSyncedAt DateTime? // último upsert bem-sucedido vindo do ERP — null quando MANUAL
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, skuCode])
+  @@unique([tenantId, sourceSystem, externalId])
+  @@index([tenantId])
+  @@map("products")
+  @@schema("catalog")
+}
+
+// ============================================================================
+// Packaging Intel — cadastro de embalagens, reutilizável entre produtos (um
+// tipo de caixa/envelope serve para vários SKUs). Ver
+// docs/pricing-intelligence-architecture.md, seção 9, para como isso entra
+// no custo e no peso cubado.
+//
+// Unidade de peso deliberadamente diferente do resto do schema: Product usa
+// Kg (weightKg, packagingWeightKg) porque descreve o produto físico, que
+// tipicamente pesa unidades de Kg; embalagem (papelão, plástico-bolha,
+// envelope) é especificada pelo fornecedor em GRAMAS na prática — manter
+// weightG explícito evita o erro de digitar "0.015" (15g) num campo que
+// todo o resto do sistema assume estar em Kg. A conversão para Kg acontece
+// uma vez, na borda, em resolveShippingDimensions.
+// ============================================================================
+
+// Sprint 26 (Motor de Margem de Promoções) — hierarquia de resolução de
+// custo logístico de embalagem, ver docs/promotion-intelligence-architecture.md:
+// STANDARD (comportamento de sempre, embalagem individual de 1 SKU),
+// GROUPING (embalagem de um kit/combo, vinculada via Product.isKit=true),
+// MASTER (caixa maior usada quando vários SKUs avulsos vão no mesmo
+// despacho — seleção por cubagem total, ainda não consumida por nenhum
+// serviço nesta sprint), SAFETY_DEFAULT (fallback conservador quando nada
+// mais resolve — no máximo uma linha ativa por tenant, validado na
+// aplicação, nunca como constraint de banco).
+enum PackagingPurpose {
+  STANDARD
+  GROUPING
+  MASTER
+  SAFETY_DEFAULT
+
+  @@schema("catalog")
+}
+
+model Packaging {
+  id            String   @id @default(uuid())
+  tenantId      String
+  name          String // ex.: "Caixa papelão 20x15x10"
+  weightG       Float // peso da embalagem vazia, em GRAMAS
+  heightCm      Float
+  widthCm       Float
+  lengthCm      Float
+  costPrice     Decimal  @db.Decimal(12, 2) // custo unitário da embalagem — mesmo nome/convenção de Product.costPrice
+  stockQuantity Int      @default(0)
+  isActive      Boolean  @default(true)
+
+  purpose PackagingPurpose @default(STANDARD)
+  // Só relevante quando purpose = MASTER: capacidade máxima (peso, em Kg)
+  // que essa caixa aguenta — usada pela futura seleção de Embalagem Master
+  // por cubagem total do pedido (Prioridade 2 da hierarquia). Nulo em
+  // qualquer outro purpose.
+  maxCapacityKg Float?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  products      Product[]
+  usageEvents   PackagingUsageEvent[]
+
+  @@index([tenantId])
+  @@index([tenantId, purpose])
+  @@map("packagings")
+  @@schema("catalog")
+}
+
+// Log de CONSUMO de embalagem — para o futuro DRE/Analytics (custo de
+// embalagem gasto num período), NÃO para o Pricing Engine (que sempre lê o
+// custo ATUAL de Packaging.costPrice via ProductCatalogReader, nunca um
+// histórico). Append-only, uma linha por unidade vendida.
+//
+// HONESTIDADE TÉCNICA: não existe hoje, neste projeto, um módulo de
+// Vendas/Pedidos que dispare isso automaticamente quando "um produto é
+// vendido" — essa tabela e o serviço de escrita associado (Etapa deste
+// módulo) existem como MECANISMO pronto (schema + porta + endpoint manual),
+// não como um pipeline automático. Quando um módulo de Vendas existir, ele
+// chama PackagingUsageEventsService.record(...) no mesmo lugar em que
+// confirma uma venda — nada aqui precisa mudar.
+//
+// unitCostPrice é uma CÓPIA CONGELADA do custo no momento do evento, não
+// uma referência a Packaging.costPrice — o custo da embalagem pode mudar
+// depois (reajuste de fornecedor), e o DRE de um período passado precisa
+// do custo histórico real, não do custo de hoje.
+model PackagingUsageEvent {
+  id            String    @id @default(uuid())
+  tenantId      String
+  productId     String // referência solta (não FK) — mesmo padrão de ChannelListing/CompetitiveOpportunity: histórico de DRE não deve ficar acoplado ao ciclo de vida do Product
+  packagingId   String
+  packaging     Packaging @relation(fields: [packagingId], references: [id])
+  quantity      Int       @default(1)
+  unitCostPrice Decimal   @db.Decimal(12, 2)
+  occurredAt    DateTime  @default(now())
+
+  @@index([tenantId, productId, occurredAt])
+  @@index([tenantId, packagingId, occurredAt])
+  @@map("packaging_usage_events")
+  @@schema("catalog")
+}
+
+// Configuração de catálogo por tenant — hoje só as margens padrão aplicadas
+// a produtos recém-importados do ERP (o Olist não tem esse conceito).
+// Mesmo padrão do LogisticsSettings.cubicWeightFactor: default sensato,
+// editável sem precisar de deploy.
+model CatalogSettings {
+  tenantId                 String   @id
+  defaultDesiredMarginPct  Float    @default(20)
+  defaultMinimumMarginPct  Float    @default(8)
+
+  // Governança financeira (Pricing Intelligence, "modo operação" — ver
+  // docs/pricing-intelligence-architecture.md, seção 8). Diferente de
+  // defaultMinimumMarginPct acima (piso POR SKU, aplicado só a produtos
+  // recém-importados sem margem definida): estes dois campos são um piso
+  // GLOBAL do tenant, sempre em vigor, independente do que cada produto
+  // configura. Guardados como percentual (0-100, mesma convenção do resto
+  // do schema); convertidos para fração na porta FinancialPolicyReader
+  // (shared/contracts/) porque é assim que a fórmula do piso financeiro
+  // (FloorPrice = custo / (1 - (taxa + margem))) é expressa.
+  taxRatePct        Float @default(0) // alíquota efetiva estimada (%) — 0 até o tenant configurar
+  minProfitMarginPct Float @default(0) // margem líquida mínima global (%) — 0 até o tenant configurar
+
+  updatedAt                DateTime @updatedAt
+
+  @@map("catalog_settings")
+  @@schema("catalog")
+}
+
+// Configuração de logística por tenant. Extraída do Catalog (onde vivia como
+// Tenant.cubicWeightFactor) porque é uma REGRA de negócio, não um fato do
+// produto — pertence ao módulo que sabe transformar peso/dimensão em custo
+// de frete, não ao módulo que apenas descreve o produto.
+model LogisticsSettings {
+  tenantId          String   @id
+  cubicWeightFactor Int      @default(6000)
+  updatedAt         DateTime @updatedAt
+
+  @@map("logistics_settings")
+  @@schema("logistics_intelligence")
+}
+
+// ============================================================================
+// Marketplace Intelligence — ver docs/marketplace-intelligence-architecture.md
+// ============================================================================
+
+// Marketplace é dado, não enum: adicionar um canal novo é inserir uma linha,
+// nunca uma migration (seção 2.1 do documento de arquitetura do módulo).
+model Marketplace {
+  id          String   @id @default(uuid())
+  code        String   @unique // "MERCADO_LIVRE", "SHOPEE", ...
+  displayName String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  rules        MarketplaceRule[]
+  changeEvents MarketplaceChangeEvent[]
+
+  @@map("marketplaces")
+  @@schema("marketplace_intelligence")
+}
+
+enum RuleType {
+  FEE_RULE
+  SHIPPING_POLICY
+  CATEGORY_TAXONOMY
+
+  @@schema("marketplace_intelligence")
+}
+
+enum DataSourceType {
+  OFFICIAL_API
+  OFFICIAL_DOCS
+  IMPORTED_FILE
+  MANUAL
+
+  @@schema("marketplace_intelligence")
+}
+
+enum RuleStatus {
+  PENDENTE_VALIDACAO
+  VALIDADA
+  DESATUALIZADA
+  OBSOLETA
+
+  @@schema("marketplace_intelligence")
+}
+
+// Tabela única e versionada para qualquer tipo de regra de marketplace — a
+// mecânica de versionamento/status/auditoria é idêntica independente do
+// conteúdo; só o payload muda (seção 2.2 do documento de arquitetura do módulo).
+model MarketplaceRule {
+  id            String      @id @default(uuid())
+  marketplaceId String
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id])
+
+  ruleType RuleType
+  scopeKey String // categoria externa (FEE_RULE), identificador de política (SHIPPING_POLICY), etc.
+
+  payload Json // validado por RulePayloadValidator do ruleType antes de persistir — nunca gravado cru
+
+  version Int
+  status  RuleStatus @default(PENDENTE_VALIDACAO)
+
+  // Override manual sempre vence conflito, independente da prioridade de
+  // fonte (seção 6 do documento de arquitetura do módulo).
+  pinned Boolean @default(false)
+
+  sourceType         DataSourceType
+  sourceProviderCode String
+  sourceFetchedAt    DateTime
+  sourceEvidenceRef  String?
+
+  contentHash String // hash do payload normalizado — usado para diff/dedupe no pipeline de sync
+
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+
+  validatedById String?
+  validatedAt   DateTime?
+
+  // null = regra global da plataforma (ex.: tabela pública de comissão do ML).
+  // preenchido = override específico de um tenant.
+  tenantId String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([marketplaceId, ruleType, scopeKey, version, tenantId])
+  @@index([marketplaceId, ruleType, scopeKey, status])
+  @@map("marketplace_rules")
+  @@schema("marketplace_intelligence")
+}
+
+enum ChangeResolution {
+  AUTO_APPLIED
+  PENDING_REVIEW
+  REJECTED
+  APPLIED_MANUALLY
+
+  @@schema("marketplace_intelligence")
+}
+
+model MarketplaceChangeEvent {
+  id            String      @id @default(uuid())
+  marketplaceId String
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id])
+  ruleType      RuleType
+  scopeKey      String
+
+  previousRuleId String?
+  newRuleId      String
+
+  changeSummary      String
+  detectedByProvider String
+  detectedAt         DateTime @default(now())
+
+  resolutionStatus ChangeResolution @default(PENDING_REVIEW)
+  reviewedById     String?
+  reviewedAt       DateTime?
+
+  @@index([marketplaceId, detectedAt])
+  @@map("marketplace_change_events")
+  @@schema("marketplace_intelligence")
+}
+
+// Sprint 22 — conexão OAuth2 por vendedor do Mercado Livre. Mesmo racional de
+// NuvemshopConnection/OlistConnection (erp_integration): um registro por
+// tenant, credenciais SEMPRE criptografadas em repouso
+// (CredentialEncryptionService, ver docs/auth-security.md). Vive no schema
+// marketplace_intelligence (não erp_integration) porque é aqui que
+// MercadoLivreApiClient/MercadoLivreOrderProvider/MercadoLivreFeeRuleProvider
+// já moram desde a Etapa 4/Sprint 21 — o módulo dono da integração também é
+// o dono da credencial, mesmo padrão de propriedade usado em todo o resto
+// da plataforma.
+//
+// Diferença estrutural para NuvemshopConnection: Nuvemshop usa um token
+// estático de app privado (nunca expira sozinho); Mercado Livre é OAuth2
+// completo — por isso os campos extras `refreshTokenEnc`/`expiresAt`/
+// `scope`/`sellerId` (identificador do vendedor devolvido pela troca do
+// `code`, necessário em toda chamada a `/orders/search?seller=`).
+model MercadoLivreConnection {
+  tenantId String @id
+
+  // ID numérico do vendedor no Mercado Livre — devolvido no token exchange
+  // (campo `user_id` da resposta de /oauth/token), não escolhido por nós.
+  sellerId String
+
+  accessTokenEnc  String // criptografado em repouso (CredentialEncryptionService)
+  refreshTokenEnc String // idem — permite renovar sem novo login do vendedor
+  tokenType       String  @default("bearer")
+  scope           String? // escopos concedidos pelo vendedor na tela de autorização do ML
+
+  // Quando o access_token expira (agora + expires_in da resposta do ML,
+  // tipicamente 6h) — o gate que MercadoLivreConnectionService.getValidAccessToken
+  // usa para decidir se renova antes de qualquer chamada à API.
+  expiresAt DateTime
+
+  isActive        Boolean   @default(true)
+  lastRefreshedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("mercado_livre_connections")
+  @@schema("marketplace_intelligence")
+}
+
+// ============================================================================
+// Integration Ops — infraestrutura genérica de sincronização com fontes
+// externas (scheduler, log, health). Vivia dentro de marketplace_intelligence
+// até a Etapa 5; extraída para cá porque o ERP Integration precisa do MESMO
+// mecanismo e nada aqui é específico de marketplace (docs/erp-integration-architecture.md,
+// seção 5). Nenhum comportamento do Marketplace Intelligence muda — só o
+// endereço das tabelas.
+// ============================================================================
+
+model ProviderSyncSchedule {
+  id           String @id @default(uuid())
+  providerCode String @unique
+
+  // Referência solta (não FK) para o que este provider sincroniza — ex.: o
+  // id de uma Marketplace, ou um valor fixo como "ERP_OLIST". Deixou de ser
+  // uma relação Prisma de propósito: esta tabela agora é compartilhada por
+  // módulos que não têm o conceito de Marketplace.
+  marketplaceId String
+
+  capability      String // "FEE_RULES" | "SHIPPING_POLICY" | "CATEGORY_TAXONOMY" | "ERP_CATALOG"
+  intervalMinutes Int
+  isEnabled       Boolean   @default(true)
+  autoTrust       Boolean   @default(false) // se true, candidatos são promovidos direto a VALIDADA (só se aplica a Marketplace Intelligence)
+  lastRunAt       DateTime?
+  lastRunStatus   String?
+
+  @@map("provider_sync_schedules")
+  @@schema("integration_ops")
+}
+
+model ProviderSyncLog {
+  id                String    @id @default(uuid())
+  providerCode      String
+  correlationId     String
+  startedAt         DateTime  @default(now())
+  finishedAt        DateTime?
+  status            String // SUCCESS | FAILED | PARTIAL
+  candidatesFound   Int       @default(0)
+  candidatesApplied Int       @default(0)
+  errorDetails      String?
+
+  @@index([providerCode, startedAt])
+  @@map("provider_sync_logs")
+  @@schema("integration_ops")
+}
+
+model ProviderHealth {
+  providerCode        String    @id
+  status              String // UP | DEGRADED | DOWN
+  consecutiveFailures Int       @default(0)
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  lastError           String?
+  updatedAt           DateTime  @updatedAt
+
+  @@map("provider_health")
+  @@schema("integration_ops")
+}
+
+// ============================================================================
+// ERP Integration — ver docs/erp-integration-architecture.md
+// ============================================================================
+
+// Uma linha por tenant: as credenciais para consumir a API do Olist Tiny em
+// nome dele. Token estático (API V2) — ver seção 8 do doc de arquitetura
+// para o porquê de V2 em vez de V3/OAuth2 nesta primeira entrega.
+model OlistConnection {
+  tenantId     String    @id
+  apiTokenEnc  String // criptografado em repouso
+  isActive     Boolean   @default(true)
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("olist_connections")
+  @@schema("erp_integration")
+}
+
+model ErpSyncChangeEvent {
+  id            String   @id @default(uuid())
+  tenantId      String
+  externalId    String // id do produto no Olist
+  skuCode       String
+  changeSummary String // diff legível
+  action        String // CREATED | UPDATED | UNCHANGED
+  contentHash   String // hash do payload normalizado — usado para diff no próximo sync (shared/domain/content-hash.ts)
+  syncedAt      DateTime @default(now())
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId, syncedAt])
+  @@map("erp_sync_change_events")
+  @@schema("erp_integration")
+}
+
+// Nuvemshop entrou no escopo por decisão sua: é a loja própria, o motor de
+// preço precisa calcular a margem dela com o mesmo rigor dos marketplaces.
+// Estruturalmente ela não é um ERP (não é fonte de cadastro read-only do
+// catálogo) — é um CANAL DE VENDA, igual Mercado Livre/Shopee. A credencial
+// mora aqui, ao lado da do Olist, porque ambas são "conexões externas do
+// tenant"; o que ela ALIMENTA (regra de taxa do gateway, listagem por SKU)
+// vive nos módulos que já sabem lidar com cada tipo de dado — ver
+// NuvemshopFeeRuleProvider (marketplace-intelligence) e ChannelListing
+// (channel_integration) logo abaixo.
+//
+// Autenticação: "app privado" da Nuvemshop — storeId + access_token gerado
+// direto no painel (Configurações > Meus Aplicativos > Criar app privado),
+// mesma categoria de decisão do token estático do Olist V2: evita construir
+// um fluxo de autorização OAuth2 (que a Nuvemshop também oferece, para apps
+// públicos) sem poder validar os endpoints exatos ao vivo neste ambiente.
+model NuvemshopConnection {
+  tenantId       String    @id
+  storeId        String
+  accessTokenEnc String // criptografado em repouso (CredentialEncryptionService)
+  isActive       Boolean   @default(true)
+  lastSyncedAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("nuvemshop_connections")
+  @@schema("erp_integration")
+}
+
+// ============================================================================
+// Channel Integration — vínculo SKU x anúncio/produto em cada canal de venda.
+// Era o "próximo módulo natural" que eu tinha deixado explicitamente fora de
+// escopo na primeira versão do ERP Integration; entrou agora porque a
+// Nuvemshop trouxe a necessidade real. Uma linha = um produto do ERP
+// vinculado a UM listing em UM canal — o mesmo SKU pode (vai) ter várias
+// linhas (uma por canal: Nuvemshop, Mercado Livre, Shopee...).
+// ============================================================================
+
+model ChannelListing {
+  id         String   @id @default(uuid())
+  tenantId   String
+  skuCode    String // chave de vínculo — o mesmo SKU que já é único em Product (schema catalog)
+  channelCode String // "NUVEMSHOP" | "MERCADO_LIVRE" | "SHOPEE" — string, não enum, mesmo racional do Marketplace: canal novo é dado, não migration
+  externalId String // id do produto/variante no canal
+
+  currentPrice Decimal? @db.Decimal(12, 2) // preço de venda hoje naquele canal — informativo, espelhado
+  url          String?
+
+  lastSyncedAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([tenantId, channelCode, externalId])
+  @@index([tenantId, skuCode])
+  @@map("channel_listings")
+  @@schema("channel_integration")
+}
+
+// ============================================================================
+// Competition Intelligence — radar de concorrência (docs/competition-intelligence-architecture.md).
+//
+// Três tabelas, cada uma com um papel:
+// 1. MonitoredCompetitorListing — CONFIGURAÇÃO: qual SKU nosso deve ser
+//    comparado com qual oferta de concorrente, e por qual radar. Não é
+//    histórico nem read-model, é o "o que monitorar".
+// 2. CompetitorOfferSnapshot — HISTÓRICO, append-only. Uma linha por
+//    coleta do radar. É a tabela que o Analytics vai consumir (série
+//    temporal de preço de concorrente) — nunca é lida pelo Pricing Engine
+//    no caminho de precificação, só por relatório/BI. Cresce sem limite;
+//    índice por (tenantId, skuCode, collectedAt) é o que sustenta isso.
+// 3. CompetitiveOpportunity — READ-MODEL enxuto, uma linha por (tenant, SKU),
+//    sempre a ÚLTIMA leitura processada (upsert, igual ErpSyncChangeEvent).
+//    É a ÚNICA tabela deste módulo que o Pricing Engine consulta — O(1) por
+//    SKU, nunca um scan de histórico. Atualizada pelo orquestrador sempre
+//    que um novo snapshot é processado.
+// ============================================================================
+
+enum CompetitionRadarSourceType {
+  SCRAPING // coleta direta de página pública do concorrente
+  PARTNER_API // ex.: PriceAPI ou serviço equivalente de terceiro
+  INTERNAL_MONITORING // dado que o próprio time alimenta manualmente/via planilha
+
+  @@schema("competition_intelligence")
+}
+
+enum BuyBoxStatus {
+  WINNING
+  LOSING
+  UNKNOWN // ainda não há oferta comparável suficiente pra decidir
+
+  @@schema("competition_intelligence")
+}
+
+model MonitoredCompetitorListing {
+  id             String   @id @default(uuid())
+  tenantId       String
+  skuCode        String // vínculo por SKU — mesmo padrão do ChannelListing
+  competitorLabel String // nome/identificação do concorrente, livre (ex.: "Loja X no ML")
+  targetRef      String // URL ou id que o radar usa pra saber o que buscar
+  radarCode      String // código do CompetitionRadar responsável (ver contrato em shared/contracts)
+  // Opcional: qual dos NOSSOS canais (ChannelListing.channelCode) usar como
+  // "nosso preço" na comparação. Nulo = monitoramos o concorrente mas ainda
+  // não sabemos comparar com um preço nosso (buyBoxStatus fica UNKNOWN) —
+  // mesma disciplina de "não inventar dado" já usada no restante do projeto.
+  channelCode    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, skuCode, targetRef])
+  @@index([tenantId, isActive])
+  @@map("monitored_competitor_listings")
+  @@schema("competition_intelligence")
+}
+
+model CompetitorOfferSnapshot {
+  id              String                     @id @default(uuid())
+  tenantId        String
+  skuCode         String
+  competitorLabel String
+  price           Decimal                    @db.Decimal(12, 2)
+  isBuyBoxWinner  Boolean?
+  sourceRadarCode String
+  sourceEvidenceRef String? // URL/id da coleta específica, pra auditoria
+  collectedAt     DateTime
+
+  // Histórico puro — nunca atualizado, só inserido. Índice pensado pra
+  // Analytics (série temporal por SKU), não pra lookup pontual.
+  @@index([tenantId, skuCode, collectedAt])
+  @@map("competitor_offer_snapshots")
+  @@schema("competition_intelligence")
+}
+
+model CompetitiveOpportunity {
+  tenantId            String
+  skuCode             String
+  bestCompetitorPrice Decimal      @db.Decimal(12, 2)
+  bestCompetitorLabel String
+  ourPrice            Decimal?     @db.Decimal(12, 2) // nulo se ainda não vinculado a um preço nosso
+  // Canal usado para resolver ourPrice (MonitoredCompetitorListing.channelCode
+  // no momento desta leitura) — nulo pela mesma razão que ourPrice pode ser
+  // nulo. Existe para que o Pricing Intelligence saiba EM QUAL CANAL aplicar
+  // uma decisão de preço (PRICE_UPDATE_DISPATCHER exige marketplaceCode +
+  // externalId, não só o SKU) — ver pricing-intelligence-architecture.md, seção 7.
+  channelCode         String?
+  priceGapPct         Float // (ourPrice - bestCompetitorPrice) / bestCompetitorPrice — negativo = estamos mais baratos
+  buyBoxStatus        BuyBoxStatus @default(UNKNOWN)
+  rank                Int? // nossa posição entre as ofertas conhecidas, quando calculável
+  detectedAt          DateTime // quando esta leitura foi processada (não a hora da coleta bruta)
+  updatedAt           DateTime     @updatedAt
+
+  @@id([tenantId, skuCode])
+  @@map("competitive_opportunities")
+  @@schema("competition_intelligence")
+}
+
+// ============================================================================
+// Financial Intelligence — DRE (Demonstrativo de Resultado) + Contas a
+// Receber. Ver docs/financial-intelligence-architecture.md.
+//
+// Duas tabelas, dois papéis bem distintos (mesma disciplina do resto da
+// plataforma: não misturar "configuração" com "histórico transacional"):
+// 1. FixedExpense — CONFIGURAÇÃO: as despesas fixas recorrentes do tenant
+//    (aluguel, folha, softwares...). Uma linha por despesa cadastrada, não
+//    por ocorrência mensal — a recorrência é um CAMPO (recurrenceType +
+//    dueDay), não uma linha nova a cada mês. Projeção de fluxo de caixa
+//    futura "expande" isso em ocorrências na hora de montar a projeção,
+//    não armazena as ocorrências.
+// 2. ReceivableRecord — TRANSACIONAL: uma linha por repasse esperado de um
+//    marketplace (o "A Receber"). Fica PENDING até a reconciliação (ver
+//    ReceivableReconciliationService) casar um repasse importado com esta
+//    linha e marcar PAID — nunca side-by-side com FixedExpense porque tem
+//    ciclo de vida e cardinalidade completamente diferentes.
+// ============================================================================
+
+enum FixedExpenseRecurrence {
+  MONTHLY
+  WEEKLY
+  YEARLY
+  ONE_TIME // despesa pontual (ex.: reforma) — projeção de fluxo de caixa a considera uma única vez, na dueDay/mês de cadastro
+
+  @@schema("financial_intelligence")
+}
+
+model FixedExpense {
+  id             String                 @id @default(uuid())
+  tenantId       String
+  name           String // ex.: "Aluguel do galpão", "Folha de pagamento"
+  amount         Decimal                @db.Decimal(12, 2)
+  recurrenceType FixedExpenseRecurrence
+  // Dia do mês (1-31) ou da semana (0-6), dependendo de recurrenceType —
+  // usado só pela futura projeção de fluxo de caixa para posicionar a
+  // despesa no calendário; null quando recurrenceType = ONE_TIME (a data já
+  // está implícita em createdAt/numa data própria, se vier a existir).
+  dueDay         Int?
+  isActive       Boolean                @default(true)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@index([tenantId])
+  @@map("fixed_expenses")
+  @@schema("financial_intelligence")
+}
+
+enum ReceivableStatus {
+  PENDING // ainda não reconciliado com nenhum repasse importado
+  PAID // reconciliado — ver ReceivableReconciliationService
+  OVERDUE // passou de expectedDate sem reconciliar (calculado/atualizado por job, não pela reconciliação em si)
+  CANCELLED // pedido cancelado/estornado no marketplace — nunca vai virar PAID
+
+  @@schema("financial_intelligence")
+}
+
+model ReceivableRecord {
+  id       String  @id @default(uuid())
+  tenantId String
+  amount   Decimal @db.Decimal(12, 2)
+  status   ReceivableStatus @default(PENDING)
+
+  expectedDate DateTime // quando o repasse é esperado (D+X do marketplace, informado na criação)
+  paidAt       DateTime? // preenchido só quando a reconciliação casa um repasse importado
+
+  // "marketplace_source" do pedido — string, não enum, mesmo racional de
+  // Marketplace.code/ChannelListing.channelCode: canal novo é dado, nunca migration.
+  marketplaceSource String
+
+  // Chave de reconciliação: o identificador do pedido/repasse NO
+  // marketplace (ex.: order id do Mercado Livre, settlement id da Shopee).
+  // Nulo é válido (registro criado manualmente, sem origem de sync ainda)
+  // — ver ReceivableReconciliationService para como isso é usado no match.
+  externalReference String?
+
+  // Referência SOLTA (não FK) ao SKU de origem, só para permitir side do
+  // DRE "por produto" no futuro — mesmo padrão de ChannelListing.skuCode/
+  // CompetitiveOpportunity.skuCode: histórico financeiro não pode ficar
+  // acoplado ao ciclo de vida do Product.
+  skuCode String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Usado pela consulta "meu A Receber" (lista por status, ordenada por
+  // data esperada) — o caminho de leitura mais comum do módulo.
+  @@index([tenantId, status, expectedDate])
+  // Usado pela reconciliação — encontrar o registro certo a partir do que
+  // veio no arquivo de repasse importado.
+  @@index([tenantId, marketplaceSource, externalReference])
+  @@map("receivable_records")
+  @@schema("financial_intelligence")
+}
+
+// ============================================================================
+// Orders — hub de pedidos multicanal. Ver docs/orders-architecture.md.
+//
+// Status UNIFICADO, não o status bruto do canal — 6 estágios canônicos,
+// inspirados no fluxo de "worklist" do Olist (referência explícita do
+// pedido): cada canal (Nuvemshop, Mercado Livre, Shopee...) tem seu próprio
+// vocabulário de status, e a tradução para estes 6 estágios acontece DENTRO
+// do adapter de cada canal (ex.: NuvemshopOrderProvider.mapStatus), nunca no
+// orquestrador genérico — o mesmo princípio de Interface Segregation já
+// aplicado a MarketplaceProvider (seção 16 de
+// docs/marketplace-intelligence-architecture.md).
+// ============================================================================
+
+enum OrderStatus {
+  EM_ABERTO // pedido colocado — pagamento pendente, recém-aprovado, ou aguardando processamento inicial
+  PREPARANDO_ENVIO // separação/embalagem em andamento — gatilho operacional (ver ORDER_EVENTS.READY_FOR_FULFILLMENT)
+  FATURADO // nota fiscal emitida (hoje só um estágio manual/futuro — ver honestidade técnica na doc)
+  ENVIADO // postado/despachado, com código de rastreio
+  ENTREGUE // confirmado como entregue pelo canal ou pela transportadora
+  CANCELADO // cancelado ou estornado em qualquer ponto do fluxo — estágio terminal negativo
+
+  @@schema("orders")
+}
+
+// Etapa 17 (escalabilidade multicanal) — quem é o responsável legal por
+// emitir a nota fiscal deste pedido. Nuvemshop/loja própria: SEMPRE o
+// vendedor (SELLER). Alguns marketplaces (Amazon e, em alguns modelos,
+// Magalu) faturam EM NOME do vendedor ou até assumem a nota fiscal
+// diretamente, dependendo do programa de vendas contratado — isso muda qual
+// sistema deve gerar a NF-e e não pode ser assumido como constante entre
+// canais. Default SELLER (o caso mais comum/conservador); cada adapter
+// declara o valor real quando souber.
+enum FiscalResponsibility {
+  SELLER
+  MARKETPLACE
+
+  @@schema("orders")
+}
+
+model Order {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Canal de origem — string, não enum, mesmo racional de Marketplace.code/
+  // ChannelListing.channelCode: canal novo é dado, nunca migration.
+  channelCode     String
+  externalOrderId String // id do pedido NO CANAL — metade da chave de idempotência
+
+  status         OrderStatus @default(EM_ABERTO) // unificado — o que a UI (worklist) e o resto do sistema leem
+  externalStatus String // status BRUTO do canal, preservado para auditoria/depuração do mapeamento
+
+  subtotalAmount Decimal @db.Decimal(12, 2) // soma dos itens, antes de frete/desconto
+  shippingAmount Decimal @db.Decimal(12, 2) @default(0)
+  discountAmount Decimal @db.Decimal(12, 2) @default(0)
+  totalAmount    Decimal @db.Decimal(12, 2) // o que o cliente pagou de fato
+
+  currency String @default("BRL")
+
+  // --- Normalização financeira (Etapa 17, escalabilidade multicanal) ---
+  // Preenchidos PELO ADAPTER de cada canal — nunca calculados aqui ou em
+  // qualquer serviço de aplicação — exatamente para que ReceivableFromOrderListener
+  // e o resto do Financial Intelligence leiam um valor já pronto, sem if/else
+  // por canal. Ver docs/orders-architecture.md, seção 11.
+  //
+  // feeAmount: comissão do marketplace deduzida deste pedido. Zero é um
+  // valor válido e honesto — ex.: Nuvemshop é a loja própria do vendedor,
+  // não tem comissão de marketplace sobre o pedido (a única dedução real ali
+  // é a taxa do gateway de pagamento, tratada por um mecanismo agregado
+  // separado — NuvemshopFeeRuleProvider — não por pedido).
+  // netAmount: totalAmount - feeAmount - qualquer outra dedução que o canal
+  // exponha (ex.: frete descontado do repasse). É este campo, não
+  // totalAmount, que popula ReceivableRecord.amount.
+  feeAmount Decimal @db.Decimal(12, 2) @default(0)
+  // @default(0) só por segurança de migration (linhas pré-existentes de uma
+  // eventual instalação já rodando) — na prática, OrderSyncOrchestrator
+  // SEMPRE calcula e grava o valor real antes de persistir; nunca depende
+  // deste default em operação normal.
+  netAmount Decimal @db.Decimal(12, 2) @default(0)
+
+  // --- Campos fiscais (Etapa 17) — aditivos, todos opcionais: nenhum canal
+  // hoje (Nuvemshop) preenche isso, mas Amazon/Magalu podem exigir. Ver
+  // docs/orders-architecture.md, seção 12.
+  fiscalResponsibility FiscalResponsibility @default(SELLER)
+  buyerTaxId           String? // CPF/CNPJ do comprador — exigido para emissão de NF-e em qualquer responsabilidade fiscal
+  invoiceNumber        String? // nº da NF-e ou chave de acesso, quando o canal ou uma integração fiscal já emitiu
+
+  // "Data limite de despacho" (prazo de handling) — comum em ML/Shopee,
+  // usado pela worklist para priorizar pedidos perto de vencer o prazo.
+  // Nulo quando o canal não informa isso (ex.: Nuvemshop não tem esse conceito nativo).
+  shippingDeadlineAt DateTime?
+
+  orderedAt   DateTime // data do pedido no canal — não a data de ingestão (ver syncedAt)
+  paidAt      DateTime?
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+  cancelledAt DateTime?
+
+  // Payload cru do canal, para auditoria/depuração — nunca lido pelo resto
+  // do sistema, só existe para investigar um mapeamento que deu errado sem
+  // precisar re-chamar a API externa.
+  rawPayload Json?
+
+  syncedAt  DateTime @default(now()) // última vez que este pedido foi escrito pelo sync (distinto de orderedAt)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Modo de Demonstração / Audit Mode — pedido fictício injetado por
+  // AuditSeederService (nunca por um OrderSyncOrchestrator real; nenhum
+  // adapter de canal jamais escreve isso). @default(false) é o que garante
+  // a segregação "automática" pedida: toda query existente que já rodava
+  // antes desta migração (worklist, DRE, contadores) continua só vendo
+  // isDemo = false sem precisar ser tocada — o filtro por dataMode
+  // ('REAL' | 'DEMO') vive na camada de repositório
+  // (PrismaOrderRepository), nunca deixado a cargo de quem chama. Ver
+  // docs/audit-mode.md.
+  isDemo Boolean @default(false)
+
+  items OrderItem[]
+
+  // Sprint 24 — vínculo com o Hub de Provas (logistics_fulfillment): um
+  // pedido de varejo aparece em exatamente um StockMovementAuditEvent
+  // (RETAIL_SHIPMENT); um pedido embarcado num lote Full aparece no evento
+  // daquele lote (FULL_DISPATCH), junto de outros pedidos do mesmo despacho.
+  stockMovementLinks StockMovementAuditEventOrder[]
+
+  // Idempotência: a MESMA chave de negócio (canal + id externo) nunca gera
+  // duas linhas — todo upsert do OrderSyncOrchestrator usa este índice.
+  @@unique([tenantId, channelCode, externalOrderId])
+  // Consulta mais comum: a worklist filtrando por status (abas) + ordenando por data.
+  @@index([tenantId, status, orderedAt])
+  @@index([tenantId, channelCode, orderedAt])
+  // Filtro por dataMode (REAL exclui isDemo, DEMO só isDemo) em toda query —
+  // worklist, contadores e DRE.
+  @@index([tenantId, isDemo])
+  @@map("orders")
+  @@schema("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Referência SOLTA (não FK) ao produto interno — resolvida no momento da
+  // ingestão via PRODUCT_CATALOG_READER.findBySku(tenantId, externalSku); pode
+  // ficar nula se o SKU do canal ainda não tiver um Product correspondente
+  // (produto não sincronizado/cadastrado ainda) — mesmo padrão de
+  // ChannelListing.skuCode/CompetitiveOpportunity.skuCode.
+  skuCode String?
+
+  // O identificador cru do item NO CANAL (sku da variante, ou id do produto
+  // quando o canal não expõe SKU) — sempre presente, independente de ter
+  // sido possível resolver para um skuCode interno.
+  externalSku String
+  productName String // snapshot do nome no momento do pedido — não segue mudanças futuras do produto
+
+  quantity   Int
+  unitPrice  Decimal @db.Decimal(12, 2)
+  totalPrice Decimal @db.Decimal(12, 2)
+
+  // Imposto discriminado por item (Etapa 17) — regras fiscais brasileiras
+  // (NF-e) exigem o tributo por item, não só um total no pedido. Opcional:
+  // nulo quando o canal não expõe essa quebra (caso da Nuvemshop hoje).
+  taxAmount Decimal? @db.Decimal(12, 2)
+
+  // Custo de aquisição no momento do pedido (Etapa 19, Orquestração de
+  // Custos) — SNAPSHOT do custo efetivo (Product.costPrice + Packaging.costPrice,
+  // ver ProductCatalogReader) capturado pelo OrderSyncOrchestrator quando o
+  // SKU do item é resolvido contra o catálogo interno (mesmo momento em que
+  // `skuCode` é preenchido). NUNCA vem do canal/marketplace — custo é dado
+  // NOSSO, não do RawOrderItemCandidate.
+  //
+  // Nullable de propósito: (a) pedidos sincronizados ANTES desta etapa nunca
+  // tiveram esse campo — migrar retroativamente inventaria um custo que
+  // ninguém registrou de fato; (b) itens cujo SKU não resolve contra o
+  // catálogo (produto não cadastrado ainda) também ficam sem valor aqui, o
+  // mesmo padrão de `skuCode` nulo. O fallback para os dois casos vive no
+  // OrdersService (ver domain/order-margin.ts) — nunca inventa retroativamente
+  // o custo daquele momento, usa o custo ATUAL do produto como a melhor
+  // aproximação disponível, e sinaliza isso explicitamente
+  // (`costSource: 'CURRENT_PRODUCT'`) para quem lê a margem.
+  costPrice Decimal? @db.Decimal(12, 2)
+
+  @@index([orderId])
+  @@map("order_items")
+  @@schema("orders")
+}
+
+// ============================================================================
+// Logistics Fulfillment — Hub de Provas + Full Fulfillment (Sprint 24).
+// Ver docs/logistics-fulfillment-architecture.md.
+//
+// Regra de ouro estrutural: StockLedgerEntry (o único lugar que de fato
+// move estoque) tem auditEventId NOT NULL — não existe caminho de aplicação
+// que grave uma linha de ledger sem referenciar um StockMovementAuditEvent,
+// e o único método de serviço que cria StockLedgerEntry
+// (StockMovementAuditEventService.approve) recusa fazer isso se
+// conferenceStatus não estiver APROVADO ou mediaUrl estiver vazio. Ver
+// domain/stock-movement-audit-event.ts (canApprove) para a validação pura.
+// ============================================================================
+
+enum WarehouseType {
+  PHYSICAL // o galpão/estoque próprio do vendedor — sempre um por tenant
+  VIRTUAL_FULL // um depósito virtual por CD de marketplace (ex.: CD_FULL_ML)
+
+  @@schema("logistics_fulfillment")
+}
+
+model Warehouse {
+  id       String        @id @default(uuid())
+  tenantId String
+  code     String // "FISICO_SP", "CD_FULL_ML", "CD_FULL_SHOPEE"
+  type     WarehouseType
+  // Preenchido só quando type = VIRTUAL_FULL — qual canal esse CD
+  // representa. String, não enum, mesmo racional de Marketplace.code:
+  // canal novo é dado, nunca migration.
+  channelCode String?
+  isActive    Boolean  @default(true)
+  // Lead time de reabastecimento (Sprint 25) — dias entre despachar do
+  // físico e o estoque ficar disponível para venda NESTE depósito.
+  // Configurável por depósito (em vez de constante no código) porque a
+  // performance logística varia por canal/CD — editável via
+  // PATCH /logistics-fulfillment/warehouses/:id/lead-time. Default 15,
+  // confirmado com o usuário como ponto de partida; o motor de sugestão
+  // (ReplenishmentAdvisorService) lê SEMPRE este campo, nunca um valor fixo.
+  leadTimeDays Int @default(15)
+  // Custo operacional deste depósito (picking/armazenagem no Full, manuseio
+  // no Físico) — Sprint 26 (Motor de Margem de Promoções). Deliberadamente
+  // NÃO inclui custo de embalagem: esse vem do módulo de embalagens
+  // (Packaging.costPrice), via LogisticsCostReader, para nunca contar o
+  // mesmo custo duas vezes. Default 0 — ninguém preencheu ainda; enquanto
+  // isso, o motor de margem simplesmente não soma custo operacional nenhum
+  // (nunca assume um valor arbitrário). Editável via PATCH
+  // /logistics-fulfillment/warehouses/:id/logistics-cost.
+  logisticsCostPerUnit Decimal @default(0) @db.Decimal(12, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Única relação entre Warehouse e StockLedgerEntry — não precisa de nome.
+  ledgerEntries StockLedgerEntry[]
+  // Warehouse tem DUAS relações distintas com StockMovementAuditEvent
+  // (origem e destino) — cada uma precisa de um nome explícito para o
+  // Prisma saber qual FK corresponde a qual back-relation.
+  destinationForEvents StockMovementAuditEvent[] @relation("DestinationWarehouse")
+  sourceForEvents      StockMovementAuditEvent[] @relation("SourceWarehouse")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, type])
+  @@map("warehouses")
+  @@schema("logistics_fulfillment")
+}
+
+enum StockMovementEventType {
+  FULL_DISPATCH // lote de despacho para um CD do Full — pode embarcar N pedidos, ou nenhum (reabastecimento preventivo)
+  RETAIL_SHIPMENT // envio de um único pedido de varejo direto ao comprador final
+
+  @@schema("logistics_fulfillment")
+}
+
+enum ConferenceStatus {
+  PENDENTE // criado, aguardando mídia + avaliação humana — NENHUM StockLedgerEntry existe ainda
+  APROVADO // conferido e batido com o pedido/NF — só agora o ledger é gravado
+  DIVERGENTE // conferido e NÃO bateu — nunca gera ledger, sempre emite alerta técnico (ver AlertService)
+
+  @@schema("logistics_fulfillment")
+}
+
+// O "Hub de Provas" propriamente dito — um registro por evento de saída de
+// estoque, seja um despacho Full ou um envio de varejo. NUNCA é o
+// movimento de estoque em si (isso é StockLedgerEntry) — é o que AUTORIZA
+// esse movimento a acontecer.
+model StockMovementAuditEvent {
+  id       String                  @id @default(uuid())
+  tenantId String
+  eventType StockMovementEventType
+
+  sourceWarehouseId String // sempre o físico, em ambos os tipos de evento
+  sourceWarehouse   Warehouse @relation("SourceWarehouse", fields: [sourceWarehouseId], references: [id])
+
+  // Nulo em RETAIL_SHIPMENT (venda ao consumidor final não credita depósito
+  // nenhum nosso) — preenchido só em FULL_DISPATCH (o CD_FULL_* de destino).
+  destinationWarehouseId String?
+  destinationWarehouse   Warehouse? @relation("DestinationWarehouse", fields: [destinationWarehouseId], references: [id])
+
+  // Mídia da conferência — nula até alguém de fato anexar. mediaType é
+  // "PHOTO" ou "VIDEO"; string (não enum) para não exigir migration se um
+  // formato novo (ex.: PDF de checklist assinado) precisar ser aceito.
+  mediaUrl  String?
+  mediaType String?
+
+  conferenceStatus  ConferenceStatus @default(PENDENTE)
+  conferredByUserId String?
+  conferredAt       DateTime?
+  // Preenchido (na prática, obrigatório na camada de aplicação) quando
+  // conferenceStatus = DIVERGENTE — o motivo exato da divergência.
+  divergenceNotes String?
+
+  // Vínculo com a Nota Fiscal correspondente — mesmo campo/formato de
+  // Order.invoiceNumber (nº da NF-e ou chave de acesso).
+  invoiceNumber String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders StockMovementAuditEventOrder[]
+  ledger StockLedgerEntry[]
+
+  // Sprint 27 (Pick & Pack) — checklist de bipagem (1 linha por SKU
+  // esperado) e a sessão de captura de vídeo em chunks, ambas 1:N/1:1 deste
+  // mesmo evento. Ver docs/pick-pack-architecture.md.
+  items              StockMovementAuditEventItem[]
+  videoCaptureSession VideoCaptureSession?
+
+  @@index([tenantId, conferenceStatus])
+  @@index([tenantId, eventType, createdAt])
+  @@map("stock_movement_audit_events")
+  @@schema("logistics_fulfillment")
+}
+
+// Checklist de bipagem (Sprint 27, "Objetivo Zero Erro") — 1 linha por SKU
+// esperado neste evento, montada no momento da criação (createPending) a
+// partir dos itens dos pedidos vinculados (via OrderFinancialsReader.
+// findItemsForOrders) — snapshot, mesmo racional de OrderItem.costPriceUsed:
+// não recalculado depois, mesmo que o pedido mude. scannedQuantity nunca
+// ultrapassa expectedQuantity (função pura canScanItem barra isso antes de
+// chegar ao repositório). expectedQuantity agregada por SKU (dois itens do
+// mesmo SKU em pedidos diferentes do mesmo lote viram uma linha só, soma).
+model StockMovementAuditEventItem {
+  id       String @id @default(uuid())
+  tenantId String
+
+  auditEventId String
+  auditEvent   StockMovementAuditEvent @relation(fields: [auditEventId], references: [id], onDelete: Cascade)
+
+  skuCode          String
+  expectedQuantity Int
+  scannedQuantity  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([auditEventId, skuCode])
+  @@index([tenantId, auditEventId])
+  @@map("stock_movement_audit_event_items")
+  @@schema("logistics_fulfillment")
+}
+
+enum VideoCaptureStatus {
+  RECORDING
+  FINALIZED
+
+  @@schema("logistics_fulfillment")
+}
+
+// Sessão de captura de vídeo em chunks (Sprint 27) — 1:1 com o audit event.
+// Estratégia escolhida: MediaDevices API no navegador (MediaRecorder com
+// timeslice) fazendo upload incremental de cada blob assim que é gerado,
+// em vez de RTSP/streaming para servidor de mídia dedicado — ver
+// docs/pick-pack-architecture.md, seção 2, para o racional completo.
+// receivedChunkCount é a fonte da verdade de idempotência: um chunk com
+// sequence < receivedChunkCount é uma retransmissão (rede instável) e é
+// descartado sem reescrever o arquivo; sequence > receivedChunkCount é uma
+// lacuna (erro de cliente) e é rejeitado. storageKey aponta para o arquivo
+// no disco que vai recebendo os chunks via append (nunca reescrito do
+// zero) — resiliente a queda de processo no meio da gravação, porque cada
+// chunk já commitado no disco não depende do restante da sessão.
+model VideoCaptureSession {
+  id       String @id @default(uuid())
+  tenantId String
+
+  auditEventId String                  @unique
+  auditEvent   StockMovementAuditEvent @relation(fields: [auditEventId], references: [id], onDelete: Cascade)
+
+  storageKey         String
+  status             VideoCaptureStatus @default(RECORDING)
+  receivedChunkCount Int                @default(0)
+  totalBytes         Int                @default(0)
+
+  startedAt   DateTime  @default(now())
+  finalizedAt DateTime?
+
+  // Retenção de 30 dias (premissa de negócio) — preenchido pelo job de
+  // limpeza em background quando o ARQUIVO físico é apagado. O metadado
+  // (esta linha) nunca é apagado — é o registro de que a conferência visual
+  // aconteceu, mesmo depois que os bytes pesados do vídeo já foram
+  // descartados. Ver docs/pick-pack-architecture.md, seção 3.
+  videoDeletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([finalizedAt])
+  @@map("video_capture_sessions")
+  @@schema("logistics_fulfillment")
+}
+
+// Join N:N — um envio de varejo vincula exatamente 1 Order; um despacho
+// Full pode vincular N Orders (todos os pedidos embarcados naquele lote),
+// ou zero (reabastecimento preventivo do CD, não motivado por pedido
+// nenhum ainda).
+model StockMovementAuditEventOrder {
+  auditEventId String
+  auditEvent   StockMovementAuditEvent @relation(fields: [auditEventId], references: [id], onDelete: Cascade)
+  orderId      String
+  order        Order                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@id([auditEventId, orderId])
+  @@index([orderId])
+  @@map("stock_movement_audit_event_orders")
+  @@schema("logistics_fulfillment")
+}
+
+// Ledger append-only — a ÚNICA fonte da verdade do saldo de estoque por
+// (warehouse, sku). Nunca é UPDATE, sempre INSERT; saldo = soma de
+// quantityDelta. auditEventId é NOT NULL de propósito: é isso que torna a
+// regra de ouro estrutural (ver comentário no topo desta seção), não uma
+// convenção que depende de disciplina de quem programa depois.
+model StockLedgerEntry {
+  id       String @id @default(uuid())
+  tenantId String
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  skuCode     String
+
+  // Negativo = saída (débito), positivo = entrada (crédito). Uma
+  // transferência Full grava DUAS linhas com o mesmo auditEventId: uma
+  // negativa no físico, uma positiva no CD virtual de destino.
+  quantityDelta Int
+
+  auditEventId String
+  auditEvent   StockMovementAuditEvent @relation(fields: [auditEventId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  // Consulta mais comum: saldo atual de um SKU num depósito (soma de
+  // quantityDelta filtrando por estes três campos).
+  @@index([tenantId, warehouseId, skuCode])
+  @@index([auditEventId])
+  @@map("stock_ledger_entries")
+  @@schema("logistics_fulfillment")
+}
+
+// ============================================================================
+// Promotion Intelligence (Sprint 26) — "Motor de Cálculo de Margem": valida
+// a viabilidade de uma promoção ANTES de ela existir de verdade. Ver
+// docs/promotion-intelligence-architecture.md.
+//
+// Deliberadamente NÃO criamos uma "ConfiguracaoCanal" — taxa/comissão por
+// canal já vem de MarketplaceRule (FEE_RULE_RESOLVER) e política fiscal do
+// tenant já vem de CatalogSettings (FINANCIAL_POLICY_READER); duplicar
+// qualquer um dos dois aqui criaria duas fontes da verdade divergentes.
+// ============================================================================
+
+enum PromotionCampaignStatus {
+  DRAFT
+  ACTIVE
+  ENDED
+  CANCELLED
+
+  @@schema("promotion_intelligence")
+}
+
+// VERDE = margem líquida positiva, VERMELHO = negativa/prejuízo — "Semáforo
+// de Margem" pedido pelo usuário. Nunca um terceiro estado: exatamente 0 é
+// tratado como VERMELHO (mesmo racional defensivo do piso financeiro do
+// PricingStrategist — na dúvida, bloqueia).
+enum MarginStatus {
+  VERDE
+  VERMELHO
+
+  @@schema("promotion_intelligence")
+}
+
+// PENDING nunca é gravado de fato (validateEnrollment sempre resolve para
+// APPROVED ou BLOCKED antes do INSERT) — existe só como valor de domínio
+// para o tipo TS, não como estado transitório real no banco.
+enum EnrollmentStatus {
+  PENDING
+  APPROVED
+  BLOCKED
+
+  @@schema("promotion_intelligence")
+}
+
+model PromotionCampaign {
+  id          String                  @id @default(uuid())
+  tenantId    String
+  name        String
+  channelCode String
+  startAt     DateTime
+  endAt       DateTime
+  status      PromotionCampaignStatus @default(DRAFT)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+
+  enrollments PromotionEnrollment[]
+
+  @@index([tenantId, channelCode, status])
+  @@map("promotion_campaigns")
+  @@schema("promotion_intelligence")
+}
+
+// Snapshot do cálculo no momento da adesão — mesmo racional de
+// OrderItem.costPriceUsed (Etapa 19): nunca recalcula silenciosamente
+// depois. Se o custo do produto, a embalagem, a taxa do canal ou a política
+// fiscal mudarem depois, este registro continua mostrando o que foi
+// avaliado NAQUELE momento; uma reavaliação é uma ação explícita (chamar
+// validateEnrollment de novo), nunca implícita.
+model PromotionEnrollment {
+  id               String    @id @default(uuid())
+  tenantId         String
+  campaignId       String
+  campaign         PromotionCampaign @relation(fields: [campaignId], references: [id])
+  skuCode          String
+  promotionalPrice Decimal   @db.Decimal(12, 2)
+
+  costPriceUsed   Decimal @db.Decimal(12, 2) // Product.costPrice — SEM embalagem, que está em logisticsCost
+  feesAmount      Decimal @db.Decimal(12, 2)
+  taxAmount       Decimal @db.Decimal(12, 2)
+  logisticsCost   Decimal @db.Decimal(12, 2) // já composto: embalagem (hierarquia) + custo operacional do Warehouse
+  netMarginAmount Decimal @db.Decimal(12, 2)
+  netMarginPct    Float
+
+  marginStatus     MarginStatus
+  enrollmentStatus EnrollmentStatus @default(PENDING)
+  blockedReason    String?
+  // false quando o FEE_RULE_RESOLVER não encontrou regra cadastrada para o
+  // canal (feesAmount assumiu 0) — mesmo alerta que
+  // NuvemshopMarginSimulatorService.feeRuleFound já dá hoje, para nunca
+  // esconder que a margem calculada pode estar otimista.
+  feeRuleFound     Boolean
+  computedAt       DateTime @default(now())
+
+  @@unique([campaignId, skuCode])
+  @@index([tenantId, marginStatus])
+  @@map("promotion_enrollments")
+  @@schema("promotion_intelligence")
+}
