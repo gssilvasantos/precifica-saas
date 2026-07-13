@@ -87,6 +87,18 @@ import { CatalogModule } from '../catalog/catalog.module';
   // logistics-fulfillment (Hub de Provas) precisa persistir a mídia
   // (foto/vídeo) anexada na conferência, e reaproveita este mesmo adapter
   // de disco local em vez de duplicar a porta/implementação.
-  exports: [CHANNEL_LISTING_READER, NuvemshopFeeRuleProvider, NuvemshopOrderProvider, FILE_STORAGE],
+  //
+  // CredentialEncryptionService exportado a partir do deploy Demo (bug de DI
+  // pego só em runtime no Render — nest build não pega isso porque o
+  // container de DI do Nest só é montado no boot, nunca em tsc/build). Mesmo
+  // racional de NuvemshopFeeRuleProvider/NuvemshopOrderProvider/FILE_STORAGE
+  // acima: MarketplaceIntelligenceModule já importa ErpIntegrationModule
+  // (só para consumir NuvemshopFeeRuleProvider), e MercadoLivreConnectionService
+  // (dentro daquele módulo) também depende deste serviço para
+  // criptografar/descriptografar o access/refresh token do Mercado Livre em
+  // repouso — sem exportar aqui, o Nest não consegue resolver essa
+  // dependência fora deste módulo, mesmo com a classe registrada em
+  // `providers`. Ver docs/auth-security.md.
+  exports: [CHANNEL_LISTING_READER, NuvemshopFeeRuleProvider, NuvemshopOrderProvider, FILE_STORAGE, CredentialEncryptionService],
 })
 export class ErpIntegrationModule {}
