@@ -19,6 +19,21 @@ import { ProductCatalogReader } from '../../../shared/contracts/product-catalog-
 import { ALERT_SERVICE, AlertService } from '../../../shared/observability/ports/alert-service.port';
 import { TenantContextStore } from '../../../shared/prisma/tenant-context';
 
+// Janela incremental normal (contas já com pelo menos 1 pedido gravado para
+// o canal) — mantém o polling leve entre ciclos.
+const INCREMENTAL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Janela de BACKFILL para a primeira sincronização de um canal (nenhum
+// pedido gravado ainda para esse tenant+provider). Bug real encontrado em
+// produção: uma conta de vendedor recém-conectada, mas com histórico de
+// meses/anos no marketplace, usava a mesma janela de 7 dias — o fetch
+// (order.date_last_updated.from) não encontrava NENHUM candidato, mesmo com
+// a conexão 100% funcional (confirmado via handshake, que não usa `since` e
+// achou milhares de pedidos). 2 anos é generoso o bastante para capturar o
+// histórico relevante de qualquer conta nova sem tornar a primeira chamada
+// ilimitada.
+const BACKFILL_WINDOW_MS = 2 * 365 * 24 * 60 * 60 * 1000;
+
 // Pipeline por provider: Fetch (paginação já resolvida DENTRO do adapter,
 // ver marketplace-provider.contract.ts) -> Resolver SKU interno por item
 // (best effort) -> Upsert idempotente -> Detectar transição de status ->
@@ -79,12 +94,21 @@ export class OrderSyncOrchestrator {
     let candidatesApplied = 0;
 
     try {
-      // MVP: sem watermark persistido por tenant ainda — busca uma janela
-      // fixa de segurança (7 dias) a cada execução. Suficiente para o
-      // volume de um MVP; a otimização natural é persistir "última data
+      // MVP: sem watermark persistido por tenant ainda — usa uma janela fixa
+      // a cada execução (curta para incremental, ampla para a primeira
+      // sincronização de um canal — ver constantes acima e o bug que isso
+      // corrigiu). A otimização natural futura é persistir "última data
       // sincronizada" por (tenant, provider), mesmo padrão de
-      // NuvemshopConnection.lastSyncedAt.
-      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      // NuvemshopConnection.lastSyncedAt — eliminaria também esta consulta
+      // extra de "já tem pedido?" a cada ciclo.
+      const isFirstSync = !(await this.orders.hasAnyOrderForChannel(tenantId, marketplaceCode));
+      const windowMs = isFirstSync ? BACKFILL_WINDOW_MS : INCREMENTAL_WINDOW_MS;
+      const since = new Date(Date.now() - windowMs);
+      if (isFirstSync) {
+        this.logger.log(
+          `Primeira sincronização de ${providerCode} para tenant ${tenantId} — usando janela de backfill de ${Math.round(windowMs / (24 * 60 * 60 * 1000))} dias em vez da incremental.`,
+        );
+      }
       const rawOrders = await provider.fetchOrders({ marketplaceCode, tenantId, since });
       candidatesFound = rawOrders.length;
       await this.health.recordSuccess(providerCode);

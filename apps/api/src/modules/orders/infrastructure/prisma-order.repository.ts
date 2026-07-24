@@ -226,6 +226,20 @@ export class PrismaOrderRepository implements OrderRepository {
     return items;
   }
 
+  // Ver comentário no port — usado só pelo OrderSyncOrchestrator para
+  // decidir a largura da janela `since` da primeira sincronização de um
+  // canal. count com take implícito 1 via `findFirst` seria uma opção, mas
+  // `count` com early-exit não existe no Prisma — como isto roda uma vez por
+  // (tenant, provider) por ciclo de sync (não por pedido), o custo de um
+  // count completo é irrelevante aqui.
+  async hasAnyOrderForChannel(tenantId: string, channelCode: string): Promise<boolean> {
+    const existing = await this.prisma.order.findFirst({
+      where: { tenantId, channelCode },
+      select: { id: true },
+    });
+    return existing !== null;
+  }
+
   // Ausente = 'REAL' (isDemo=false) — o padrão seguro: qualquer chamador que
   // esqueça de passar dataMode nunca vê pedido de demonstração.
   private isDemoFlag(dataMode?: AppDataMode): boolean {

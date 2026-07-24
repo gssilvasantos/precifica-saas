@@ -62,6 +62,7 @@ describe('OrdersService', () => {
       findAllForPeriod: jest.fn().mockResolvedValue(allOrders),
       deleteDemoOrders: jest.fn(),
       findItemsByOrderIds: jest.fn().mockResolvedValue([]),
+      hasAnyOrderForChannel: jest.fn().mockResolvedValue(true),
     };
     const catalog: jest.Mocked<ProductCatalogReader> = {
       findBySku: jest.fn(),

@@ -46,6 +46,14 @@ export interface OrderRepository {
   // numa única query (nunca N+1, mesmo racional de findAllForPeriod). Usado
   // por OrdersService.findItemsForOrders (OrderFinancialsReader).
   findItemsByOrderIds(tenantId: string, orderIds: string[]): Promise<{ orderId: string; skuCode: string | null; quantity: number }[]>;
+  // Diagnóstico de "primeira sincronização" (ver OrderSyncOrchestrator) — se
+  // um tenant nunca teve NENHUM pedido gravado para este canal, a janela
+  // incremental fixa de 7 dias (pensada para manter o polling leve) faria a
+  // primeira sincronização real de uma conta já estabelecida (com histórico
+  // de meses/anos) encontrar zero candidatos, mesmo com a conexão 100%
+  // funcional — silenciosamente. Este método existe só para decidir a
+  // largura da janela de busca, nunca para nenhuma outra lógica de negócio.
+  hasAnyOrderForChannel(tenantId: string, channelCode: string): Promise<boolean>;
 }
 
 export const ORDER_REPOSITORY = Symbol('ORDER_REPOSITORY');

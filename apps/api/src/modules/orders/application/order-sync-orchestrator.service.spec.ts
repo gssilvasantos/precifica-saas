@@ -81,6 +81,10 @@ describe('OrderSyncOrchestrator', () => {
       findAllForPeriod: jest.fn(),
       deleteDemoOrders: jest.fn(),
       findItemsByOrderIds: jest.fn().mockResolvedValue([]),
+      // Default: já tem pedido (canal "estabelecido") — mantém o comportamento
+      // dos testes existentes na janela incremental de 7 dias. O teste novo
+      // do backfill sobrescreve isto para `false`.
+      hasAnyOrderForChannel: jest.fn().mockResolvedValue(true),
     };
 
     const syncLogs: jest.Mocked<ProviderSyncLogRepository> = {

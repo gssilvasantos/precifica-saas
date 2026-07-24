@@ -858,6 +858,16 @@ Complemento da tela `/integracoes`, que até aqui só tinha UI real para Mercado
 
 Verificação: `tsc --noEmit` do frontend — nenhum erro novo introduzido (os erros pré-existentes de `node_modules` ausente do retrofit shadcn/ui, já documentados na Verificação final da fundação shadcn/ui, continuam os mesmos).
 
+## Bug de produção — janela fixa de 7 dias zerava a primeira sincronização de pedidos (24/07/2026)
+
+Conectada uma conta real do Mercado Livre (vendedor estabelecido, milhares de pedidos históricos), o Kyneti não mostrava NENHUM pedido em nenhuma tela (Dashboard/Pedidos), mesmo com Audit Mode em "Real". Diagnóstico descartou, nesta ordem: (1) toggle Demo/Real — já estava em Real, 0 pedidos de demonstração também; (2) permissões OAuth2 do app no devcenter do Mercado Livre — já corretas ("Leitura" em Venda e envios de um produto); (3) o botão **Testar conexão** (`mercado-livre-handshake.service.ts`) confirmou a conexão 100% funcional, achando 8821 pedidos reais.
+
+**Causa raiz real**: `OrderSyncOrchestrator.syncTenant` hardcodava `since = 7 dias atrás` em TODA sincronização (incluindo a primeira), filtrando via `order.date_last_updated.from` na API do Mercado Livre. Uma conta com histórico mais antigo que 7 dias sempre teria zero candidatos — silenciosamente, porque o try/catch de isolamento de falha por tenant/provider não distingue "0 resultados" de "falhou". O handshake de diagnóstico não usa `since`, por isso achava os pedidos e mascarava o problema.
+
+**Correção** (`order-sync-orchestrator.service.ts` + `order-repository.port.ts` + `prisma-order.repository.ts`): novo método `hasAnyOrderForChannel(tenantId, channelCode)` — se o tenant nunca teve nenhum pedido gravado para aquele canal, usa uma janela de **backfill de 2 anos** em vez da incremental de 7 dias. Sincronizações seguintes (canal já "estabelecido") continuam na janela curta de 7 dias, mantendo o polling leve. Testes (`order-sync-orchestrator.service.spec.ts`, `orders.service.spec.ts`, `audit-seeder.service.spec.ts`) atualizados com o novo mock do repositório.
+
+Nota de verificação: `tsc --noEmit` não pôde ser executado até o fim neste sandbox (mesma limitação de rede/tempo já documentada na fundação shadcn/ui) — revisão manual completa do diff (assinaturas de tipo, todos os call sites do `OrderRepository`, todos os mocks de teste) feita em substituição.
+
 ## Design System — fundação shadcn/ui + Dark Mode (vitrine da marca)
 
 Com a base de segurança (RLS) encaminhada, o usuário pediu para virar a atenção para a "cara" do sistema — um layout navegável para validar usabilidade e a lógica de negócio já implementada. Identidade definida pelo usuário: tons de cinza grafite como base, azul neon só como destaque, estética de "Dashboard de Inteligência" (sério/robusto/tecnológico, nada de referências a varejo/cosméticos), Dark Mode como padrão tecnológico com Light Mode como alternativa, shadcn/ui como biblioteca de componentes. Prioridade combinada com o usuário: `AppLayout` + `Dashboard` primeiro, como vitrine, antes de retrofitar as outras 9 telas já funcionais.
