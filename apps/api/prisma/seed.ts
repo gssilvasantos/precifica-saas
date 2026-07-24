@@ -93,6 +93,47 @@ async function main() {
     update: {},
   });
 
+  // BUG DE PRODUÇÃO (24/07/2026) — estas duas linhas nunca existiram desde
+  // que o hub de Pedidos (Etapa 16/Sprint 21) foi criado: sem uma linha de
+  // ProviderSyncSchedule com capability='ORDERS', OrdersSyncSchedulerJob
+  // .findDue() sempre retorna vazio e o cron de 10 min NUNCA dispara sync de
+  // pedido nenhum — nem para Mercado Livre, nem para Nuvemshop — e sem log
+  // nenhum de aviso (`if (ordersDue.length === 0) return;`, silencioso por
+  // design, pensado pra não logar barulho quando não há nada vencido, mas
+  // que mascarou completamente a ausência total do schedule). Descoberto
+  // depurando por que uma conexão real do Mercado Livre com milhares de
+  // pedidos históricos nunca sincronizava nada, mesmo após corrigir a janela
+  // de busca (ver order-sync-orchestrator.service.ts).
+  console.log('Configurando schedule de sincronização de PEDIDOS do Mercado Livre...');
+  if (mercadoLivreId) {
+    await prisma.providerSyncSchedule.upsert({
+      where: { providerCode: 'MERCADO_LIVRE_ORDERS' },
+      create: {
+        providerCode: 'MERCADO_LIVRE_ORDERS',
+        marketplaceId: mercadoLivreId,
+        capability: 'ORDERS',
+        intervalMinutes: 10, // mesma cadência do @Cron(EVERY_10_MINUTES) do scheduler
+        autoTrust: false, // não usado por este capability — mantido por consistência do modelo
+      },
+      update: {},
+    });
+  }
+
+  console.log('Configurando schedule de sincronização de PEDIDOS da Nuvemshop...');
+  if (nuvemshopId) {
+    await prisma.providerSyncSchedule.upsert({
+      where: { providerCode: 'NUVEMSHOP_ORDERS' },
+      create: {
+        providerCode: 'NUVEMSHOP_ORDERS',
+        marketplaceId: nuvemshopId,
+        capability: 'ORDERS',
+        intervalMinutes: 10,
+        autoTrust: false,
+      },
+      update: {},
+    });
+  }
+
   console.log('Configurando schedule de monitoramento do Competition Intelligence...');
   await prisma.providerSyncSchedule.upsert({
     where: { providerCode: 'COMPETITION_RADAR_MONITOR' },
