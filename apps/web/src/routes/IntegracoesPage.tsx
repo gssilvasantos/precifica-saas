@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchMercadoLivreStatus,
@@ -22,6 +23,27 @@ const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', tim
 export default function IntegracoesPage() {
   const queryClient = useQueryClient();
   const [handshakeResult, setHandshakeResult] = useState<MercadoLivreHandshakeResult | null>(null);
+
+  // Lê o resultado do redirect de volta do callback OAuth2 do Mercado Livre
+  // (mercado-livre-connection.controller.ts) — `conectado=mercado-livre` ou
+  // `erro=mercado-livre`. Limpa o query param logo em seguida (replace, sem
+  // empilhar no histórico) pra um F5 não reexibir o banner indefinidamente.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const callbackResult = searchParams.get('conectado') ?? (searchParams.get('erro') ? 'erro' : null);
+  const callbackWasError = searchParams.has('erro');
+
+  useEffect(() => {
+    if (!callbackResult) return;
+    void queryClient.invalidateQueries({ queryKey: ['mercado-livre-status'] });
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('conectado');
+      next.delete('erro');
+      return next;
+    }, { replace: true });
+    // Roda só uma vez, no mount — não queremos reagir a re-renders normais.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const statusQuery = useQuery({
     queryKey: ['mercado-livre-status'],
@@ -65,6 +87,21 @@ export default function IntegracoesPage() {
           Conecte suas contas de marketplace para o Kyneti ingerir pedidos reais e calcular o DRE automaticamente.
         </p>
       </div>
+
+      {callbackResult && (
+        <div
+          className={[
+            'rounded-xl border p-4 text-sm',
+            callbackWasError ? 'border-margin-danger/40 bg-margin-danger/10' : 'border-margin-good/40 bg-margin-good/10',
+          ].join(' ')}
+        >
+          <p className={callbackWasError ? 'font-medium text-margin-danger' : 'font-medium text-margin-good'}>
+            {callbackWasError
+              ? 'Não foi possível concluir a conexão com o Mercado Livre — tente novamente.'
+              : 'Mercado Livre conectado com sucesso.'}
+          </p>
+        </div>
+      )}
 
       <div className="rounded-2xl bg-surface p-6 shadow-card">
         <div className="flex items-start justify-between gap-4">
