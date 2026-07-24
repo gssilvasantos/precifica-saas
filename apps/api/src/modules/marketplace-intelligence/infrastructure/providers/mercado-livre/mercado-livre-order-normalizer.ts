@@ -7,11 +7,18 @@ import { mapMercadoLivreStatus } from './mercado-livre-order-status.mapper';
 // para ficar testável sem instanciar o provider) é o ÚNICO lugar que
 // conhece o formato bruto do canal.
 //
-// AVISO DE HONESTIDADE (Sprint 21): formato assumido com base na
-// documentação pública da API de Pedidos do Mercado Livre — nunca validado
-// contra uma resposta real (exige OAuth2 de vendedor, ainda não
-// implementado). Ver mercado-livre-order.provider.ts.
-export function normalizeMercadoLivreOrder(raw: unknown): RawOrderCandidate | null {
+// AVISO DE HONESTIDADE (Sprint 21) — ATUALIZADO em 24/07/2026 após o
+// primeiro sync real: a suposição original de que `shipping.status` viria
+// preenchido dentro do payload de `/orders/search` estava ERRADA — aquele
+// campo é só uma referência (`{id: <shipment_id>}`), nunca o status de
+// fato. O status real de envio só existe no sub-recurso dedicado
+// (`GET /shipments/{id}`, ver MercadoLivreApiClient.fetchShipmentStatus) —
+// por isso esta função agora aceita `resolvedShippingStatus` como segundo
+// parâmetro, resolvido pelo PROVIDER (que tem acesso ao client/token, algo
+// que esta função pura não tem) antes de chamar normalizeMercadoLivreOrder.
+// Sem ele, cai no fallback de `shipping.status` só por retrocompatibilidade
+// — na prática, quase sempre undefined em produção.
+export function normalizeMercadoLivreOrder(raw: unknown, resolvedShippingStatus?: string): RawOrderCandidate | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;
 
@@ -20,7 +27,7 @@ export function normalizeMercadoLivreOrder(raw: unknown): RawOrderCandidate | nu
 
   const shipping = (obj.shipping ?? {}) as Record<string, unknown>;
   const rawStatus = String(obj.status ?? 'confirmed');
-  const shippingStatus = shipping.status ? String(shipping.status) : undefined;
+  const shippingStatus = resolvedShippingStatus ?? (shipping.status ? String(shipping.status) : undefined);
   const unifiedStatus = mapMercadoLivreStatus({ status: rawStatus, shippingStatus });
   const externalStatusParts = [rawStatus, shippingStatus].filter(Boolean);
 
@@ -65,6 +72,27 @@ export function normalizeMercadoLivreOrder(raw: unknown): RawOrderCandidate | nu
     items,
     rawPayload: raw,
   };
+}
+
+// Extrai o `shipping.id` (referência ao envio) do payload bruto — usado
+// pelo PROVIDER para decidir se vale a pena consultar
+// MercadoLivreApiClient.fetchShipmentStatus antes de normalizar (só faz
+// sentido para pedidos pagos, ver comentário em mercado-livre-order.provider.ts).
+// Extraído como função própria (em vez de expor via RawOrderCandidate) para
+// não vazar um campo específico do Mercado Livre no contrato compartilhado
+// entre canais (marketplace-provider.contract.ts).
+export function extractShippingId(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const shipping = ((raw as Record<string, unknown>).shipping ?? {}) as Record<string, unknown>;
+  return shipping.id != null ? String(shipping.id) : null;
+}
+
+// Status bruto de ORDEM (não de envio) — usado pelo provider para decidir
+// se um pedido está "pago" o suficiente para valer a pena consultar o envio
+// real (pedido em aberto/cancelado não tem shipping relevante ainda).
+export function extractOrderStatus(raw: unknown): string {
+  if (!raw || typeof raw !== 'object') return 'confirmed';
+  return String((raw as Record<string, unknown>).status ?? 'confirmed').toLowerCase();
 }
 
 function tryNormalizeItem(item: Record<string, unknown>): RawOrderItemCandidate | null {

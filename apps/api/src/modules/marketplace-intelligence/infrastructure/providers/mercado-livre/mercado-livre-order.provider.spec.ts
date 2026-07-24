@@ -5,7 +5,7 @@ import { MercadoLivreConnectionService } from '../../../application/mercado-livr
 
 describe('MercadoLivreOrderProvider (Sprint 22 — OAuth2 real)', () => {
   function buildProvider() {
-    const client = { fetchOrders: jest.fn() } as unknown as jest.Mocked<MercadoLivreApiClient>;
+    const client = { fetchOrders: jest.fn(), fetchShipmentStatus: jest.fn() } as unknown as jest.Mocked<MercadoLivreApiClient>;
     const connection = {
       listActiveTenantIds: jest.fn(),
       getValidAccessToken: jest.fn(),
@@ -61,18 +61,81 @@ describe('MercadoLivreOrderProvider (Sprint 22 — OAuth2 real)', () => {
         total_amount: 100,
         currency_id: 'BRL',
         date_created: '2026-07-01T10:00:00.000-04:00',
-        shipping: { status: 'pending' },
+        shipping: { id: 555 },
         order_items: [{ item: { id: 'MLB1', seller_sku: 'SKU-1' }, quantity: 1, unit_price: 100 }],
       },
     ]);
+    // Bug de produção (24/07/2026): /shipments/{id} ainda não tem status
+    // disponível (pedido recém-pago) — cai no fallback EM_ABERTO/PREPARANDO,
+    // nunca assume "enviado" sem confirmação real.
+    client.fetchShipmentStatus.mockResolvedValue(null);
 
     const result = await provider.fetchOrders({ marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1' });
 
     expect(connection.getValidAccessToken).toHaveBeenCalledWith('tenant-1');
     expect(connection.getSellerId).toHaveBeenCalledWith('tenant-1');
     expect(client.fetchOrders).toHaveBeenCalledWith('999', 'access-token-valido', undefined);
+    // Pedido pago com shipping.id presente — consulta o status real do envio.
+    expect(client.fetchShipmentStatus).toHaveBeenCalledWith('555', 'access-token-valido');
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ externalOrderId: '123', status: 'PREPARANDO_ENVIO' });
+  });
+
+  it('fetchOrders: consulta o envio real e reflete ENVIADO/ENTREGUE quando o Mercado Livre confirma (bug corrigido 24/07/2026)', async () => {
+    const { provider, connection, client } = buildProvider();
+    connection.getValidAccessToken.mockResolvedValue('access-token-valido');
+    connection.getSellerId.mockResolvedValue('999');
+    client.fetchOrders.mockResolvedValue([
+      {
+        id: 111,
+        status: 'paid',
+        total_amount: 50,
+        currency_id: 'BRL',
+        date_created: '2026-06-01T10:00:00.000-04:00',
+        shipping: { id: 1 },
+        order_items: [{ item: { id: 'MLB1', seller_sku: 'SKU-1' }, quantity: 1, unit_price: 50 }],
+      },
+      {
+        id: 222,
+        status: 'paid',
+        total_amount: 60,
+        currency_id: 'BRL',
+        date_created: '2026-06-02T10:00:00.000-04:00',
+        shipping: { id: 2 },
+        order_items: [{ item: { id: 'MLB1', seller_sku: 'SKU-1' }, quantity: 1, unit_price: 60 }],
+      },
+    ]);
+    client.fetchShipmentStatus.mockImplementation(async (shipmentId: string) =>
+      shipmentId === '1' ? { status: 'delivered', substatus: null } : { status: 'shipped', substatus: null },
+    );
+
+    const result = await provider.fetchOrders({ marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1' });
+
+    expect(result).toHaveLength(2);
+    expect(result.find((o) => o.externalOrderId === '111')).toMatchObject({ status: 'ENTREGUE' });
+    expect(result.find((o) => o.externalOrderId === '222')).toMatchObject({ status: 'ENVIADO' });
+  });
+
+  it('fetchOrders: NÃO consulta o envio para pedido ainda não pago (economiza chamada de API)', async () => {
+    const { provider, connection, client } = buildProvider();
+    connection.getValidAccessToken.mockResolvedValue('access-token-valido');
+    connection.getSellerId.mockResolvedValue('999');
+    client.fetchOrders.mockResolvedValue([
+      {
+        id: 333,
+        status: 'payment_in_process',
+        total_amount: 30,
+        currency_id: 'BRL',
+        date_created: '2026-07-20T10:00:00.000-04:00',
+        shipping: { id: 9 },
+        order_items: [{ item: { id: 'MLB1', seller_sku: 'SKU-1' }, quantity: 1, unit_price: 30 }],
+      },
+    ]);
+
+    const result = await provider.fetchOrders({ marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1' });
+
+    expect(client.fetchShipmentStatus).not.toHaveBeenCalled();
+    expect(result[0]).toMatchObject({ status: 'EM_ABERTO' });
   });
 
   it('fetchOrders: token válido mas sellerId não resolvido (defesa em profundidade) — devolve [] sem chamar o client', async () => {

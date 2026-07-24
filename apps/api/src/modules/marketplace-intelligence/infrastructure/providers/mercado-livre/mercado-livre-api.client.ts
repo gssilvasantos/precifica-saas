@@ -186,6 +186,33 @@ export class MercadoLivreApiClient {
     return orders;
   }
 
+  // Status REAL de envio — bug de produção (24/07/2026): o objeto `shipping`
+  // devolvido por `/orders/search` é só uma REFERÊNCIA ({id: <shipment_id>}),
+  // nunca o status de fato (a suposição original de que `shipping.status`
+  // viria populado ali era um aviso de honestidade não validado — o primeiro
+  // sync real revelou que TODO pedido pago ficava para sempre marcado como
+  // "Preparando envio", mesmo pedidos de meses atrás já entregues de
+  // verdade). O status/sub-status real do envio só existe neste sub-recurso
+  // dedicado. Chamado pelo MercadoLivreOrderProvider só para pedidos pagos
+  // (ver comentário lá) — pedido em aberto/cancelado não precisa. Devolve
+  // `null` (não lança) se o envio ainda não existir ou o payload vier em
+  // formato inesperado — o chamador trata isso como "sem informação nova",
+  // nunca como falha do sync inteiro.
+  async fetchShipmentStatus(shipmentId: string, accessToken: string): Promise<{ status: string; substatus: string | null } | null> {
+    try {
+      const response = await this.request(`${BASE_URL}/shipments/${shipmentId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok) return null;
+      const data = (await response.json()) as { status?: string; substatus?: string };
+      if (!data.status) return null;
+      return { status: data.status, substatus: data.substatus ?? null };
+    } catch (error) {
+      this.logger.warn(`Falha ao consultar /shipments/${shipmentId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
   // --- Product Ads (Módulo de Ads, Fase 1) ---
   //
   // AVISO DE HONESTIDADE (mais forte que o de fee-rules acima, de propósito):

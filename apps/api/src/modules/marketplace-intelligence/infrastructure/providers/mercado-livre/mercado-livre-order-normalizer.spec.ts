@@ -70,6 +70,17 @@ describe('normalizeMercadoLivreOrder', () => {
     expect(result?.shippedAt).toBeUndefined();
   });
 
+  it('resolvedShippingStatus (consultado de verdade em /shipments/{id}) tem prioridade sobre o shipping.status do payload de /orders/search (que na prática não existe — bug corrigido 24/07/2026)', () => {
+    // shipping.status='pending' no payload bruto seria o fallback, mas o
+    // provider já consultou o envio real e descobriu 'delivered' — o
+    // resultado tem que refletir a informação REAL, não o fallback.
+    const raw = buildRawOrder({ status: 'paid', shipping: { status: 'pending' } });
+
+    const result = normalizeMercadoLivreOrder(raw, 'delivered');
+
+    expect(result?.status).toBe('ENTREGUE');
+  });
+
   it('status cancelled -> CANCELADO', () => {
     const raw = buildRawOrder({ status: 'cancelled' });
 

@@ -8,8 +8,15 @@ import {
   RawOrderCandidate,
 } from '../../../../../shared/contracts/marketplace-provider.contract';
 import { MercadoLivreApiClient } from './mercado-livre-api.client';
-import { normalizeMercadoLivreOrder } from './mercado-livre-order-normalizer';
+import { extractOrderStatus, extractShippingId, normalizeMercadoLivreOrder } from './mercado-livre-order-normalizer';
 import { MercadoLivreConnectionService } from '../../../application/mercado-livre-connection.service';
+
+// Só vale a pena consultar o status REAL do envio (uma chamada de API a
+// mais por pedido, ver MercadoLivreApiClient.fetchShipmentStatus) para
+// pedidos que já chegaram a este estágio — pedido em aberto/aguardando
+// pagamento/cancelado não tem shipping relevante ainda. Reduz
+// drasticamente o número de consultas extras num backfill grande.
+const STATUSES_WORTH_CHECKING_SHIPMENT = new Set(['paid', 'partially_paid']);
 
 // Segunda capacidade do Mercado Livre no hub de pedidos (Sprint 21) — classe
 // SEPARADA de MercadoLivreFeeRuleProvider (mesmo racional de
@@ -76,6 +83,32 @@ export class MercadoLivreOrderProvider implements OrderCapableProvider, Authenti
     }
 
     const rawOrders = await this.client.fetchOrders(sellerId, accessToken, ctx.since);
-    return rawOrders.map((raw) => normalizeMercadoLivreOrder(raw)).filter((o): o is RawOrderCandidate => o !== null);
+
+    // Bug de produção (24/07/2026) — ver aviso de honestidade em
+    // mercado-livre-order-normalizer.ts: `shipping.status` não vem no
+    // payload de `/orders/search` (é só uma referência), então todo pedido
+    // pago ficava para sempre em "Preparando envio", mesmo já
+    // enviado/entregue há meses. Aqui, para cada pedido PAGO, consultamos o
+    // status real do envio (`/shipments/{id}`) antes de normalizar — as
+    // chamadas passam pelo MESMO RateLimiter do client (nunca estouram a
+    // cota configurada), mas ainda assim são uma chamada extra por pedido;
+    // por isso o filtro por status acima (pedido em aberto/cancelado não
+    // precisa consultar nada).
+    const candidates = await Promise.all(
+      rawOrders.map(async (raw) => {
+        const shippingId = extractShippingId(raw);
+        const orderStatus = extractOrderStatus(raw);
+        let resolvedShippingStatus: string | undefined;
+
+        if (shippingId && STATUSES_WORTH_CHECKING_SHIPMENT.has(orderStatus)) {
+          const shipment = await this.client.fetchShipmentStatus(shippingId, accessToken);
+          resolvedShippingStatus = shipment?.status;
+        }
+
+        return normalizeMercadoLivreOrder(raw, resolvedShippingStatus);
+      }),
+    );
+
+    return candidates.filter((o): o is RawOrderCandidate => o !== null);
   }
 }
