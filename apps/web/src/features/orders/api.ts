@@ -86,3 +86,20 @@ export async function fetchOrderStatusCounts(mode?: AppDataMode): Promise<OrderS
   const { data } = await apiClient.get<OrderStatusCounts>('/orders/status-counts', { params: { mode } });
   return data;
 }
+
+export interface TriggerOrderSyncResult {
+  triggered: boolean;
+  providerCode: string;
+}
+
+// "Sincronizar agora" (24/07/2026) — dispara o MESMO pipeline do cron de 10
+// min (orders-sync-scheduler.job.ts), só que sob demanda. AVISO: o endpoint
+// (`OrdersSyncController.triggerSync`) espera a sincronização terminar antes
+// de responder — para um canal com muito histórico e rate limit
+// conservador (ver mercado-livre-api.client.ts), isso pode levar minutos, não
+// segundos. O botão que chama isto precisa deixar isso claro (nunca parecer
+// travado).
+export async function triggerOrderSync(providerCode: string): Promise<TriggerOrderSyncResult> {
+  const { data } = await apiClient.post<TriggerOrderSyncResult>(`/orders/providers/${providerCode}/sync`);
+  return data;
+}

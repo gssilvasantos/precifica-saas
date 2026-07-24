@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { fetchOrders, fetchOrderStatusCounts, type Order, type OrderStatus } from '../../features/orders/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchOrders, fetchOrderStatusCounts, triggerOrderSync, type Order, type OrderStatus } from '../../features/orders/api';
 import { ORDER_CHANNELS } from '../../features/orders/channels';
 import { ORDER_STATUS_META, ORDER_STATUS_TABS } from '../../features/orders/status-meta';
 import { useAppMode } from '../../features/app-mode/app-mode-context';
@@ -29,9 +29,11 @@ interface Props {
 // memória) — mesma disciplina de performance documentada na arquitetura.
 export default function OrderTable({ insights = [] }: Props) {
   const { mode } = useAppMode();
+  const queryClient = useQueryClient();
   const [channelCode, setChannelCode] = useState<string>('');
   const [status, setStatus] = useState<OrderStatus | ''>('');
   const [page, setPage] = useState(1);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const filters = useMemo(
     () => ({ channelCode: channelCode || undefined, status: status || undefined, mode }),
@@ -48,6 +50,27 @@ export default function OrderTable({ insights = [] }: Props) {
   const countsQuery = useQuery({
     queryKey: ['orders-status-counts', mode],
     queryFn: () => fetchOrderStatusCounts(mode),
+  });
+
+  const selectedChannelMeta = channelCode ? ORDER_CHANNELS.find((c) => c.code === channelCode) : undefined;
+  const canSyncSelectedChannel = Boolean(selectedChannelMeta?.providerCode);
+
+  // "Sincronizar agora" (24/07/2026) — genérico para qualquer canal com
+  // provider real (providerCode presente em ORDER_CHANNELS), não um botão
+  // dedicado a um card de Integrações. AVISO: o endpoint espera a
+  // sincronização terminar antes de responder — para um canal com muito
+  // histórico e rate limit conservador, isso pode levar MINUTOS (ver
+  // mercado-livre-api.client.ts) — por isso a mensagem abaixo é explícita
+  // sobre não travar/recarregar enquanto espera.
+  const syncMutation = useMutation({
+    mutationFn: triggerOrderSync,
+    onMutate: () => setSyncMessage(null),
+    onSuccess: () => {
+      setSyncMessage(`Sincronização de ${selectedChannelMeta?.label ?? 'canal'} concluída — atualizando pedidos.`);
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['orders-status-counts'] });
+    },
+    onError: () => setSyncMessage('Falha ao sincronizar — tente novamente em instantes.'),
   });
 
   const orders = ordersQuery.data?.items ?? [];
@@ -131,7 +154,25 @@ export default function OrderTable({ insights = [] }: Props) {
             </option>
           ))}
         </select>
+
+        {/* "Sincronizar agora" — só aparece com um canal com sync real
+            selecionado (nunca em "Todos os canais", que misturaria vários
+            providers numa única chamada). Genérico por design: funciona
+            para qualquer canal com providerCode, não só Mercado Livre. */}
+        {canSyncSelectedChannel && (
+          <button
+            onClick={() => syncMutation.mutate(selectedChannelMeta!.providerCode!)}
+            disabled={syncMutation.isPending}
+            className="rounded-lg border border-ink-300 px-3 py-1.5 text-sm font-medium text-ink-700 transition hover:border-neon hover:text-gold disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {syncMutation.isPending ? 'Sincronizando… (pode levar minutos)' : 'Sincronizar agora'}
+          </button>
+        )}
       </div>
+
+      {syncMessage && (
+        <p className="text-xs text-ink-500">{syncMessage}</p>
+      )}
 
       <div className="overflow-x-auto rounded-2xl bg-surface shadow-card">
         <table className="w-full min-w-[960px] text-left text-sm">
