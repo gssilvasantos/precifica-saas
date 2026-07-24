@@ -1,6 +1,6 @@
 # Plano de Solicitação de Acesso — APIs de Ads (Shopee, TikTok Shop, Amazon, Magalu)
 
-**⏸ EM STANDBY (decisão de negócio, 16/07/2026):** a execução deste plano foi pausada até o layout/UI do Kyneti estar maduro o suficiente para uma demonstração visual completa. Motivo, com base neste mesmo documento: Shopee exige "produto vivo publicamente acessível" e "conta de teste/trial" para validar o produto "funcionando de verdade" (seção 1); Amazon exige uma auditoria formal de segurança (Security Onboarding Review, seção 3) igualmente dependente de um produto demonstrável. Pedir acesso agora, com backend maduro mas sem layout representável, arrisca reprovação/atraso. Retomar assim que o sprint de UI cobrir os fluxos-chave de demonstração — ver README.md, seção "Fase 0 — EM STANDBY".
+**▶ STANDBY LIBERADO (24/07/2026):** a execução deste plano estava pausada (decisão de negócio, 16/07/2026) até o RLS multi-tenant estar validado em produção e o layout/UI do Kyneti estar maduro o suficiente para uma demonstração visual completa. Ambas as condições foram cumpridas — ver README.md, seção "Fase 0 — STANDBY LIBERADO". Este documento passa de planejamento para execução: os 4 processos abaixo devem ser abertos em paralelo, começando pelo checklist da seção 7.
 
 **Status:** documento de planejamento, sem código associado ainda. Cobre só a etapa de **obter acesso de desenvolvedor/parceiro** às APIs de anúncios dessas 4 plataformas — não cobre a implementação do módulo de Ads em si (isso é o passo seguinte, condicionado a essas aprovações). Mercado Livre fica de fora deste documento porque já está resolvido: o Kyneti já é um app OAuth2 registrado no developer portal deles desde o Sprint 22 (ver `docs/auth-security.md`) — a Product Ads API do Mercado Livre usa o mesmo app, só precisa pedir o escopo `advertising/product_ads` a mais.
 
@@ -14,9 +14,11 @@
 
 **Pré-requisitos:**
 - CNPJ e documentos societários da empresa.
-- Produto "vivo" publicamente acessível — o Kyneti já atende isso (`https://api.kyneti.com.br`, SSL ativo).
+- Produto "vivo" publicamente acessível — o Kyneti já atende isso.
 - URL do produto servida em HTTPS com TLS 1.2 — já atendido.
 - Uma conta de teste/trial que a Shopee possa usar para validar o produto funcionando de verdade.
+
+**Correção importante:** a URL a fornecer é a do **painel do produto** (`https://kyneti.com.br`, onde fica a tela de login e a seção de Integrações), não a URL da API (`https://api.kyneti.com.br`, que não tem UI nenhuma — só responde JSON). O pedido deles é explícito: "URL com TLS 1.2 e login e senha válidas... precisamos da URL de ADMIN para validar [a seção de Integrações]" — ou seja, eles vão logar no painel com credencial que a gente fornece, não testar a API diretamente nem conectar uma conta Shopee própria. Ver a conta de revisão dedicada em `apps/api/create-review-user.ts`.
 
 **Passo a passo:**
 1. Acessar a homepage do Shopee Open Platform → *Log In* → *Sign Up*, com e-mail corporativo.

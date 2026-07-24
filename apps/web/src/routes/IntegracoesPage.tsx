@@ -7,14 +7,18 @@ import {
   testMercadoLivreConnection,
 } from '../features/marketplace-connections/api';
 import type { MercadoLivreHandshakeResult } from '../features/marketplace-connections/api';
+import { NuvemshopConnectionCard } from '../features/erp-connections/components/NuvemshopConnectionCard';
+import { OlistConnectionCard } from '../features/erp-connections/components/OlistConnectionCard';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
-// Fase de Conexão Real — primeira tela do frontend para o fluxo de OAuth2 do
-// Mercado Livre de verdade (autorizar/status/desconectar/testar), em vez de
-// exigir curl (ver README, Etapa 5 e Sprint 22). Nuvemshop segue API-only
-// por enquanto — ver card "próximo passo" abaixo, honesto sobre o que ainda
-// não tem tela própria.
+// Fase de Conexão Real — tela do frontend para as 3 integrações de canal
+// (Mercado Livre via OAuth2 — autorizar/status/desconectar/testar — e
+// Nuvemshop/Olist via formulário de token estático — conectar/status/
+// desconectar/sincronizar), em vez de exigir curl (ver README, Etapa 5 e
+// Sprint 22). Também serve como prova visual de "integrações ativas" para
+// revisão de parceiro de plataformas externas (ex.: Shopee Open Platform —
+// ver docs/marketplace-ads-api-access-plan.md).
 export default function IntegracoesPage() {
   const queryClient = useQueryClient();
   const [handshakeResult, setHandshakeResult] = useState<MercadoLivreHandshakeResult | null>(null);
@@ -129,13 +133,9 @@ export default function IntegracoesPage() {
         )}
       </div>
 
-      <div className="rounded-2xl border border-dashed border-ink-300/60 bg-surface/60 p-6">
-        <h2 className="text-sm font-semibold text-ink-700">Nuvemshop</h2>
-        <p className="mt-1 text-sm text-ink-500">
-          Conectar via token estático, ver status e disparar sincronização já funcionam via API (ver README, Etapa
-          5) — a tela dedicada para fazer isso sem curl é o próximo passo do frontend.
-        </p>
-      </div>
+      <NuvemshopConnectionCard />
+
+      <OlistConnectionCard />
     </div>
   );
 }

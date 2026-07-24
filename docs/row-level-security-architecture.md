@@ -1,6 +1,10 @@
 # Row-Level Security (RLS) — desenho técnico + implementação
 
-Status: **migração aplicada e isolamento cross-tenant validado empiricamente contra o Postgres real (Supabase); falta só apontar o serviço em produção (Render) para o role correto.** Achado importante durante a validação: `ENABLE`/`FORCE ROW LEVEL SECURITY` sozinhos não bastam quando a conexão usa o role `postgres` do Supabase — esse role tem privilégios equivalentes a `BYPASSRLS`, que ignora RLS incondicionalmente, independente de `FORCE` (ver seção 3.4.1, nova). Corrigido com um role de aplicação dedicado, `app_runtime` (sem `BYPASSRLS`, sem superuser, só CRUD nos 13 schemas — `apps/api/prisma/manual-migrations/2026-07-22_create_app_runtime_role.sql`). Teste cruzado real (Tenant B autenticado tentando ler registro do Tenant A por ID direto, via `apps/api/test-rls.ts`) confirmou bloqueio (`SUCESSO ABSOLUTO!`, 0 linhas) rodando com `app_runtime`. **Pendente**: o serviço `kyneti-api` no Render ainda conecta com `DATABASE_URL` do role `postgres` (bypass) — só o `.env` local foi trocado até agora. Prioridade #1 do usuário: reforçar a fundação de isolamento multi-tenant antes de qualquer funcionalidade nova (Ads Fase 0 e novos canais ficam em standby até isto fechar).
+Status: **RLS completa, aplicada e validada em produção — front-end e login confirmados funcionando com o role restrito `app_runtime`.** Dois achados reais durante a validação, ambos corrigidos:
+1. `ENABLE`/`FORCE ROW LEVEL SECURITY` sozinhos não bastam quando a conexão usa o role `postgres` do Supabase — esse role tem privilégios equivalentes a `BYPASSRLS`, que ignora RLS incondicionalmente, independente de `FORCE` (seção 3.4.1). Corrigido com um role de aplicação dedicado, `app_runtime` (sem `BYPASSRLS`, sem superuser, só CRUD nos 13 schemas — `apps/api/prisma/manual-migrations/2026-07-22_create_app_runtime_role.sql`), já apontado em produção via `DATABASE_URL` do Render (`DIRECT_URL` continua com `postgres`, só para migrações).
+2. `TenantContextInterceptor` tinha um bug de propagação do `AsyncLocalStorage` — o `.subscribe()` do pipeline do NestJS rodava **fora** da janela do `.run()`, então sob tráfego concorrente o contexto de tenant de uma request podia vazar/contaminar outra (seção 3.4.2). Corrigido movendo o `.subscribe()` para dentro do callback.
+
+Teste cruzado real (Tenant B autenticado tentando ler registro do Tenant A por ID direto, via `apps/api/test-rls.ts`) confirmou bloqueio (`SUCESSO ABSOLUTO!`, 0 linhas) rodando com `app_runtime`; login em produção (`kyneti.com.br`, conta demo) validado funcionando normalmente após os dois fixes acima. Prioridade #1 do usuário (reforçar a fundação de isolamento multi-tenant antes de qualquer funcionalidade nova) está fechada — Ads Fase 0 e novos canais podem sair do standby.
 
 ## 0. O que já existe, o que falta (checklist de aplicação)
 
@@ -19,14 +23,15 @@ Status: **migração aplicada e isolamento cross-tenant validado empiricamente c
 - [ ] `NuvemshopChannelListingSyncService.syncAllTenants()`
 - [ ] `ErpSyncOrchestrator.syncAllTenants()`
 
-**Validado contra o Postgres real (Supabase, o único ambiente que existe — não há staging separado):**
+**Validado contra o Postgres real (Supabase, o único ambiente que existe — não há staging separado) e em produção:**
 - [x] Migração `2026-07-17_enable_row_level_security.sql` aplicada (ENABLE+FORCE+policies nas 30 tabelas).
 - [x] Role `app_runtime` criado (`2026-07-22_create_app_runtime_role.sql`) — sem `BYPASSRLS`, sem superuser, só CRUD nos 13 schemas via GRANT + `ALTER DEFAULT PRIVILEGES` para tabelas futuras.
 - [x] Teste manual do "dono da tabela"/isolamento cruzado (seção 3.4.1): Tenant B autenticado tentando ler registro do Tenant A pelo ID direto, via `apps/api/test-rls.ts` rodando com `app_runtime` — **bloqueado corretamente, 0 linhas retornadas**.
+- [x] `DATABASE_URL` do serviço `kyneti-api` no Render apontada para `app_runtime` (`DIRECT_URL` continua com `postgres`, só para migrações).
+- [x] Bug de propagação de contexto no `TenantContextInterceptor` encontrado e corrigido (seção 3.4.2) — `.subscribe()` movido para dentro do callback do `AsyncLocalStorage.run()`.
+- [x] Smoke test pós-troca: login (conta demo) + dashboard + listagem de produtos confirmados funcionando normalmente em `kyneti.com.br` com `app_runtime` em produção.
 
-**Pendente:**
-- [ ] Apontar `DATABASE_URL` do serviço `kyneti-api` no Render para o role `app_runtime` (hoje ainda usa `postgres`, ou seja, a RLS ainda não protege nada em produção de fato — só localmente já foi validada). `DIRECT_URL` continua com `postgres` (migrações precisam de privilégio administrativo).
-- [ ] Smoke test pós-troca: login + dashboard + fluxos principais funcionando normalmente com `app_runtime` (grants cobrem SELECT/INSERT/UPDATE/DELETE nos 13 schemas; qualquer tabela esquecida apareceria como erro de permissão).
+**Pendente (hardening não-bloqueante, pode ser feito com o sistema já em produção):**
 - [ ] Rodar as 2 suítes E2E do Pick & Pack contra o banco já com RLS ativa e `app_runtime` em uso — cobertura de integração adicional além do teste manual acima.
 - [ ] Medir latência antes/depois nos endpoints de maior volume (sync de pedidos, DRE).
 
@@ -190,6 +195,41 @@ Ou seja: com a aplicação inteira conectando via esse role, a RLS nunca teve ef
 
 Repetindo o teste cruzado com `app_runtime` no lugar de `postgres`: **bloqueado corretamente** — a query retornou 0 linhas. Essa é a confirmação real de que a RLS protege de verdade, não só "parece estar configurada certo".
 
+### 3.4.2 Segundo achado: `TenantContextInterceptor` perdia o contexto do `AsyncLocalStorage` sob concorrência
+
+Depois de trocar produção para `app_runtime`, o login com a conta demo passou a devolver **401** mesmo com o usuário confirmado ativo no banco, e-mail e senha corretos (hash bcrypt validado manualmente, inclusive regravado do zero para descartar qualquer dúvida). A causa não estava no banco — estava em como o interceptor global abria o contexto de tenant:
+
+```ts
+// ANTES (bug): o .subscribe() acontece FORA do callback do .run()
+return new Observable((subscriber) => {
+  const run = tenantId
+    ? () => TenantContextStore.run(tenantId, () => next.handle())
+    : () => TenantContextStore.runAsService(() => next.handle());
+  run().subscribe(subscriber); // <- fora da janela do AsyncLocalStorage
+});
+```
+
+`next.handle()` só **constrói** o Observable (é lazy — nada executa ainda). A execução real (controller → service → Prisma) só começa no `.subscribe()`. Como esse `.subscribe()` rodava depois que `TenantContextStore.run(...)` já tinha retornado, a chamada assíncrona real do request acontecia **fora** da janela do `AsyncLocalStorage` — um anti-padrão documentado no próprio repositório do NestJS ([nestjs/nest#15317](https://github.com/nestjs/nest/issues/15317)).
+
+O efeito prático, sob tráfego concorrente (múltiplas requests processadas ao mesmo tempo), não é necessariamente "contexto vazio" (isso lançaria o `Error` explícito do `PrismaService` e viraria 500) — pode ser **contexto de uma request diferente vazando para outra**, já que o `.subscribe()" deslocado herda o que estiver "ambiente" no momento em vez do valor certo daquela request. Para o login (rota pública, deveria abrir bypass), isso significa que a query podia acabar rodando escopada para o `tenantId` de outra request qualquer que estivesse ativa por perto — a RLS filtra corretamente por esse tenant errado, `demo@precifica.dev` não pertence a ele, `matches.length === 0`, 401 limpo. Consistente com tudo observado: banco correto, hash correto, grants corretos, e mesmo assim rejeitado.
+
+**Correção**, em `shared/prisma/tenant-context.interceptor.ts`:
+```ts
+// DEPOIS: .subscribe() dentro do callback do .run()
+return new Observable((subscriber) => {
+  const subscribeWithinContext = () => next.handle().subscribe(subscriber);
+  if (tenantId) {
+    TenantContextStore.run(tenantId, subscribeWithinContext);
+  } else {
+    TenantContextStore.runAsService(subscribeWithinContext);
+  }
+});
+```
+
+Validado em produção: login com a conta demo funcionando normalmente após o fix, dashboard e listagem de produtos carregando com dado real.
+
+**Implicação de segurança, não só de login**: esse mesmo bug, sob concorrência, poderia ter feito requisições **autenticadas** rodarem ocasionalmente escopadas para o `tenantId` errado — o cenário exato que a RLS no banco existe para conter como segunda camada de defesa em profundidade. Não há evidência de que isso tenha efetivamente vazado dado entre tenants reais (a RLS bloquearia o vazamento cruzado mesmo nesse caso, só que retornando dado vazio/errado em vez do certo, um bug de correção funcional, não necessariamente de confidencialidade) — mas é um bom lembrete prático de por que a camada de banco importa mesmo quando o código da aplicação "parece" certo.
+
 ## 4. Inventário de tabelas (o que recebe RLS, o que não recebe)
 
 **Tabelas com `tenantId` direto (RLS direta — grande maioria, ~30 tabelas):** `users`, `suppliers`, `tax_profiles`, `products`, `packagings`, `packaging_usage_events`, `catalog_settings` (chave é o próprio `tenantId`), `product_audit_logs`, `logistics_settings`, `mercado_livre_connections`, `olist_connections`, `nuvemshop_connections`, `erp_sync_change_events`, `channel_listings`, `monitored_competitor_listings`, `competitor_offer_snapshots`, `competitive_opportunities`, `fixed_expenses`, `receivable_records`, `orders`, `warehouses`, `stock_movement_audit_events`, `stock_movement_audit_event_items`, `video_capture_sessions`, `stock_ledger_entries`, `promotion_campaigns`, `promotion_enrollments`, `ads_campaigns`, `ads_metric_snapshots`, `ads_action_suggestions`.
@@ -225,8 +265,8 @@ Cada operação Prisma passa a ser executada como um array-transaction de 2 stat
 4. ~~Rodar a suíte de testes de unidade + `tsc --noEmit` contra o código novo~~ — **feito** (ambiente com rede, fora deste sandbox): 466/466 testes passando (58 test suites), zero erros de tipagem. **Pendente**: as 2 suítes E2E do Pick & Pack contra o banco com RLS já ativa (verificação de integração real, não coberta pelos testes unitários/tsc).
 5. ~~Aplicar `2026-07-17_enable_row_level_security.sql`~~ — **feito**, contra o único Supabase existente (não há staging separado neste projeto).
 6. ~~Teste manual do "dono da tabela"/isolamento cruzado (seção 3.4)~~ — **feito**, com uma volta extra: a primeira tentativa (role `postgres`) falhou por causa do `BYPASSRLS` (seção 3.4.1), corrigido criando o role `app_runtime` (`2026-07-22_create_app_runtime_role.sql`). Repetido com `app_runtime`: **bloqueou corretamente**.
-7. **Pendente** — apontar `DATABASE_URL` do serviço `kyneti-api` no Render para `app_runtime` (hoje ainda é `postgres`) + smoke test (login/dashboard) + medir latência antes/depois nos endpoints de maior volume (sync de pedidos, DRE).
-8. **Pendente** — depois do passo 7 confirmado: liberar de volta o toggle de Ads Fase 0/novos canais, que ficou em standby até esta frente fechar. `2026-07-17_rollback_row_level_security.sql` fica pronto como botão de desfazer em qualquer ponto.
+7. ~~Apontar `DATABASE_URL` do serviço `kyneti-api` no Render para `app_runtime`~~ — **feito**, com uma segunda volta extra: o smoke test de login expôs um segundo bug real, independente do banco — `TenantContextInterceptor` perdia o contexto do `AsyncLocalStorage` por subscrever o Observable fora da janela do `.run()` (seção 3.4.2). Corrigido, redeployado, **login e dashboard confirmados funcionando em produção** (`kyneti.com.br`, conta demo). **Pendente, não-bloqueante**: medir latência antes/depois nos endpoints de maior volume (sync de pedidos, DRE).
+8. ~~Liberar de volta o toggle de Ads Fase 0/novos canais~~ — **liberado**: a prioridade #1 (isolamento multi-tenant reforçado e validado em produção) está fechada. `2026-07-17_rollback_row_level_security.sql` continua disponível como botão de desfazer, caso necessário no futuro.
 
 ## Fontes consultadas
 - [prisma/prisma-client-extensions — row-level-security](https://github.com/prisma/prisma-client-extensions/tree/main/row-level-security) (exemplo oficial do time Prisma, `forCompany`/`bypassRLS` — mesmo padrão adaptado aqui para `forTenant`/`bypassRLS`)
