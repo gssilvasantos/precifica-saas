@@ -9,10 +9,22 @@ import { RateLimiterConfig } from './rate-limiter';
 // conservadora baseada no padrão comum de APIs de e-commerce
 // (poucas requisições por segundo por loja) — DEVE ser confirmado contra a
 // documentação oficial antes de operar em produção com volume real. Os
-// demais canais (Mercado Livre, Shopee, TikTok Shop, Amazon, Magalu, SHEIN)
-// ainda não têm client implementado (ver docs/marketplace-intelligence-architecture.md,
+// demais canais (Shopee, TikTok Shop, Amazon, Magalu, SHEIN) ainda não têm
+// client implementado (ver docs/marketplace-intelligence-architecture.md,
 // seção 16) — quando existirem, cada um declara seu próprio limite real
 // aqui em vez de herdar o DEFAULT_RATE_LIMIT abaixo.
+//
+// MERCADO_LIVRE foi adicionado explicitamente (24/07/2026) depois de um
+// incidente real em produção: a primeira sincronização de pedidos de uma
+// conta com histórico de anos (ver janela de backfill em
+// order-sync-orchestrator.service.ts) paginou `/orders/search` sem NENHUM
+// throttling — MercadoLivreApiClient nunca usou este módulo, apesar dele já
+// existir desde a Etapa 17 — e levou um HTTP 429 do Mercado Livre por volta
+// da página 42 (offset 2100), derrubando a sincronização inteira (sem
+// retry, o erro simplesmente propagava e nenhum pedido era persistido,
+// mesmo os já buscados). Sem confirmação do limite oficial documentado,
+// mantido deliberadamente no DEFAULT_RATE_LIMIT (1 req/s) — conservador,
+// nunca o contrário.
 export const MARKETPLACE_RATE_LIMITS: Record<string, RateLimiterConfig> = {
   NUVEMSHOP: { requestsPerInterval: 2, intervalMs: 1000 },
 };

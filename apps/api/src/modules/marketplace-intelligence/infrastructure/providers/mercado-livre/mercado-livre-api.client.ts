@@ -1,4 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { RateLimiter } from '../../../../../shared/rate-limiting/rate-limiter';
+import { getRateLimitConfig } from '../../../../../shared/rate-limiting/marketplace-rate-limits';
+import { isRateLimitError, withRetry } from '../../../../../shared/rate-limiting/with-retry';
 
 const BASE_URL = 'https://api.mercadolibre.com';
 const SITE_ID = 'MLB'; // Brasil
@@ -51,8 +54,38 @@ export interface MlOAuthTokenResponse {
 export class MercadoLivreApiClient {
   private readonly logger = new Logger(MercadoLivreApiClient.name);
 
+  // Bug de produção (24/07/2026, ver marketplace-rate-limits.ts) — este
+  // client fazia fetch() cru em todo método, sem nenhum throttling: a
+  // primeira sincronização de uma conta com histórico de anos paginou
+  // /orders/search sem pausa nenhuma e levou um HTTP 429 na página 42,
+  // derrubando a sincronização inteira. Mesmo padrão de RateLimiter +
+  // withRetry já usado por NuvemshopApiClient desde a Etapa 17 — nunca fica
+  // "se channelCode === X" espalhado, é uma instância privada configurada
+  // com o limite deste canal (ver getRateLimitConfig).
+  private readonly rateLimiter = new RateLimiter(getRateLimitConfig('MERCADO_LIVRE'));
+
+  // Wrapper único por onde TODA chamada de rede desta classe passa —
+  // agenda através do RateLimiter (nunca excede a cota configurada) e
+  // retenta com backoff exponencial especificamente em HTTP 429 (a API
+  // pode ter um limite mais estrito que o nosso, ou outro
+  // processo/tenant consumindo a mesma cota do lado do Mercado Livre).
+  // Qualquer outro status (404/500/...) é devolvido normalmente — cada
+  // método decide como reagir, exatamente como antes.
+  private async request(url: string, init?: RequestInit): Promise<Response> {
+    return withRetry(
+      async () => {
+        const response = await this.rateLimiter.schedule(() => fetch(url, init));
+        if (response.status === 429) {
+          throw new Error(`Mercado Livre retornou HTTP 429 (rate limit) para ${url}`);
+        }
+        return response;
+      },
+      { shouldRetry: isRateLimitError },
+    );
+  }
+
   async fetchTopLevelCategories(): Promise<MlCategory[]> {
-    const response = await fetch(`${BASE_URL}/sites/${SITE_ID}/categories`);
+    const response = await this.request(`${BASE_URL}/sites/${SITE_ID}/categories`);
     if (!response.ok) {
       throw new Error(`Mercado Livre categories API retornou ${response.status}`);
     }
@@ -62,7 +95,7 @@ export class MercadoLivreApiClient {
 
   async fetchListingPrices(categoryId: string, referencePrice: number): Promise<MlListingPrice[]> {
     const url = `${BASE_URL}/sites/${SITE_ID}/listing_prices?price=${referencePrice}&category_id=${categoryId}`;
-    const response = await fetch(url);
+    const response = await this.request(url);
     if (!response.ok) {
       throw new Error(`Mercado Livre listing_prices API retornou ${response.status} para ${categoryId}`);
     }
@@ -109,7 +142,7 @@ export class MercadoLivreApiClient {
   }
 
   private async postOAuthToken(params: Record<string, string>): Promise<MlOAuthTokenResponse> {
-    const response = await fetch(`${BASE_URL}/oauth/token`, {
+    const response = await this.request(`${BASE_URL}/oauth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
       body: new URLSearchParams(params).toString(),
@@ -136,7 +169,7 @@ export class MercadoLivreApiClient {
 
     while (true) {
       const url = `${BASE_URL}/orders/search?seller=${sellerId}&offset=${offset}&limit=${limit}${sinceParam}`;
-      const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const response = await this.request(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!response.ok) {
         throw new Error(`Mercado Livre /orders/search retornou HTTP ${response.status} (offset ${offset})`);
       }
@@ -178,7 +211,7 @@ export class MercadoLivreApiClient {
   // chamadas.
   async fetchAdvertiserId(accessToken: string): Promise<string | null> {
     const url = `${BASE_URL}/advertising/advertisers?product_id=PADS&site_id=${SITE_ID}`;
-    const response = await fetch(url, {
+    const response = await this.request(url, {
       headers: { Authorization: `Bearer ${accessToken}`, 'Api-Version': '2' },
     });
     if (!response.ok) {
@@ -196,7 +229,7 @@ export class MercadoLivreApiClient {
 
     while (true) {
       const url = `${BASE_URL}/marketplace/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/campaigns/search?offset=${offset}&limit=${limit}`;
-      const response = await fetch(url, {
+      const response = await this.request(url, {
         headers: { Authorization: `Bearer ${accessToken}`, 'Api-Version': '2' },
       });
       if (!response.ok) {
@@ -223,7 +256,7 @@ export class MercadoLivreApiClient {
     const from = dateFrom.toISOString().slice(0, 10);
     const to = dateTo.toISOString().slice(0, 10);
     const url = `${BASE_URL}/marketplace/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/campaigns/metrics?date_from=${from}&date_to=${to}&metrics_summary=false&aggregation_type=daily`;
-    const response = await fetch(url, {
+    const response = await this.request(url, {
       headers: { Authorization: `Bearer ${accessToken}`, 'Api-Version': '2' },
     });
     if (!response.ok) {
@@ -247,7 +280,7 @@ export class MercadoLivreApiClient {
   // nunca automaticamente.
   async pauseCampaign(advertiserId: string, accessToken: string, externalCampaignId: string): Promise<void> {
     const url = `${BASE_URL}/marketplace/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/campaigns/${externalCampaignId}`;
-    const response = await fetch(url, {
+    const response = await this.request(url, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${accessToken}`, 'Api-Version': '2', 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'paused' }),
