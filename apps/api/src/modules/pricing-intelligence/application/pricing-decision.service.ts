@@ -7,6 +7,8 @@ import {
   InvalidPricingContextError,
   calculateFinancialFloorPrice,
   marginPctOf,
+  validatePriceAgainstMap,
+  MapPriceViolationError,
 } from '../domain/pricing-strategist';
 import {
   PRODUCT_CATALOG_READER,
@@ -22,6 +24,7 @@ import { PriceUpdateDispatcher, PriceUpdateOutcome } from '../../../shared/contr
 import { FinancialPolicyReader } from '../../../shared/contracts/financial-policy-reader.port';
 
 const FINANCIAL_FLOOR_NOTE = 'Preço ajustado para o piso financeiro por proteção de margem.';
+const MAP_FLOOR_NOTE = 'Preço ajustado para respeitar a política de MAP (Preço Mínimo Anunciado) do fornecedor.';
 
 // Resultado de aplicar (ou tentar aplicar) uma PricingDecision — vive na
 // camada de aplicação, não no domínio puro (domain/pricing-strategist.ts):
@@ -75,7 +78,7 @@ export class PricingDecisionService {
   async applyDecision(tenantId: string, skuCode: string): Promise<ApplyDecisionResult | null> {
     const resolved = await this.resolveDecision(tenantId, skuCode);
     if (!resolved) return null;
-    return this.dispatchDecision(tenantId, resolved.decision, resolved.channelCode);
+    return this.dispatchDecision(tenantId, resolved.decision, resolved.channelCode, resolved.mapPrice);
   }
 
   // Aplicação AUTOMÁTICA — usada pelo CompetitorSignalListener ao reagir a
@@ -94,13 +97,18 @@ export class PricingDecisionService {
       };
     }
 
-    return this.dispatchDecision(tenantId, resolved.decision, resolved.channelCode);
+    return this.dispatchDecision(tenantId, resolved.decision, resolved.channelCode, resolved.mapPrice);
   }
 
   private async resolveDecision(
     tenantId: string,
     skuCode: string,
-  ): Promise<{ decision: PricingDecision; channelCode: string | null; autoRepricingEnabled: boolean } | null> {
+  ): Promise<{
+    decision: PricingDecision;
+    channelCode: string | null;
+    autoRepricingEnabled: boolean;
+    mapPrice: number | null;
+  } | null> {
     const [product, opportunity, policy] = await Promise.all([
       this.catalog.findBySku(tenantId, skuCode),
       this.competitorSnapshots.findOpportunity(tenantId, skuCode),
@@ -130,6 +138,7 @@ export class PricingDecisionService {
       minProfitMargin: policy.minProfitMargin,
       competitorBestPrice: opportunity.bestCompetitorPrice,
       buyBoxStatus: opportunity.buyBoxStatus,
+      mapPrice: product.mapPrice,
     };
 
     let decision: PricingDecision;
@@ -165,10 +174,33 @@ export class PricingDecisionService {
       };
     }
 
+    // Defesa em profundidade do MAP — MESMO racional do recheck financeiro
+    // acima: é uma invariante de GOVERNANÇA (política do fornecedor, não
+    // margem interna), deve valer para QUALQUER PricingStrategist plugado.
+    // Encadeado DEPOIS do recheck financeiro de propósito — se o MAP for
+    // MAIOR que o piso financeiro já aplicado, ele vence por cima (o efeito
+    // final é o mesmo de comparar os três pisos de uma vez, sem precisar de
+    // um branch de 3 vias aqui). `product.mapPrice` é a fonte direta (não
+    // `context.mapPrice`) para nunca depender de o Strategist ter
+    // repassado o campo corretamente.
+    if (product.mapPrice !== null && decision.recommendedPrice < product.mapPrice) {
+      this.logger.warn(`SKU ${skuCode} (tenant ${tenantId}): ${MAP_FLOOR_NOTE} (${decision.recommendedPrice} -> ${product.mapPrice})`);
+      decision = {
+        ...decision,
+        recommendedPrice: product.mapPrice,
+        resultingMarginPct: marginPctOf(product.mapPrice, product.costPrice),
+        mapPrice: product.mapPrice,
+        action: 'MAP_FLOOR_APPLIED',
+        hitMapFloor: true,
+        reason: `${decision.reason} [Governança] ${MAP_FLOOR_NOTE}`,
+      };
+    }
+
     return {
       decision,
       channelCode: opportunity.channelCode,
       autoRepricingEnabled: product.autoRepricingEnabled,
+      mapPrice: product.mapPrice,
     };
   }
 
@@ -180,6 +212,7 @@ export class PricingDecisionService {
     tenantId: string,
     decision: PricingDecision,
     channelCode: string | null,
+    mapPrice: number | null,
   ): Promise<ApplyDecisionResult> {
     if (decision.recommendedPrice === decision.currentPrice) {
       return {
@@ -204,6 +237,28 @@ export class PricingDecisionService {
         applied: false,
         reason: `Nenhum anúncio encontrado no canal ${channelCode} para o SKU ${decision.skuCode} — não há externalId para aplicar o preço.`,
       };
+    }
+
+    // Gate FINAL, imediatamente antes de qualquer chamada à API de
+    // precificação (PRICE_UPDATE_DISPATCHER) — pedido explícito do usuário:
+    // "em hipótese alguma o Kyneti envia um preço abaixo do MAP". Em
+    // condições normais isto NUNCA dispara (o piso de MAP já foi aplicado
+    // duas vezes antes: dentro do PricingStrategist e na defesa em
+    // profundidade de resolveDecision) — é a última linha de defesa contra
+    // qualquer bug futuro nas duas camadas anteriores, nunca confiamos numa
+    // única camada de validação para uma invariante deste tipo.
+    try {
+      validatePriceAgainstMap(decision.skuCode, decision.recommendedPrice, mapPrice);
+    } catch (error) {
+      if (error instanceof MapPriceViolationError) {
+        this.logger.error(error.message);
+        return {
+          decision,
+          applied: false,
+          reason: error.message,
+        };
+      }
+      throw error;
     }
 
     const dispatchOutcome = await this.priceUpdateDispatcher.dispatch({

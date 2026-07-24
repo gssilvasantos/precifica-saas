@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { VideoCaptureService } from '../../application/video-capture.service';
+import { TenantContextStore } from '../../../../shared/prisma/tenant-context';
 
 // Sprint 27 (Pick & Pack) — mesmo padrão de OrdersSyncSchedulerJob: job leve
 // de @Cron que só invoca a regra de negócio (runRetentionCleanup), nunca
@@ -16,6 +17,14 @@ export class VideoRetentionCleanupJob {
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async runCleanup() {
+    // Varredura de manutenção cruzando todos os tenants por natureza (apaga
+    // vídeo vencido por data, não por conta específica) — bypass do
+    // envelope inteiro é o desenho correto aqui, não só do topo. Ver
+    // docs/row-level-security-architecture.md, seção 3.3.
+    await TenantContextStore.runAsService(() => this.runCleanupInner());
+  }
+
+  private async runCleanupInner() {
     try {
       const { deletedCount } = await this.videoCapture.runRetentionCleanup(new Date());
       if (deletedCount > 0) {

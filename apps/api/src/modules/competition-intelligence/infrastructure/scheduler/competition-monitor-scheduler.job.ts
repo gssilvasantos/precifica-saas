@@ -5,6 +5,7 @@ import {
   PROVIDER_SYNC_SCHEDULE_REPOSITORY,
   ProviderSyncScheduleRepository,
 } from '../../../../shared/sync-ops/ports/provider-sync-schedule-repository.port';
+import { TenantContextStore } from '../../../../shared/prisma/tenant-context';
 
 // Monitoramento de concorrência roda com cadência própria — mais frequente
 // que sync de catálogo (preço de concorrente muda o dia inteiro), mas ainda
@@ -22,6 +23,15 @@ export class CompetitionMonitorSchedulerJob {
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async run() {
+    // Bypass do envelope externo — ver docs/row-level-security-architecture.md,
+    // seção 3.3. CompetitionMonitorOrchestrator.runAll ainda não foi
+    // revisado para reabrir contexto por tenant internamente (item de
+    // hardening futuro, não bloqueante: hoje só garante que o job não
+    // quebra sob RLS, mesma prioridade de "não travar clientes" pedida).
+    await TenantContextStore.runAsService(() => this.runInner());
+  }
+
+  private async runInner() {
     const schedule = await this.schedules.findByProviderCode(PROVIDER_CODE);
     if (schedule && !schedule.isEnabled) return;
 

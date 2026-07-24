@@ -5,6 +5,7 @@ import {
   PROVIDER_SYNC_SCHEDULE_REPOSITORY,
   ProviderSyncScheduleRepository,
 } from '../../../../shared/sync-ops/ports/provider-sync-schedule-repository.port';
+import { TenantContextStore } from '../../../../shared/prisma/tenant-context';
 
 // Mesmo padrão de SyncSchedulerJob (Marketplace Intelligence): job leve que
 // roda periodicamente e dispara sync só para os providers de ORDERS
@@ -22,6 +23,14 @@ export class OrdersSyncSchedulerJob {
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async checkDueSchedules() {
+    // Cron não passa pelo TenantContextInterceptor — bypass do envelope
+    // externo (ver docs/row-level-security-architecture.md, seção 3.3); o
+    // loop por tenant dentro de OrderSyncOrchestrator.syncProvider reabre o
+    // contexto correto por tenant antes de tocar dado de negócio.
+    await TenantContextStore.runAsService(() => this.checkDueSchedulesInner());
+  }
+
+  private async checkDueSchedulesInner() {
     const due = await this.schedules.findDue(new Date());
     const ordersDue = due.filter((s) => s.capability === 'ORDERS');
     if (ordersDue.length === 0) return;

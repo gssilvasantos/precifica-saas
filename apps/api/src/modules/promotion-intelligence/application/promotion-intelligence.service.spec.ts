@@ -22,6 +22,7 @@ function buildProduct(overrides: Partial<ProductCatalogSummary> = {}): ProductCa
     autoRepricingEnabled: false,
     packagingId: null,
     isKit: false,
+    mapPrice: null,
     ...overrides,
   };
 }
@@ -50,7 +51,7 @@ describe('PromotionIntelligenceService', () => {
       ),
     };
     const financialPolicy: jest.Mocked<FinancialPolicyReader> = {
-      getPolicy: jest.fn().mockResolvedValue({ taxRate: 0.06, minProfitMargin: 0 } as FinancialPolicy),
+      getPolicy: jest.fn().mockResolvedValue({ taxRate: 0.06, minProfitMargin: 0, targetRoas: 3 } as FinancialPolicy),
     };
     const logistics: jest.Mocked<LogisticsCostReader> = {
       getTotalLogisticsCost: jest.fn().mockResolvedValue(logisticsCost),

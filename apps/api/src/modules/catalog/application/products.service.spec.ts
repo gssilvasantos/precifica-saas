@@ -6,6 +6,7 @@ import { PackagingRepository } from './ports/packaging-repository.port';
 import { ShippingWeightCalculator, PackageWeightResult } from '../../../shared/contracts/shipping-weight-calculator.port';
 import { Product } from '../domain/product.entity';
 import { Packaging } from '../domain/packaging.entity';
+import { ProductAuditLogService } from './product-audit-log.service';
 
 // Foco desta suíte: a interação entre Packaging e o recálculo de peso —
 // trocar SÓ a embalagem (nenhum campo físico do produto em si) precisa
@@ -22,6 +23,7 @@ describe('ProductsService (integração com Packaging)', () => {
     taxProfileId: null,
     packagingId: null,
     isKit: false,
+    mapPrice: null,
     costPrice: 60,
     desiredMarginPct: 30,
     minimumMarginPct: 20,
@@ -87,15 +89,18 @@ describe('ProductsService (integração com Packaging)', () => {
     const shippingWeight: jest.Mocked<ShippingWeightCalculator> = {
       calculate: jest.fn().mockResolvedValue(weightResult),
     };
+    const auditLog = { record: jest.fn(), listForProduct: jest.fn() } as unknown as jest.Mocked<ProductAuditLogService>;
 
-    const service = new ProductsService(products, suppliers, taxProfiles, packagings, shippingWeight);
-    return { service, products, packagings, shippingWeight };
+    const service = new ProductsService(products, suppliers, taxProfiles, packagings, shippingWeight, auditLog);
+    return { service, products, packagings, shippingWeight, auditLog };
   }
+
+  const actor = { userId: 'user-1' };
 
   it('trocar só o packagingId (nenhum campo físico) ainda dispara recálculo de peso usando as dimensões da nova embalagem', async () => {
     const { service, packagings, shippingWeight } = buildService();
 
-    await service.update('tenant-1', 'prod-1', { packagingId: 'pack-1' });
+    await service.update('tenant-1', 'prod-1', { packagingId: 'pack-1' }, actor);
 
     expect(packagings.findById).toHaveBeenCalledWith('tenant-1', 'pack-1');
     expect(shippingWeight.calculate).toHaveBeenCalledTimes(1);
@@ -111,7 +116,7 @@ describe('ProductsService (integração com Packaging)', () => {
   it('update sem tocar em nenhum campo físico nem em packagingId: não recalcula peso', async () => {
     const { service, shippingWeight } = buildService();
 
-    await service.update('tenant-1', 'prod-1', { name: 'Novo nome' });
+    await service.update('tenant-1', 'prod-1', { name: 'Novo nome' }, actor);
 
     expect(shippingWeight.calculate).not.toHaveBeenCalled();
   });
@@ -120,7 +125,7 @@ describe('ProductsService (integração com Packaging)', () => {
     const { service, packagings, shippingWeight } = buildService();
     packagings.findById.mockResolvedValueOnce(null);
 
-    await expect(service.update('tenant-1', 'prod-1', { packagingId: 'pack-inexistente' })).rejects.toThrow(
+    await expect(service.update('tenant-1', 'prod-1', { packagingId: 'pack-inexistente' }, actor)).rejects.toThrow(
       'Embalagem inválida para esta conta.',
     );
     expect(shippingWeight.calculate).not.toHaveBeenCalled();

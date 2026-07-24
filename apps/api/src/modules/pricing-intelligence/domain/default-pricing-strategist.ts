@@ -22,14 +22,18 @@ import {
 // 1) Sugestão competitiva "crua": baseada em buyBoxStatus.
 //    - LOSING: igualar o concorrente (recommendedPrice = competitorBestPrice).
 //    - WINNING ou UNKNOWN: manter o preço atual (recommendedPrice = currentPrice).
-// 2) Gate de segurança, incondicional: calcula os DOIS pisos — o de produto
-//    (minimumMarginPct) e o financeiro do tenant (taxRate + minProfitMargin)
-//    — e usa o MAIOR dos dois (o mais restritivo) como piso efetivo. Se a
-//    sugestão da fase 1 cair abaixo dele, o piso efetivo VENCE — inclusive
-//    protegendo contra o caso do preço atual já estar, por algum motivo
-//    (edição manual, dado importado), abaixo do piso. `action` identifica
-//    QUAL dos dois pisos foi o decisivo, para a mensagem ficar honesta sobre
-//    o motivo real.
+// 2) Gate de segurança, incondicional: calcula os TRÊS pisos — o de produto
+//    (minimumMarginPct), o financeiro do tenant (taxRate + minProfitMargin)
+//    e o de MAP (Product.mapPrice, quando configurado) — e usa o MAIOR dos
+//    três (o mais restritivo) como piso efetivo. Se a sugestão da fase 1
+//    cair abaixo dele, o piso efetivo VENCE — inclusive protegendo contra o
+//    caso do preço atual já estar, por algum motivo (edição manual, dado
+//    importado), abaixo do piso. `action` identifica QUAL dos três pisos foi
+//    o decisivo, para a mensagem ficar honesta sobre o motivo real. MAP
+//    vence empate com os outros dois de propósito: furar a política do
+//    fornecedor é uma questão contratual/legal, não só de margem interna —
+//    ver validatePriceAgainstMap (gate final, independente deste, chamado
+//    por PricingDecisionService antes de qualquer chamada ao marketplace).
 @Injectable()
 export class DefaultPricingStrategist implements PricingStrategist {
   calculateOptimalPrice(context: PricingContext): PricingDecision {
@@ -37,7 +41,8 @@ export class DefaultPricingStrategist implements PricingStrategist {
 
     const safetyFloorPrice = calculateSafetyFloorPrice(context.costPrice, context.minimumMarginPct);
     const financialFloorPrice = calculateFinancialFloorPrice(context.costPrice, context.taxRate, context.minProfitMargin);
-    const effectiveFloorPrice = Math.max(safetyFloorPrice, financialFloorPrice);
+    const mapPrice = context.mapPrice;
+    const effectiveFloorPrice = Math.max(safetyFloorPrice, financialFloorPrice, mapPrice ?? -Infinity);
 
     const { rawPrice, rawAction, rawReason } = this.suggestRaw(context);
 
@@ -49,9 +54,17 @@ export class DefaultPricingStrategist implements PricingStrategist {
     let reason = rawReason;
     let hitSafetyFloor = false;
     let hitFinancialFloor = false;
+    let hitMapFloor = false;
 
     if (hitFloor) {
-      if (financialFloorIsStricter) {
+      if (mapPrice !== null && effectiveFloorPrice === mapPrice) {
+        action = 'MAP_FLOOR_APPLIED';
+        hitMapFloor = true;
+        reason =
+          `${rawReason} Isso furaria o Preço Mínimo Anunciado (MAP) definido pelo fornecedor ` +
+          `(${mapPrice.toFixed(2)}) — preço ajustado para respeitar a política de MAP (${recommendedPrice.toFixed(2)}) ` +
+          `em vez de ${rawPrice.toFixed(2)}.`;
+      } else if (financialFloorIsStricter) {
         action = 'FINANCIAL_FLOOR_APPLIED';
         hitFinancialFloor = true;
         reason =
@@ -75,6 +88,8 @@ export class DefaultPricingStrategist implements PricingStrategist {
       financialFloorPrice: round2(financialFloorPrice),
       hitSafetyFloor,
       hitFinancialFloor,
+      mapPrice,
+      hitMapFloor,
       reason,
     };
   }

@@ -12,6 +12,10 @@ import ConfiguracoesFiscaisPage from './routes/ConfiguracoesFiscaisPage';
 import AbastecimentoPage from './routes/AbastecimentoPage';
 import ConferenciaPage from './routes/ConferenciaPage';
 import ConferenciaDetalhePage from './routes/ConferenciaDetalhePage';
+import AdsPage from './routes/AdsPage';
+import MapGovernancePage from './routes/MapGovernancePage';
+import PromotionsPage from './routes/PromotionsPage';
+import PromotionCampaignDetailPage from './routes/PromotionCampaignDetailPage';
 
 export default function App() {
   return (
@@ -23,6 +27,7 @@ export default function App() {
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/pedidos" element={<OrdersPage />} />
+            <Route path="/ads" element={<AdsPage />} />
             <Route path="/catalogo" element={<CatalogPage />} />
             {/* /produtos (sem id) cai no primeiro produto — ver useEffect em ProductPricingPage */}
             <Route path="/produtos" element={<ProductPricingPage />} />
@@ -32,6 +37,9 @@ export default function App() {
             <Route path="/abastecimento" element={<AbastecimentoPage />} />
             <Route path="/conferencia" element={<ConferenciaPage />} />
             <Route path="/conferencia/:eventId" element={<ConferenciaDetalhePage />} />
+            <Route path="/governanca-map" element={<MapGovernancePage />} />
+            <Route path="/promocoes" element={<PromotionsPage />} />
+            <Route path="/promocoes/:campaignId" element={<PromotionCampaignDetailPage />} />
             <Route path="/configuracoes-fiscais" element={<ConfiguracoesFiscaisPage />} />
             <Route path="/" element={<Navigate to="/catalogo" replace />} />
           </Route>

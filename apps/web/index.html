@@ -10,8 +10,24 @@
       href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      // Aplica a classe `.dark` no <html> ANTES do React montar — evita o
+      // "flash" de Light Mode em cada reload (padrão FOUC de dark mode via
+      // classe). Dark é o tema padrão da marca (ver
+      // src/features/theme/theme-context.tsx): só vira light se o usuário já
+      // tiver trocado explicitamente antes (localStorage).
+      (function () {
+        try {
+          var saved = localStorage.getItem('kyneti-theme');
+          var theme = saved === 'light' ? 'light' : 'dark';
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-canvas text-ink-900">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

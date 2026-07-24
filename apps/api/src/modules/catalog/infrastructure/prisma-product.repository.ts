@@ -52,12 +52,17 @@ export class PrismaProductRepository implements ProductRepository {
   // Converte o Decimal do Prisma para number na borda — o domínio não precisa
   // saber que a persistência usa um tipo decimal de banco.
   private toDomain(
-    record: Record<string, unknown> & { costPrice: { toString(): string }; erpSalePrice: { toString(): string } | null },
+    record: Record<string, unknown> & {
+      costPrice: { toString(): string };
+      erpSalePrice: { toString(): string } | null;
+      mapPrice: { toString(): string } | null;
+    },
   ): Product {
     return {
       ...record,
       costPrice: Number(record.costPrice),
       erpSalePrice: record.erpSalePrice !== null ? Number(record.erpSalePrice) : null,
+      mapPrice: record.mapPrice !== null ? Number(record.mapPrice) : null,
     } as Product;
   }
 }

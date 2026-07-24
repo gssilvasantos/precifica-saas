@@ -17,6 +17,7 @@ import {
 import { PRODUCT_CATALOG_READER } from '../../../shared/contracts/tokens';
 import { ProductCatalogReader } from '../../../shared/contracts/product-catalog-reader.port';
 import { ALERT_SERVICE, AlertService } from '../../../shared/observability/ports/alert-service.port';
+import { TenantContextStore } from '../../../shared/prisma/tenant-context';
 
 // Pipeline por provider: Fetch (paginação já resolvida DENTRO do adapter,
 // ver marketplace-provider.contract.ts) -> Resolver SKU interno por item
@@ -57,9 +58,12 @@ export class OrderSyncOrchestrator {
       return;
     }
 
-    const tenantIds = await provider.listTenantIdsToSync();
+    // Bypass estreito só para descobrir quais tenants este provider atende —
+    // cada tenant reabre seu próprio contexto antes de tocar dado de pedido
+    // (ver docs/row-level-security-architecture.md, seção 3.3).
+    const tenantIds = await TenantContextStore.runAsService(() => provider.listTenantIdsToSync!());
     for (const tenantId of tenantIds) {
-      await this.syncTenant(provider.code, provider.marketplaceCode, tenantId, provider);
+      await TenantContextStore.run(tenantId, () => this.syncTenant(provider.code, provider.marketplaceCode, tenantId, provider));
     }
   }
 

@@ -34,6 +34,11 @@ export interface ProductCatalogSummary {
   // de Agrupamento" de kit. Aditivo, mesmo racional do resto do arquivo.
   packagingId: string | null;
   isKit: boolean;
+  // Política de Preço Mínimo Anunciado (MAP, Product.mapPrice) — piso
+  // definido pelo fornecedor/marca, não calculado a partir de custo/margem
+  // como os campos acima. null = sem restrição MAP para este SKU. Ver
+  // domain/pricing-strategist.ts (PricingContext.mapPrice/validatePriceAgainstMap).
+  mapPrice: number | null;
 }
 
 export interface ProductCatalogReader {

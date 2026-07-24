@@ -49,6 +49,17 @@ export class CreateProductDto {
   @IsBoolean()
   autoRepricingEnabled?: boolean;
 
+  // Política de Preço Mínimo Anunciado (MAP) — piso definido pelo
+  // fornecedor/marca, ver docs/map-price-governance-architecture.md.
+  // Aceita `null` explícito para limpar a restrição (ver product-audit.ts,
+  // diffGovernanceFields) — @IsOptional() do class-validator trata `null`
+  // como valor "vazio" e pula as demais validações desta propriedade,
+  // deixando o `null` passar direto para o service.
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  mapPrice?: number | null;
+
   @IsNumber()
   @IsPositive()
   weightKg!: number;

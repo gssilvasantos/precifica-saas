@@ -52,6 +52,7 @@ export class CatalogReaderService implements ProductCatalogReader, PackagingLink
       autoRepricingEnabled: product.autoRepricingEnabled,
       packagingId: product.packagingId,
       isKit: product.isKit,
+      mapPrice: product.mapPrice,
     };
   }
 

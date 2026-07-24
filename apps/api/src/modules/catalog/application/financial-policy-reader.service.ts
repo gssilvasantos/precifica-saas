@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { CatalogSettingsService } from './catalog-settings.service';
 import { CATALOG_SETTINGS_EVENTS, FinancialPolicyUpdatedEvent } from '../domain/catalog-settings-events';
-import { FinancialPolicy, FinancialPolicyReader } from '../../../shared/contracts/financial-policy-reader.port';
+import { DEFAULT_TARGET_ROAS, FinancialPolicy, FinancialPolicyReader } from '../../../shared/contracts/financial-policy-reader.port';
 
 // Resposta à pergunta "como buscar isso de forma eficiente sem consulta
 // pesada a cada cálculo": CatalogSettings já é uma linha por tenant (lookup
@@ -49,8 +49,15 @@ export class FinancialPolicyReaderService implements FinancialPolicyReader {
       return cached.policy;
     }
 
-    const { taxRatePct, minProfitMarginPct } = await this.settingsService.getFinancialPolicy(tenantId);
-    const policy: FinancialPolicy = { taxRate: taxRatePct / 100, minProfitMargin: minProfitMarginPct / 100 };
+    const { taxRatePct, minProfitMarginPct, targetRoas } = await this.settingsService.getFinancialPolicy(tenantId);
+    // targetRoas é o único campo desta política que NÃO é percentual-para-fração
+    // (já é um múltiplo, ex. 3 = "3x o gasto") — só o fallback acontece aqui,
+    // nenhuma conversão de unidade.
+    const policy: FinancialPolicy = {
+      taxRate: taxRatePct / 100,
+      minProfitMargin: minProfitMarginPct / 100,
+      targetRoas: targetRoas ?? DEFAULT_TARGET_ROAS,
+    };
     this.cache.set(tenantId, { policy, expiresAt: Date.now() + CACHE_TTL_MS });
     return policy;
   }

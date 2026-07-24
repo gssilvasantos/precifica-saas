@@ -18,6 +18,7 @@ function buildProduct(overrides: Partial<ProductCatalogSummary> = {}): ProductCa
     autoRepricingEnabled: false,
     packagingId: 'pack-1',
     isKit: false,
+    mapPrice: null,
     ...overrides,
   };
 }

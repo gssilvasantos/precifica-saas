@@ -13,6 +13,14 @@ export enum ProviderCapability {
   PRICE_UPDATE = 'PRICE_UPDATE',
   // Hub de pedidos multicanal (ver OrderCapableProvider, docs/orders-architecture.md).
   ORDERS = 'ORDERS',
+  // Módulo de Ads multicanal, Fase 1 (ver AdsCapableProvider,
+  // docs/marketplace-ads-architecture.md).
+  ADS = 'ADS',
+  // Módulo de Ads multicanal, Fase 3 — ações de ESCRITA (ver
+  // AdsActionCapableProvider, docs/marketplace-ads-architecture.md, seção 12).
+  // Capacidade separada de ADS (Interface Segregation): um provider pode ler
+  // campanhas sem necessariamente saber executar uma ação sobre elas.
+  ADS_ACTIONS = 'ADS_ACTIONS',
 }
 
 export interface RawRuleCandidate {
@@ -195,4 +203,72 @@ export function isPriceUpdateCapable(p: MarketplaceProvider): p is PriceUpdateCa
 
 export function isOrderCapable(p: MarketplaceProvider): p is OrderCapableProvider {
   return p.capabilities.includes(ProviderCapability.ORDERS);
+}
+
+// --- Módulo de Ads multicanal (Fase 1, escopo Mercado Livre — ver
+// docs/marketplace-ads-architecture.md). Mesmo racional de RawOrderCandidate:
+// o adapter concreto (MercadoLivreAdsProvider) é o ÚNICO lugar que conhece o
+// formato bruto do canal; devolve os dois candidatos já normalizados.
+// Granularidade de campanha (não ad-group/ad individual) de propósito no
+// MVP — ver seção 2 do doc.
+//
+// Deliberadamente SEM `revenueOrganic`/TACOS aqui: nenhuma API de Ads de
+// marketplace devolve "receita orgânica" (é uma métrica DERIVADA, não um
+// fato do canal) — o TACOS é calculado no application layer
+// (AdsInsightsService) combinando `spend` daqui com a receita total do
+// tenant no período, vinda de ORDER_FINANCIALS_READER (já existe, é a MESMA
+// porta que alimenta o DRE — nunca duplicar essa fonte).
+export interface RawAdsCampaignCandidate {
+  externalCampaignId: string; // id da campanha no marketplace
+  name: string;
+  status: 'ACTIVE' | 'PAUSED' | 'ENDED' | 'UNKNOWN'; // já traduzido pelo adapter
+  dailyBudget: number | null;
+}
+
+export interface RawAdsMetricCandidate {
+  externalCampaignId: string;
+  periodDate: Date; // granularidade diária — mesma janela que a maioria das APIs de ads reporta
+  spend: number;
+  revenueAds: number; // vendas atribuídas ao anúncio pelo próprio marketplace
+  clicks: number;
+  impressions: number;
+}
+
+export interface AdsCapableProvider extends MarketplaceProvider {
+  fetchAdsCampaigns(ctx: FetchContext): Promise<RawAdsCampaignCandidate[]>;
+  // dateFrom/dateTo: a maioria das APIs de ads limita a janela de métricas
+  // (ex.: Mercado Livre limita a 90 dias) — quem decide a janela é o
+  // orquestrador (AdsSyncOrchestrator), o provider só respeita o que
+  // recebeu; se o canal tiver um limite menor, o adapter deve lançar erro
+  // explícito, nunca truncar silenciosamente.
+  fetchAdsMetrics(ctx: FetchContext, dateFrom: Date, dateTo: Date): Promise<RawAdsMetricCandidate[]>;
+}
+
+export function isAdsCapable(p: MarketplaceProvider): p is AdsCapableProvider {
+  return p.capabilities.includes(ProviderCapability.ADS);
+}
+
+// --- Ações de escrita em Ads (Fase 3 — Safety Lock, ver
+// docs/marketplace-ads-architecture.md, seção 12). Mesmo racional de
+// PriceUpdateCapableProvider: capacidade de ESCRITA separada da capacidade
+// de leitura (ADS) — Interface Segregation, um provider pode ler campanhas
+// sem necessariamente saber executar uma ação sobre elas.
+//
+// Único método no MVP: pausar uma campanha. É a única recomendação
+// ACIONÁVEL que classifyCampaignHealth já dá para CUSTO_PERDIDO ("candidata
+// a pausar") — ajustar orçamento (reduzir X%) exigiria uma heurística nova,
+// mais especulativa, fora do escopo desta fatia. Quem decide QUANDO chamar
+// isto nunca é o provider: é o AdsActionDispatcherService, e só depois de
+// confirmação explícita do usuário (o "Safety Lock" em si).
+export interface AdsActionResult {
+  success: boolean;
+  message?: string;
+}
+
+export interface AdsActionCapableProvider extends MarketplaceProvider {
+  pauseCampaign(ctx: FetchContext, externalCampaignId: string): Promise<AdsActionResult>;
+}
+
+export function isAdsActionCapable(p: MarketplaceProvider): p is AdsActionCapableProvider {
+  return p.capabilities.includes(ProviderCapability.ADS_ACTIONS);
 }

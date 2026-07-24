@@ -1,5 +1,13 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+// Import direto do runtime, não de `Prisma.PrismaClientKnownRequestError`
+// (typeof Prisma) — este projeto roda em sandboxes onde `prisma generate`
+// às vezes não executa (rede bloqueada), e nesse cenário o client gerado
+// (`@prisma/client/index.d.ts`) fica com um stub incompleto que não
+// reexporta `PrismaClientKnownRequestError` no namespace `Prisma`. A classe
+// de erro em si vive em `@prisma/client/runtime/library`, que é parte do
+// pacote publicado (não do output do `generate`), então este import
+// funciona mesmo sem o client ter sido gerado nesta máquina.
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { PRODUCT_REPOSITORY, ProductRepository } from './ports/product-repository.port';
 import { SUPPLIER_REPOSITORY, SupplierRepository } from './ports/supplier-repository.port';
 import { TAX_PROFILE_REPOSITORY, TaxProfileRepository } from './ports/tax-profile-repository.port';
@@ -9,7 +17,9 @@ import { ShippingWeightCalculator } from '../../../shared/contracts/shipping-wei
 import { assertMarginsAreConsistent, InconsistentMarginError } from '../domain/margin-rules';
 import { assertEditableFields, LockedFieldEditError } from '../domain/product-ownership-rules';
 import { resolveShippingDimensions } from '../domain/shipping-dimensions-resolver';
+import { diffGovernanceFields, ProductAuditSource } from '../domain/product-audit';
 import { Packaging } from '../domain/packaging.entity';
+import { ProductAuditLogService } from './product-audit-log.service';
 
 export interface CreateProductInput {
   skuCode: string;
@@ -22,6 +32,9 @@ export interface CreateProductInput {
   desiredMarginPct: number;
   minimumMarginPct: number;
   autoRepricingEnabled?: boolean;
+  // Política de Preço Mínimo (MAP) — ver domain/product-audit.ts e
+  // prisma/schema.prisma (model Product). undefined/null = sem restrição.
+  mapPrice?: number | null;
   weightKg: number;
   packagingWeightKg?: number;
   lengthCm: number;
@@ -31,6 +44,17 @@ export interface CreateProductInput {
 
 export type UpdateProductInput = Partial<CreateProductInput>;
 
+// Quem está fazendo a mudança — obrigatório em update() porque toda
+// alteração de campo de governança (mapPrice) precisa de um autor
+// identificável na trilha de auditoria (ProductAuditLogService). source
+// default 'MANUAL' cobre o caminho de sempre (PATCH /products/:id);
+// BulkMapPriceImportService passa 'BULK_IMPORT' explicitamente — MESMO
+// método, MESMO hook de auditoria, só a origem muda.
+export interface ProductUpdateActor {
+  userId: string;
+  source?: ProductAuditSource;
+}
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -39,6 +63,7 @@ export class ProductsService {
     @Inject(TAX_PROFILE_REPOSITORY) private readonly taxProfiles: TaxProfileRepository,
     @Inject(PACKAGING_REPOSITORY) private readonly packagings: PackagingRepository,
     @Inject(SHIPPING_WEIGHT_CALCULATOR) private readonly shippingWeight: ShippingWeightCalculator,
+    private readonly auditLog: ProductAuditLogService,
   ) {}
 
   async create(tenantId: string, input: CreateProductInput) {
@@ -73,6 +98,7 @@ export class ProductsService {
         desiredMarginPct: input.desiredMarginPct,
         minimumMarginPct: input.minimumMarginPct,
         autoRepricingEnabled: input.autoRepricingEnabled,
+        mapPrice: input.mapPrice ?? null,
         weightKg: input.weightKg,
         packagingWeightKg: input.packagingWeightKg ?? 0,
         lengthCm: input.lengthCm,
@@ -97,7 +123,7 @@ export class ProductsService {
     return product;
   }
 
-  async update(tenantId: string, id: string, input: UpdateProductInput) {
+  async update(tenantId: string, id: string, input: UpdateProductInput, actor: ProductUpdateActor) {
     const current = await this.findOne(tenantId, id);
 
     // Etapa 5 — produto espelhado do Olist: campos físicos/comerciais só
@@ -147,8 +173,16 @@ export class ProductsService {
       );
     }
 
+    // Diff de campos de GOVERNANÇA (hoje só mapPrice) calculado ANTES do
+    // update — compara o valor ATUAL persistido contra o input recebido.
+    // Feito antes, não depois, para nunca gravar um "oldValue" que já
+    // reflete o próprio update (a comparação precisa ser sempre
+    // antes-vs-depois, não depois-vs-depois).
+    const auditEntries = diffGovernanceFields(current, input);
+
+    let updated;
     try {
-      return await this.products.update(id, {
+      updated = await this.products.update(id, {
         ...input,
         ...(weights
           ? {
@@ -161,6 +195,15 @@ export class ProductsService {
     } catch (error) {
       throw this.translateError(error);
     }
+
+    // Auditoria só é gravada DEPOIS que o update persistiu com sucesso —
+    // nunca queremos um registro de auditoria "órfão" descrevendo uma
+    // mudança que na verdade falhou (ex.: violação de unique constraint).
+    if (auditEntries.length > 0) {
+      await this.auditLog.record(tenantId, auditEntries, { userId: actor.userId, source: actor.source ?? 'MANUAL' });
+    }
+
+    return updated;
   }
 
   async remove(tenantId: string, id: string) {
@@ -200,7 +243,7 @@ export class ProductsService {
   }
 
   private translateError(error: unknown) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+    if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
       return new ConflictException('Já existe um produto com esse SKU nesta conta.');
     }
     return error;

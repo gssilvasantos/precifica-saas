@@ -41,16 +41,26 @@ export class CatalogSettingsService {
   // porta shared/contracts/financial-policy-reader.port.ts) — não por
   // controller HTTP diretamente (ver CatalogSettingsController para a rota
   // GET equivalente).
-  async getFinancialPolicy(tenantId: string): Promise<{ taxRatePct: number; minProfitMarginPct: number }> {
+  //
+  // targetRoas sai CRU aqui (number | null, sem fallback) — quem resolve
+  // para DEFAULT_TARGET_ROAS quando o tenant não configurou é
+  // FinancialPolicyReaderService (shared/contracts/financial-policy-reader.port.ts),
+  // nunca este método: mesma disciplina de "o dado bruto e a política
+  // resolvida são coisas diferentes" já usada para taxRatePct/minProfitMarginPct
+  // (0 por padrão) vs. a fração que o Pricing Intelligence de fato consome.
+  async getFinancialPolicy(
+    tenantId: string,
+  ): Promise<{ taxRatePct: number; minProfitMarginPct: number; targetRoas: number | null }> {
     const record = await this.settings.findByTenant(tenantId);
     return {
       taxRatePct: record?.taxRatePct ?? DEFAULT_TAX_RATE_PCT,
       minProfitMarginPct: record?.minProfitMarginPct ?? DEFAULT_MIN_PROFIT_MARGIN_PCT,
+      targetRoas: record?.targetRoas ?? null,
     };
   }
 
-  async updateFinancialPolicy(tenantId: string, taxRatePct: number, minProfitMarginPct: number) {
-    const result = await this.settings.upsertFinancialPolicy(tenantId, taxRatePct, minProfitMarginPct);
+  async updateFinancialPolicy(tenantId: string, taxRatePct: number, minProfitMarginPct: number, targetRoas?: number) {
+    const result = await this.settings.upsertFinancialPolicy(tenantId, taxRatePct, minProfitMarginPct, targetRoas);
     // Avisa quem cacheia (FinancialPolicyReaderService) que o valor mudou —
     // sem isso, a mudança só valeria depois do TTL do cache expirar (ver
     // seção 8 do doc de arquitetura para o racional de ter um cache aqui).

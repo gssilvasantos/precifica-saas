@@ -33,6 +33,7 @@ describe('CatalogReaderService (custo efetivo com Packaging)', () => {
     sourceSystem: 'MANUAL',
     externalId: null,
     isActive: true,
+    mapPrice: null,
   } as unknown as Product;
 
   const packaging: Packaging = {

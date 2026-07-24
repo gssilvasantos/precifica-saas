@@ -20,6 +20,7 @@ import {
 import { computeContentHash } from '../../../shared/domain/content-hash';
 import { RULE_PAYLOAD_VALIDATORS } from '../domain/rule-payload-validators';
 import { MarketplaceProviderRegistry } from './marketplace-provider-registry.service';
+import { TenantContextStore } from '../../../shared/prisma/tenant-context';
 
 const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = [2000, 8000, 32000];
@@ -58,14 +59,27 @@ export class RuleSyncOrchestrator {
     // dado global (ex.: Mercado Livre) não implementam isso: uma única
     // passada, tenantId null, comportamento idêntico ao de antes desta
     // extensão (ver docs/erp-integration-architecture.md, seção Nuvemshop).
-    const tenantIds: (string | null)[] = provider.listTenantIdsToSync ? await provider.listTenantIdsToSync() : [null];
+    // Descoberta de tenants é bypass estreito (ver
+    // docs/row-level-security-architecture.md, seção 3.3). MarketplaceRule
+    // é a tabela especial com tenantId nullable: tenantId null = regra
+    // global (ex.: Mercado Livre), escrita sob bypass; tenantId preenchido =
+    // override por tenant (ex.: NuvemshopFeeRuleProvider), escrita sob o
+    // contexto daquele tenant.
+    const tenantIds: (string | null)[] = provider.listTenantIdsToSync
+      ? await TenantContextStore.runAsService(() => provider.listTenantIdsToSync!())
+      : [null];
     if (tenantIds.length === 0) {
       this.logger.log(`Provider ${providerCode} não tem nenhum tenant elegível para sync agora — nada a fazer.`);
       return;
     }
 
     for (const tenantId of tenantIds) {
-      await this.runSyncPass(providerCode, provider, feeProvider, schedule?.autoTrust ?? false, tenantId);
+      const run = () => this.runSyncPass(providerCode, provider, feeProvider, schedule?.autoTrust ?? false, tenantId);
+      if (tenantId) {
+        await TenantContextStore.run(tenantId, run);
+      } else {
+        await TenantContextStore.runAsService(run);
+      }
     }
 
     if (schedule) await this.schedules.markRun(schedule.id, 'SUCCESS', new Date());

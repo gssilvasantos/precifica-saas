@@ -2,9 +2,77 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+   Tokens semânticos shadcn/ui — "R G B" espaço-separado (sem função rgb()
+   aqui, ela entra só no Tailwind config: rgb(var(--x) / <alpha-value>)) para
+   os modificadores de opacidade (bg-primary/60 etc.) funcionarem.
+
+   Dark é o tema PADRÃO da marca (pedido explícito do usuário — "tecnológico"
+   é o padrão, não uma preferência de SO), por isso `.dark` é aplicada por
+   padrão no <html> antes do React montar (ver index.html +
+   features/theme/theme-context.tsx) — `:root` sozinho (sem `.dark`) só é
+   usado quando o usuário troca explicitamente para Light Mode.
+   ============================================================================ */
+
+:root {
+  /* Light Mode — alternativa ao padrão, mesma base grafite + neon, só que
+     sobre canvas/superfície claros (paleta original da Etapa 18). */
+  --background: 248 249 250;       /* canvas */
+  --foreground: 26 26 30;          /* ink-900 */
+  --card: 255 255 255;             /* surface */
+  --card-foreground: 26 26 30;
+  --popover: 255 255 255;
+  --popover-foreground: 26 26 30;
+  --primary: 26 26 30;             /* chumbo — base da marca em ambos os temas */
+  --primary-foreground: 255 255 255;
+  --secondary: 244 244 246;
+  --secondary-foreground: 26 26 30;
+  --muted: 244 244 246;
+  --muted-foreground: 113 113 122; /* ink-500 */
+  --accent: 0 240 255;             /* neon — destaque, nunca fundo padrão */
+  --accent-foreground: 26 26 30;
+  --destructive: 239 68 68;
+  --destructive-foreground: 255 255 255;
+  --border: 212 212 216;           /* ink-300 */
+  --input: 212 212 216;
+  --ring: 0 240 255;               /* neon — anel de foco, igual nos 2 temas */
+  --radius: 0.75rem;
+}
+
+.dark {
+  /* Dark Mode — "Dashboard de Inteligência": grafite profundo como base,
+     azul neon só como destaque (foco, indicador ativo, glow de KPI, acento
+     de gráfico). `primary` aqui é um neutro claro de alto contraste, não
+     neon — neon em todo botão vira "vitrine de loja", não "sério e
+     tecnológico", que foi o pedido. */
+  --background: 13 13 15;          /* ink-950 — grafite profundo */
+  --foreground: 244 244 246;
+  --card: 26 26 30;                /* ink-900 — leve elevação sobre o fundo */
+  --card-foreground: 244 244 246;
+  --popover: 26 26 30;
+  --popover-foreground: 244 244 246;
+  --primary: 244 244 246;          /* quase branco — alto contraste sobre grafite */
+  --primary-foreground: 13 13 15;
+  --secondary: 39 39 44;           /* ink-800 */
+  --secondary-foreground: 244 244 246;
+  --muted: 39 39 44;
+  --muted-foreground: 161 161 170;
+  --accent: 0 240 255;             /* neon — mesmo tom nos 2 temas */
+  --accent-foreground: 244 244 246;
+  --destructive: 248 113 113;      /* vermelho mais claro — contraste sobre grafite */
+  --destructive-foreground: 13 13 15;
+  --border: 63 63 70;              /* ink-700 */
+  --input: 63 63 70;
+  --ring: 0 240 255;
+  --radius: 0.75rem;
+}
+
 @layer base {
+  * {
+    @apply border-border;
+  }
   body {
-    @apply antialiased;
+    @apply antialiased bg-background text-foreground transition-colors duration-200;
   }
   h1, h2, h3, .font-display {
     @apply font-serif tracking-tight;

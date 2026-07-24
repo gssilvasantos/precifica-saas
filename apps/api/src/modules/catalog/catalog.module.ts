@@ -8,6 +8,8 @@ import { CatalogReaderService } from './application/catalog-reader.service';
 import { FinancialPolicyReaderService } from './application/financial-policy-reader.service';
 import { PackagingsService } from './application/packaging.service';
 import { PackagingUsageEventsService } from './application/packaging-usage-event.service';
+import { ProductAuditLogService } from './application/product-audit-log.service';
+import { BulkMapPriceImportService } from './application/bulk-map-price-import.service';
 import { ProductsController } from './interface/controllers/products.controller';
 import { SuppliersController } from './interface/controllers/suppliers.controller';
 import { TaxProfilesController } from './interface/controllers/tax-profiles.controller';
@@ -20,12 +22,14 @@ import { PrismaTaxProfileRepository } from './infrastructure/prisma-tax-profile.
 import { PrismaCatalogSettingsRepository } from './infrastructure/prisma-catalog-settings.repository';
 import { PrismaPackagingRepository } from './infrastructure/prisma-packaging.repository';
 import { PrismaPackagingUsageEventRepository } from './infrastructure/prisma-packaging-usage-event.repository';
+import { PrismaProductAuditLogRepository } from './infrastructure/prisma-product-audit-log.repository';
 import { PRODUCT_REPOSITORY } from './application/ports/product-repository.port';
 import { SUPPLIER_REPOSITORY } from './application/ports/supplier-repository.port';
 import { TAX_PROFILE_REPOSITORY } from './application/ports/tax-profile-repository.port';
 import { CATALOG_SETTINGS_REPOSITORY } from './application/ports/catalog-settings-repository.port';
 import { PACKAGING_REPOSITORY } from './application/ports/packaging-repository.port';
 import { PACKAGING_USAGE_EVENT_REPOSITORY } from './application/ports/packaging-usage-event-repository.port';
+import { PRODUCT_AUDIT_LOG_REPOSITORY } from './application/ports/product-audit-log-repository.port';
 import { LogisticsIntelligenceModule } from '../logistics-intelligence/logistics-intelligence.module';
 import {
   PRODUCT_CATALOG_WRITER,
@@ -57,12 +61,18 @@ import {
     FinancialPolicyReaderService,
     PackagingsService,
     PackagingUsageEventsService,
+    // Política de Preço Mínimo (MAP) — trilha de auditoria de campos de
+    // governança do Product, consumida por ProductsService.update e pelo
+    // import em massa (ver product-audit-log.service.ts).
+    ProductAuditLogService,
+    BulkMapPriceImportService,
     { provide: PRODUCT_REPOSITORY, useClass: PrismaProductRepository },
     { provide: SUPPLIER_REPOSITORY, useClass: PrismaSupplierRepository },
     { provide: TAX_PROFILE_REPOSITORY, useClass: PrismaTaxProfileRepository },
     { provide: CATALOG_SETTINGS_REPOSITORY, useClass: PrismaCatalogSettingsRepository },
     { provide: PACKAGING_REPOSITORY, useClass: PrismaPackagingRepository },
     { provide: PACKAGING_USAGE_EVENT_REPOSITORY, useClass: PrismaPackagingUsageEventRepository },
+    { provide: PRODUCT_AUDIT_LOG_REPOSITORY, useClass: PrismaProductAuditLogRepository },
     // Exporta a PORTA (token), nunca a classe concreta — o erp-integration só
     // vai conhecer PRODUCT_CATALOG_WRITER + a interface ProductCatalogWriter.
     { provide: PRODUCT_CATALOG_WRITER, useExisting: CatalogSyncWriterService },

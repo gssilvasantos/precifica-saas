@@ -38,6 +38,6 @@ export class CatalogSettingsController {
   @Roles(UserRole.ADMIN)
   @Put('financial-policy')
   updateFinancialPolicy(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateFinancialPolicyDto) {
-    return this.settings.updateFinancialPolicy(user.tenantId, dto.taxRatePct, dto.minProfitMarginPct);
+    return this.settings.updateFinancialPolicy(user.tenantId, dto.taxRatePct, dto.minProfitMarginPct, dto.targetRoas);
   }
 }

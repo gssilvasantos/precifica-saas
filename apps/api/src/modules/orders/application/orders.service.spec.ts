@@ -104,6 +104,7 @@ describe('OrdersService', () => {
         autoRepricingEnabled: false,
         packagingId: null,
         isKit: false,
+        mapPrice: null,
       });
 
       const summary = await service.getMarginSummary('tenant-1', 'order-1');
@@ -132,6 +133,7 @@ describe('OrdersService', () => {
         autoRepricingEnabled: false,
         packagingId: null,
         isKit: false,
+        mapPrice: null,
       });
 
       await service.getMarginSummary('tenant-1', 'order-1');
@@ -192,6 +194,7 @@ describe('OrdersService', () => {
         autoRepricingEnabled: false,
         packagingId: null,
         isKit: false,
+        mapPrice: null,
       });
 
       const lines = await service.listForPeriod('tenant-1');

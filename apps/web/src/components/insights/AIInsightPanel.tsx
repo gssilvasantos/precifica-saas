@@ -1,6 +1,7 @@
 import type { SVGProps } from 'react';
 import type { AIInsight } from '../../features/insights/types';
 import { SEVERITY_META } from '../../features/insights/severity-meta';
+import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
 
 interface Props {
   insights: AIInsight[];
@@ -14,40 +15,41 @@ interface Props {
 // dado real (mesmo padrão de honestidade usado em todo o resto do produto).
 export default function AIInsightPanel({ insights }: Props) {
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-card">
-      <div className="mb-3 flex items-center gap-2">
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-neon/15 text-ink-900">
+    <Card>
+      <CardHeader className="flex-row items-center gap-2 space-y-0">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/15 text-accent">
           <SparkIcon className="h-3.5 w-3.5" />
         </span>
-        <h2 className="font-serif text-base font-semibold text-ink-900">Sugestões de IA</h2>
-      </div>
+        <CardTitle>Sugestões de IA</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {insights.length === 0 && (
+          <p className="rounded-lg bg-muted px-4 py-6 text-center text-xs text-muted-foreground">
+            Nenhuma sugestão ainda — este painel está pronto para receber recomendações (estoque, reprecificação,
+            canais em risco) assim que o motor de inteligência estiver conectado.
+          </p>
+        )}
 
-      {insights.length === 0 && (
-        <p className="rounded-lg bg-canvas px-4 py-6 text-center text-xs text-ink-500">
-          Nenhuma sugestão ainda — este painel está pronto para receber recomendações (estoque, reprecificação,
-          canais em risco) assim que o motor de inteligência estiver conectado.
-        </p>
-      )}
-
-      {insights.length > 0 && (
-        <ul className="space-y-3">
-          {insights.map((insight) => {
-            const meta = SEVERITY_META[insight.severity];
-            return (
-              <li key={insight.id} className="flex items-start gap-3 rounded-lg bg-canvas/60 px-3 py-2.5">
-                <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotClass}`} />
-                <div>
-                  <span className={`text-[11px] font-semibold uppercase tracking-wide ${meta.textClass}`}>
-                    {meta.label}
-                  </span>
-                  <p className="text-sm text-ink-700">{insight.message}</p>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
+        {insights.length > 0 && (
+          <ul className="space-y-3">
+            {insights.map((insight) => {
+              const meta = SEVERITY_META[insight.severity];
+              return (
+                <li key={insight.id} className="flex items-start gap-3 rounded-lg bg-muted/60 px-3 py-2.5">
+                  <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotClass}`} />
+                  <div>
+                    <span className={`text-[11px] font-semibold uppercase tracking-wide ${meta.textClass}`}>
+                      {meta.label}
+                    </span>
+                    <p className="text-sm text-foreground">{insight.message}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

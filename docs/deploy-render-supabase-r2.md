@@ -302,6 +302,20 @@ Não crie/procure estas variáveis — não são lidas em nenhum lugar do códig
 - [x] Build/Start Command e Root Directory documentados.
 - [x] Lista exaustiva de env vars levantada via grep de `process.env` em todo `src/`.
 - [x] Segredos fortes gerados (`JWT_SECRET`, `ERP_CREDENTIALS_ENCRYPTION_KEY`) — únicos para produção, nunca reaproveitar os de dev.
-- [ ] Variáveis efetivamente cadastradas no painel do Render (ação do usuário).
-- [ ] `MERCADO_LIVRE_REDIRECT_URI` atualizada tanto no Render quanto no painel de app do Mercado Livre, apontando para a URL real do Render (ação do usuário, só possível depois que o serviço existir e tiver uma URL).
-- [ ] Primeiro deploy + smoke test (login, listagem de produtos, um upload de foto) confirmados em produção.
+- [x] Variáveis cadastradas no painel do Render.
+- [x] Primeiro deploy + healthcheck (`GET /api/health` → `{"status":"ok"}`) confirmados em produção.
+- [ ] `MERCADO_LIVRE_REDIRECT_URI` atualizada tanto no Render quanto no painel de app do Mercado Livre, apontando para `https://api.kyneti.com.br/...` (só faz sentido antes do primeiro teste real de conexão com o Mercado Livre em produção).
+- [ ] Smoke test funcional completo (login, listagem de produtos, um upload de foto) — health check passou, mas isso ainda não foi confirmado.
+
+### 4.5 Estado real em produção (2026-07-13)
+
+Backend no ar. Ajustes feitos durante o primeiro deploy real que não estavam previstos nas seções 4.1–4.4, registrados aqui para não se perderem:
+
+- **Build Command real:** precisou de `--include=dev` no `npm install` — o Render, por padrão, não instala `devDependencies` em builds de produção (`NODE_ENV=production` implícito faz o npm pular essa lista), mas `@nestjs/cli` (usado pelo `npm run build`) e `prisma` (usado pelo `npx prisma migrate deploy`/`generate`) estão em `devDependencies` neste projeto — sem a flag, o build falha por comando não encontrado. Build Command atualizado: `npm install --include=dev && npx prisma generate && npm run build`.
+- **Migration automática no deploy:** ao contrário do que a seção 4.1 recomendava (Pre-Deploy Command separado), a prática adotada foi rodar `npx prisma migrate deploy` no próprio Build/Start Command a cada deploy. Funciona porque `migrate deploy` é idempotente (só aplica migrations pendentes), mas vale registrar o desvio da recomendação original — o risco documentado na seção 1.3/2 (uma migration ruim quebrando o deploy) continua valendo, só que agora acoplado ao boot em vez de isolado.
+- **Supabase — caracteres especiais na senha:** a senha do Postgres do Supabase tinha caracteres que precisam de URL-encoding dentro da connection string (`DATABASE_URL`/`DIRECT_URL`) — sem isso, o Prisma falha ao parsear a URL. Resolvido codificando os caracteres especiais antes de colar no Render.
+- **Domínio real da API:** `https://api.kyneti.com.br`, com SSL ativo, domínio customizado configurado no Render via Cloudflare (mesma conta/domínio raiz usada para `assets.kyneti.com.br` no R2 — seção 3.5). **Isso muda `MERCADO_LIVRE_REDIRECT_URI`**: o valor de exemplo na seção 4.2 (`kyneti-api.onrender.com`) fica obsoleto — usar `https://api.kyneti.com.br/api/marketplace-intelligence/mercado-livre/callback` quando for configurar a conexão real.
+- **Health check confirmado:** `GET /api/health` → `{"status":"ok"}`.
+- **Bug de DI corrigido antes deste deploy funcionar:** `CredentialEncryptionService` não estava exportado por `ErpIntegrationModule` — ver `docs/auth-security.md`, seção 2, para o detalhe completo (root cause + fix + porque `nest build` não pega esse tipo de erro).
+
+Com isso, os 4 passos deste documento estão concluídos e o backend está servindo tráfego real. Próximos passos (deploy do frontend, integrações de marketplace) ficam fora do escopo deste documento.

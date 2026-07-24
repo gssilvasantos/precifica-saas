@@ -106,6 +106,7 @@ describe('OrderSyncOrchestrator', () => {
         autoRepricingEnabled: false,
         packagingId: null,
         isKit: false,
+        mapPrice: null,
       }),
     };
 

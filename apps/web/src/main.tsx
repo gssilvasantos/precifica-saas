@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { AuthProvider } from './features/auth/auth-context';
 import { AppModeProvider } from './features/app-mode/app-mode-context';
+import { ThemeProvider } from './features/theme/theme-context';
 import './styles/index.css';
 
 const queryClient = new QueryClient({
@@ -17,12 +18,14 @@ const queryClient = new QueryClient({
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <AppModeProvider>
-          <App />
-        </AppModeProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <AppModeProvider>
+            <App />
+          </AppModeProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   </React.StrictMode>,
 );

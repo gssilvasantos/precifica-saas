@@ -1,3 +1,6 @@
+import { Card, CardContent } from '../ui/card';
+import { cn } from '../../lib/utils';
+
 interface Props {
   label: string;
   value: string;
@@ -6,20 +9,17 @@ interface Props {
 }
 
 // Camada de Comando (Etapa 18) — cartão de KPI puro, sem lógica de busca.
-// `highlight` é o único lugar que usa o azul neon como cor de destaque
-// (borda + glow sutil), nunca como fundo cheio — mantém o fundo branco/chumbo
-// pedido e o neon só como "detalhe".
+// Migrado para o primitivo Card (token bg-card/border-border, resolve Light/
+// Dark sozinho). `highlight` continua o único lugar que usa neon como
+// destaque (anel + glow), nunca como fundo cheio.
 export default function KpiCard({ label, value, caption, highlight }: Props) {
   return (
-    <div
-      className={[
-        'rounded-2xl bg-surface p-5 shadow-card transition',
-        highlight ? 'ring-1 ring-neon/60 shadow-neonGlow' : '',
-      ].join(' ')}
-    >
-      <p className="text-xs font-medium uppercase tracking-wide text-ink-500">{label}</p>
-      <p className="mt-2 font-serif text-3xl font-semibold text-ink-900">{value}</p>
-      {caption && <p className="mt-1 text-xs text-ink-500">{caption}</p>}
-    </div>
+    <Card className={cn('transition', highlight && 'ring-1 ring-accent/60 shadow-neonGlow')}>
+      <CardContent className="p-5">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="mt-2 font-serif text-3xl font-semibold text-foreground">{value}</p>
+        {caption && <p className="mt-1 text-xs text-muted-foreground">{caption}</p>}
+      </CardContent>
+    </Card>
   );
 }

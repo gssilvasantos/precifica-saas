@@ -21,6 +21,9 @@ export interface Product {
   desiredMarginPct: number;
   minimumMarginPct: number;
   autoRepricingEnabled: boolean;
+  // Política de Preço Mínimo Anunciado (MAP) — ver prisma/schema.prisma,
+  // model Product, para o racional completo. null = sem restrição MAP.
+  mapPrice: number | null;
   weightKg: number;
   packagingWeightKg: number;
   packedWeightKg: number;
@@ -60,6 +63,11 @@ export interface ProductCreateData {
   desiredMarginPct: number;
   minimumMarginPct: number;
   autoRepricingEnabled?: boolean;
+  // undefined = não informado neste create (persiste como null, sem
+  // restrição MAP); null explícito é o mesmo efeito — ver ProductsService.update
+  // para o caso de UPDATE, onde a distinção undefined/null importa de verdade
+  // (undefined = "não mexer", null = "limpar o MAP existente").
+  mapPrice?: number | null;
   weightKg: number;
   packagingWeightKg: number;
   lengthCm: number;

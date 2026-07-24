@@ -34,6 +34,7 @@ describe('PricingDecisionService (modo operação)', () => {
     autoRepricingEnabled: false,
     packagingId: null,
     isKit: false,
+    mapPrice: null,
   };
 
   const opportunity: CompetitiveOpportunitySummary = {
@@ -58,6 +59,8 @@ describe('PricingDecisionService (modo operação)', () => {
     financialFloorPrice: 60,
     hitSafetyFloor: false,
     hitFinancialFloor: false,
+    mapPrice: null,
+    hitMapFloor: false,
     reason: 'teste',
   };
 
@@ -70,7 +73,7 @@ describe('PricingDecisionService (modo operação)', () => {
 
   // Default: sem governança financeira configurada (0/0) — não deve alterar
   // nenhum dos cenários já cobertos antes desta política existir.
-  const noFinancialPolicy: FinancialPolicy = { taxRate: 0, minProfitMargin: 0 };
+  const noFinancialPolicy: FinancialPolicy = { taxRate: 0, minProfitMargin: 0, targetRoas: 3 };
 
   let strategist: jest.Mocked<PricingStrategist>;
   let catalog: jest.Mocked<ProductCatalogReader>;
@@ -192,7 +195,7 @@ describe('PricingDecisionService (modo operação)', () => {
     // costPrice 60, taxRate 6% + minProfitMargin 30% => financialFloorPrice = 60 / 0.64 = 93.75,
     // maior que os 90 que o strategist (mockado) recomendou — deve vencer.
     beforeEach(() => {
-      financialPolicy.getPolicy.mockResolvedValue({ taxRate: 0.06, minProfitMargin: 0.3 });
+      financialPolicy.getPolicy.mockResolvedValue({ taxRate: 0.06, minProfitMargin: 0.3, targetRoas: 3 });
     });
 
     it('decide(): sobrescreve a sugestão do strategist quando ela fura o piso financeiro', async () => {
@@ -215,6 +218,73 @@ describe('PricingDecisionService (modo operação)', () => {
     it('busca a política financeira do tenant certo', async () => {
       await service.decide('tenant-42', 'SKU-001');
       expect(financialPolicy.getPolicy).toHaveBeenCalledWith('tenant-42');
+    });
+  });
+
+  describe('piso de MAP (defesa em profundidade)', () => {
+    // strategist mockado devolve `decision` (recommendedPrice 90) sem saber
+    // nada de MAP — simula um PricingStrategist customizado/futuro que NÃO
+    // implemente o piso de MAP corretamente. O recheck em resolveDecision
+    // deve corrigir de qualquer forma, usando product.mapPrice diretamente
+    // (não um campo devolvido pelo strategist).
+    it('decide(): sobrescreve a sugestão do strategist quando ela fura o MAP do produto', async () => {
+      catalog.findBySku.mockResolvedValue({ ...product, mapPrice: 95 });
+
+      const result = await service.decide('tenant-1', 'SKU-001');
+
+      expect(result?.action).toBe('MAP_FLOOR_APPLIED');
+      expect(result?.recommendedPrice).toBe(95);
+      expect(result?.hitMapFloor).toBe(true);
+      expect(result?.mapPrice).toBe(95);
+      expect(result?.reason).toMatch(/MAP/);
+    });
+
+    it('applyDecision(): aplica o preço JÁ AJUSTADO pelo MAP, não a sugestão original do strategist', async () => {
+      catalog.findBySku.mockResolvedValue({ ...product, mapPrice: 95, autoRepricingEnabled: false });
+
+      const result = await service.applyDecision('tenant-1', 'SKU-001');
+
+      const dispatchedCommand = dispatcher.dispatch.mock.calls[0][0];
+      expect(dispatchedCommand.newPrice).toBe(95);
+      expect(result?.decision.action).toBe('MAP_FLOOR_APPLIED');
+    });
+
+    it('mapPrice null no produto: recheck não altera a decisão do strategist', async () => {
+      catalog.findBySku.mockResolvedValue({ ...product, mapPrice: null });
+
+      const result = await service.decide('tenant-1', 'SKU-001');
+
+      expect(result?.action).toBe('MATCH_COMPETITOR');
+      expect(result?.hitMapFloor).toBe(false);
+    });
+
+    // Gate FINAL (última linha de defesa, imediatamente antes do dispatch) —
+    // em condições normais NUNCA dispara, porque o recheck acima já corrige
+    // qualquer decisão antes de chegar aqui. Para provar que o gate por si
+    // só bloqueia o dispatcher, chamamos dispatchDecision diretamente
+    // (contornando resolveDecision) com uma decisão que "escapou" das duas
+    // camadas anteriores — exatamente o cenário de bug futuro que este gate
+    // existe para pegar.
+    it('dispatchDecision(): gate final bloqueia o dispatcher mesmo se uma decisão inválida escapar das camadas anteriores', async () => {
+      const decisionThatSlippedThrough: PricingDecision = {
+        ...decision,
+        recommendedPrice: 80, // abaixo do mapPrice abaixo
+      };
+
+      const result = await (service as any).dispatchDecision('tenant-1', decisionThatSlippedThrough, 'NUVEMSHOP', 95);
+
+      expect(dispatcher.dispatch).not.toHaveBeenCalled();
+      expect(result.applied).toBe(false);
+      expect(result.reason).toMatch(/abaixo do MAP/);
+    });
+
+    it('dispatchDecision(): não bloqueia quando o preço respeita o MAP', async () => {
+      channelListings.findBySku.mockResolvedValue(listing);
+
+      const result = await (service as any).dispatchDecision('tenant-1', decision, 'NUVEMSHOP', 80);
+
+      expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
+      expect(result.applied).toBe(true);
     });
   });
 });

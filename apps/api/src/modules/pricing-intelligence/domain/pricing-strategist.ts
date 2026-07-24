@@ -36,13 +36,19 @@ export interface PricingContext {
   minProfitMargin: number;
   competitorBestPrice: number | null; // null quando buyBoxStatus é UNKNOWN (ainda sem leitura de concorrência)
   buyBoxStatus: BuyBoxStatus;
+  // Política de Preço Mínimo Anunciado (MAP) — piso definido pelo
+  // FORNECEDOR/MARCA (Product.mapPrice), não calculado a partir de
+  // custo/margem como os dois pisos acima. null = sem restrição MAP para
+  // este SKU. Ver calculateEffectiveFloorPrice/validatePriceAgainstMap.
+  mapPrice: number | null;
 }
 
 export type PricingAction =
-  | 'MATCH_COMPETITOR' // baixamos o preço para igualar o concorrente — seguro, dentro dos dois pisos
+  | 'MATCH_COMPETITOR' // baixamos o preço para igualar o concorrente — seguro, dentro dos três pisos
   | 'HOLD_PRICE' // mantemos o preço atual (já vencendo, ou sem dado de concorrência ainda)
   | 'SAFETY_FLOOR_APPLIED' // o piso POR PRODUTO (minimumMarginPct) foi o mais restritivo e venceu a sugestão
-  | 'FINANCIAL_FLOOR_APPLIED'; // o piso FINANCEIRO do tenant (imposto + margem líquida mínima global) foi o mais restritivo e venceu
+  | 'FINANCIAL_FLOOR_APPLIED' // o piso FINANCEIRO do tenant (imposto + margem líquida mínima global) foi o mais restritivo e venceu
+  | 'MAP_FLOOR_APPLIED'; // o piso de MAP (Product.mapPrice, definido pelo fornecedor) foi o mais restritivo e venceu
 
 export interface PricingDecision {
   skuCode: string;
@@ -54,6 +60,11 @@ export interface PricingDecision {
   financialFloorPrice: number; // piso financeiro do tenant (imposto + margem mínima global) — idem
   hitSafetyFloor: boolean;
   hitFinancialFloor: boolean;
+  // mapPrice ecoado da entrada (não recalculado — é um valor direto, não uma
+  // fórmula) só para o chamador não precisar buscar Product de novo para
+  // saber qual era o piso de MAP vigente nesta decisão.
+  mapPrice: number | null;
+  hitMapFloor: boolean;
   reason: string;
 }
 
@@ -108,6 +119,37 @@ export function calculateFinancialFloorPrice(costPrice: number, taxRate: number,
   return costPrice / (1 - (taxRate + minProfitMargin));
 }
 
+// Trava de MAP — DIFERENTE das duas de cima (Safety Lock de margem): nunca
+// jogamos fora nem "corrigimos silenciosamente" um preço que fura o MAP na
+// hora de efetivamente ENVIAR ao marketplace, jogamos uma exceção. É a
+// última linha de defesa, pedida explicitamente para ser chamada "antes de
+// qualquer chamada para a API de precificação" — ver
+// PricingDecisionService.dispatchDecision. Em condições normais NUNCA deve
+// disparar (o piso de MAP já foi aplicado antes, tanto dentro do
+// PricingStrategist quanto na defesa em profundidade de
+// PricingDecisionService.resolveDecision) — é um assert de "isso não pode
+// escapar", não um caminho de negócio esperado.
+export class MapPriceViolationError extends Error {
+  constructor(
+    public readonly skuCode: string,
+    public readonly attemptedPrice: number,
+    public readonly mapPrice: number,
+  ) {
+    super(
+      `SKU ${skuCode}: preço ${attemptedPrice.toFixed(2)} está abaixo do MAP (Preço Mínimo Anunciado) de ` +
+        `${mapPrice.toFixed(2)} definido pelo fornecedor — bloqueado antes do envio ao marketplace. ` +
+        'Em hipótese alguma o Kyneti envia um preço abaixo do MAP.',
+    );
+    this.name = 'MapPriceViolationError';
+  }
+}
+
+export function validatePriceAgainstMap(skuCode: string, price: number, mapPrice: number | null): void {
+  if (mapPrice !== null && price < mapPrice) {
+    throw new MapPriceViolationError(skuCode, price, mapPrice);
+  }
+}
+
 export function validatePricingContext(context: PricingContext): void {
   if (context.costPrice <= 0) throw new InvalidPricingContextError('costPrice precisa ser maior que zero.');
   if (context.currentPrice <= 0) throw new InvalidPricingContextError('currentPrice precisa ser maior que zero.');
@@ -127,5 +169,8 @@ export function validatePricingContext(context: PricingContext): void {
   }
   if (context.competitorBestPrice !== null && context.competitorBestPrice <= 0) {
     throw new InvalidPricingContextError('competitorBestPrice, quando presente, precisa ser maior que zero.');
+  }
+  if (context.mapPrice !== null && context.mapPrice <= 0) {
+    throw new InvalidPricingContextError('mapPrice, quando presente, precisa ser maior que zero.');
   }
 }

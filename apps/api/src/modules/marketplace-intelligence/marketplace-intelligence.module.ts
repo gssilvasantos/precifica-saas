@@ -15,6 +15,7 @@ import { PrismaMercadoLivreConnectionRepository } from './infrastructure/prisma-
 import { MercadoLivreApiClient } from './infrastructure/providers/mercado-livre/mercado-livre-api.client';
 import { MercadoLivreFeeRuleProvider } from './infrastructure/providers/mercado-livre/mercado-livre-fee-rule.provider';
 import { MercadoLivreOrderProvider } from './infrastructure/providers/mercado-livre/mercado-livre-order.provider';
+import { MercadoLivreAdsProvider } from './infrastructure/providers/mercado-livre/mercado-livre-ads.provider';
 import { SyncSchedulerJob } from './infrastructure/scheduler/sync-scheduler.job';
 
 import { MarketplaceRulesAdminController } from './interface/controllers/marketplace-rules-admin.controller';
@@ -67,9 +68,18 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // módulo Orders registrar em ORDER_CAPABLE_PROVIDERS, mesmo racional de
     // NuvemshopOrderProvider ser exportado do erp-integration.
     MercadoLivreOrderProvider,
+    // Módulo de Ads, Fase 1 — terceira capacidade do Mercado Livre (ADS),
+    // mesmo racional de MercadoLivreOrderProvider: classe separada,
+    // reaproveita a MESMA conexão OAuth2 (MercadoLivreConnectionService,
+    // abaixo) — nenhuma reautorização do vendedor é necessária, só o escopo
+    // advertising/product_ads precisa estar habilitado no app cadastrado no
+    // painel do Mercado Livre (ver docs/marketplace-ads-api-access-plan.md).
+    // Exportada abaixo para o módulo marketplace-ads registrar em
+    // ADS_CAPABLE_PROVIDERS.
+    MercadoLivreAdsProvider,
     // Sprint 22 — OAuth2 real por vendedor (docs/auth-security.md). Injetada
-    // diretamente em MercadoLivreOrderProvider (mesmo módulo, sem precisar
-    // de token em shared/contracts) e usada pelo
+    // diretamente em MercadoLivreOrderProvider/MercadoLivreAdsProvider (mesmo
+    // módulo, sem precisar de token em shared/contracts) e usada pelo
     // MercadoLivreConnectionController para o fluxo authorize/callback.
     MercadoLivreConnectionService,
     // Fase de Conexão Real — diagnóstico read-only da conexão, ver
@@ -97,6 +107,6 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // Pricing Engine conhece só PRICE_UPDATE_DISPATCHER + a interface.
     { provide: PRICE_UPDATE_DISPATCHER, useExisting: PriceUpdateDispatcherService },
   ],
-  exports: [FEE_RULE_RESOLVER, PRICE_UPDATE_DISPATCHER, MercadoLivreOrderProvider],
+  exports: [FEE_RULE_RESOLVER, PRICE_UPDATE_DISPATCHER, MercadoLivreOrderProvider, MercadoLivreAdsProvider],
 })
 export class MarketplaceIntelligenceModule {}

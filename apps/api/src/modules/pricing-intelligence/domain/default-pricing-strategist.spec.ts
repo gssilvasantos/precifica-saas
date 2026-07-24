@@ -23,6 +23,7 @@ describe('DefaultPricingStrategist', () => {
     minProfitMargin: 0,
     competitorBestPrice: null,
     buyBoxStatus: 'UNKNOWN',
+    mapPrice: null,
   };
 
   it('LOSING com concorrente acima do piso: iguala o concorrente', () => {
@@ -153,6 +154,77 @@ describe('DefaultPricingStrategist', () => {
       expect(decision.financialFloorPrice).toBeCloseTo(69.77, 2);
       expect(decision.hitSafetyFloor).toBe(false);
       expect(decision.hitFinancialFloor).toBe(false);
+    });
+  });
+
+  describe('piso de MAP (política de preço mínimo do fornecedor)', () => {
+    // safetyFloorPrice = 75, financialFloorPrice = 60 (taxRate/minProfitMargin
+    // zerados neste bloco) — mapPrice 95 é o mais restritivo dos três.
+    it('quando o MAP é mais restritivo que os outros dois pisos, ele vence', () => {
+      const decision = strategist.calculateOptimalPrice({
+        ...baseContext,
+        buyBoxStatus: 'LOSING',
+        competitorBestPrice: 80, // acima do safetyFloor (75), mas abaixo do MAP (95)
+        mapPrice: 95,
+      });
+
+      expect(decision.action).toBe('MAP_FLOOR_APPLIED');
+      expect(decision.recommendedPrice).toBe(95);
+      expect(decision.hitMapFloor).toBe(true);
+      expect(decision.hitSafetyFloor).toBe(false);
+      expect(decision.hitFinancialFloor).toBe(false);
+      expect(decision.mapPrice).toBe(95);
+      expect(decision.reason).toMatch(/Preço Mínimo Anunciado \(MAP\)/);
+    });
+
+    it('quando o MAP é mais frouxo que os outros pisos, não é acionado', () => {
+      const decision = strategist.calculateOptimalPrice({
+        ...baseContext,
+        buyBoxStatus: 'LOSING',
+        competitorBestPrice: 65, // abaixo do safetyFloor (75) — safety floor deve vencer
+        mapPrice: 50, // mais frouxo que o safetyFloor
+      });
+
+      expect(decision.action).toBe('SAFETY_FLOOR_APPLIED');
+      expect(decision.recommendedPrice).toBe(75);
+      expect(decision.hitMapFloor).toBe(false);
+      expect(decision.mapPrice).toBe(50); // ecoado mesmo sem ser o vigente
+    });
+
+    it('quando o MAP empata com o piso financeiro mais restritivo, o MAP vence (contratual > margem interna)', () => {
+      const decision = strategist.calculateOptimalPrice({
+        ...baseContext,
+        minimumMarginPct: 10, // safetyFloorPrice = 66.67, mais frouxo
+        taxRate: 0.06,
+        minProfitMargin: 0.08, // financialFloorPrice = 69.77
+        buyBoxStatus: 'LOSING',
+        competitorBestPrice: 65,
+        mapPrice: 69.77, // igual ao financialFloorPrice
+      });
+
+      expect(decision.action).toBe('MAP_FLOOR_APPLIED');
+      expect(decision.hitMapFloor).toBe(true);
+      expect(decision.hitFinancialFloor).toBe(false);
+    });
+
+    it('mapPrice null: não é acionado nem influencia o piso efetivo', () => {
+      const decision = strategist.calculateOptimalPrice({
+        ...baseContext,
+        buyBoxStatus: 'LOSING',
+        competitorBestPrice: 80,
+        mapPrice: null,
+      });
+
+      expect(decision.action).toBe('MATCH_COMPETITOR');
+      expect(decision.recommendedPrice).toBe(80);
+      expect(decision.hitMapFloor).toBe(false);
+      expect(decision.mapPrice).toBeNull();
+    });
+
+    it('rejeita contexto inválido (mapPrice <= 0)', () => {
+      expect(() =>
+        strategist.calculateOptimalPrice({ ...baseContext, mapPrice: 0 }),
+      ).toThrow(InvalidPricingContextError);
     });
   });
 });

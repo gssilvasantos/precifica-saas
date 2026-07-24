@@ -61,6 +61,21 @@
 //                             verdade, reaproveitando MarketplaceRule
 //                             (fee) e CatalogSettings (política fiscal) —
 //                             nunca duplica nenhum dos dois.
+// marketplace_ads          -> Módulo de Ads multicanal, Fase 1 — leitura de
+//                             campanhas e métricas (ver
+//                             docs/marketplace-ads-architecture.md).
+//                             Bounded context PRÓPRIO, distinto de
+//                             marketplace_intelligence: ali vive a CONEXÃO
+//                             OAuth2/credencial de cada canal (reaproveitada
+//                             aqui via MercadoLivreAdsProvider), mas o dado
+//                             de campanha/métrica de anúncio é um domínio
+//                             diferente (performance de mídia paga, não
+//                             regra de taxa/repricing). channelCode é um
+//                             STRING solto (não FK para Marketplace), mesmo
+//                             padrão de ChannelListing/OrderItem — permite
+//                             registrar Shopee/TikTok/Amazon/Magalu depois
+//                             sem nenhuma migration nova, só um provider novo
+//                             implementando AdsCapableProvider.
 // Próximo schema (a criar quando o módulo existir): analytics.
 // pricing_intelligence já existe como PRIMEIRA FATIA (simulador de margem
 // Nuvemshop) — ver seção do módulo mais abaixo.
@@ -83,7 +98,7 @@ datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
-  schemas   = ["identity", "catalog", "logistics_intelligence", "marketplace_intelligence", "integration_ops", "erp_integration", "channel_integration", "competition_intelligence", "financial_intelligence", "orders", "logistics_fulfillment", "promotion_intelligence"]
+  schemas   = ["identity", "catalog", "logistics_intelligence", "marketplace_intelligence", "integration_ops", "erp_integration", "channel_integration", "competition_intelligence", "financial_intelligence", "orders", "logistics_fulfillment", "promotion_intelligence", "marketplace_ads"]
 }
 
 enum UserRole {
@@ -227,6 +242,18 @@ model Product {
   // --- Margens (PRD, seção 1.2: dois campos, não um) ---
   desiredMarginPct Float // margem desejada (%) — define o preço ideal
   minimumMarginPct Float // margem mínima aceitável (%) — define o preço mínimo, piso de segurança
+
+  // Política de Preço Mínimo Anunciado (MAP) — piso definido pelo
+  // FORNECEDOR/MARCA, não calculado a partir de custo/margem como os dois
+  // campos acima. Nullable de verdade (não @default(0)): null = "sem
+  // restrição MAP para este SKU", 0 seria um valor de piso ambíguo (preço
+  // zero nunca é uma política de MAP real). Não é campo travado por
+  // sourceSystem (mesma razão de autoRepricingEnabled/isKit): é uma decisão
+  // comercial/contratual da Precifica com o fornecedor, não um fato físico
+  // espelhado do ERP — continua editável mesmo em produtos ERP_OLIST.
+  // Toda mudança neste campo é auditada — ver model ProductAuditLog abaixo
+  // e domain/product-audit.ts (diffGovernanceFields).
+  mapPrice Decimal? @db.Decimal(12, 2)
 
   // Modo operação do PricingStrategist (docs/pricing-intelligence-architecture.md,
   // seção 7): false = PricingDecisionService só calcula e loga a sugestão;
@@ -397,9 +424,69 @@ model CatalogSettings {
   taxRatePct        Float @default(0) // alíquota efetiva estimada (%) — 0 até o tenant configurar
   minProfitMarginPct Float @default(0) // margem líquida mínima global (%) — 0 até o tenant configurar
 
+  // Meta de ROAS do tenant (Ads — Fase 4, sugestão via IA). Diferente de
+  // taxRatePct/minProfitMarginPct acima: 0 não é um default seguro aqui (ROAS
+  // meta 0 significaria "qualquer retorno serve", o oposto da intenção) —
+  // por isso nullable de verdade, não @default(0). null = "tenant não
+  // configurou uma meta própria ainda"; FinancialPolicyReaderService resolve
+  // para DEFAULT_ROAS_HEALTHY_THRESHOLD (domain/ads-metrics.ts) nesse caso,
+  // nunca este model nem nenhum outro consumidor decide o fallback sozinho.
+  targetRoas Float?
+
   updatedAt                DateTime @updatedAt
 
   @@map("catalog_settings")
+  @@schema("catalog")
+}
+
+// Trilha de auditoria de campos de GOVERNANÇA do Product — hoje só
+// mapPrice (Política de Preço Mínimo). HONESTIDADE TÉCNICA: não existia
+// nenhum mecanismo de auditoria genérico neste projeto antes deste model —
+// ErpSyncChangeEvent (erp_integration) audita só o diff de sync do ERP,
+// MarketplaceChangeEvent (marketplace_intelligence) só mudança de regra de
+// marketplace, StockMovementAuditEvent (logistics_fulfillment) é prova de
+// SAÍDA DE ESTOQUE físico — nenhum dos três serve para "usuário X mudou o
+// campo Y do produto Z, de A para B, às HH:MM". Este model é novo,
+// propositalmente ESCOPADO a campos de governança do Product (não uma
+// tabela genérica "audite qualquer coisa") — mesma disciplina de não
+// genericizar prematuramente já usada no resto da plataforma; `field` é
+// string livre para acomodar outros campos de governança no futuro sem
+// migration nova, mas o consumidor (ProductAuditLogService) só grava para
+// os campos em GOVERNANCE_AUDITED_FIELDS (domain/product-audit.ts).
+enum ProductAuditSource {
+  MANUAL // editado via PATCH /products/:id
+  BULK_IMPORT // aplicado via POST /products/bulk-import/map-price
+
+  @@schema("catalog")
+}
+
+model ProductAuditLog {
+  id        String @id @default(uuid())
+  tenantId  String
+  productId String
+  // Desnormalizado de propósito (mesmo padrão de ReceivableRecord.skuCode/
+  // ChannelListing.skuCode): a trilha de auditoria precisa sobreviver e
+  // continuar legível mesmo que o produto seja removido depois — nunca uma
+  // FK com cascade que apagaria o histórico junto.
+  skuCode String
+
+  field String // "mapPrice" hoje — ver comentário acima do model
+
+  // Serializados como string — o valor pode ser Decimal/Boolean/etc
+  // dependendo do campo, e esta tabela nunca tenta ser fortemente tipada
+  // por campo (isso é responsabilidade de quem grava, não do schema).
+  // Ambos nullable porque tanto "estava sem MAP" (oldValue null) quanto
+  // "MAP removido" (newValue null) são estados legítimos.
+  oldValue String?
+  newValue String?
+
+  source          ProductAuditSource
+  changedByUserId String // sempre preenchido — toda mutação (manual ou bulk import) passa por um usuário autenticado, nunca um processo anônimo
+  changedAt       DateTime @default(now())
+
+  @@index([tenantId, productId, changedAt])
+  @@index([tenantId, field, changedAt])
+  @@map("product_audit_logs")
   @@schema("catalog")
 }
 
@@ -1463,4 +1550,184 @@ model PromotionEnrollment {
   @@index([tenantId, marginStatus])
   @@map("promotion_enrollments")
   @@schema("promotion_intelligence")
+}
+
+// ============================================================================
+// marketplace_ads -> Módulo de Ads multicanal, Fase 1 (dashboard de leitura,
+//                     escopo Mercado Livre — ver
+//                     docs/marketplace-ads-architecture.md). Granularidade de
+//                     CAMPANHA (não ad-group/ad individual) de propósito no
+//                     MVP. channelCode é string solta, não FK — mesmo padrão
+//                     de ChannelListing/OrderItem, para permitir registrar
+//                     Shopee/TikTok/Amazon/Magalu depois sem migration nova.
+// ============================================================================
+
+enum AdsCampaignStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+  UNKNOWN
+
+  @@schema("marketplace_ads")
+}
+
+// Espelha domain/ads-metrics.ts CampaignHealthTier (Fase 2) — duplicado de
+// propósito, mesmo padrão de AdsCampaignStatus/BuyBoxStatus: schema.prisma é
+// a única fonte de verdade do BANCO, o domínio é a única fonte de verdade da
+// REGRA de classificação; a duplicação de nomes é o preço de manter o
+// domínio livre de import do Prisma Client.
+enum AdsCampaignHealthTier {
+  ESTRELA
+  PONTO_DE_ATENCAO
+  CUSTO_PERDIDO
+  SEM_DADOS
+
+  @@schema("marketplace_ads")
+}
+
+model AdsCampaign {
+  id                  String            @id @default(uuid())
+  tenantId            String
+  channelCode         String // "MERCADO_LIVRE" hoje — string solta, ver comentário do bloco acima
+  externalCampaignId  String // id da campanha no marketplace
+  name                String
+  status              AdsCampaignStatus @default(UNKNOWN)
+  dailyBudget         Decimal?          @db.Decimal(12, 2)
+  lastSyncedAt        DateTime          @default(now())
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  // Fase 2 (alertas inteligentes) — o último tier que gerou um alerta
+  // emitido para esta campanha; null quando nunca alertou ou já se
+  // recuperou (RESET). Ver domain/ads-metrics.ts, determineAlertAction, e
+  // AdsAlertingService (único gravador destes 2 campos).
+  lastAlertedTier AdsCampaignHealthTier?
+  lastAlertedAt   DateTime?
+
+  // Modo de Demonstração / Audit Mode — mesmo padrão de Order.isDemo:
+  // campanha fictícia injetada por AdsAuditSeederService (nunca por um
+  // AdsSyncOrchestrator real; nenhum AdsCapableProvider jamais escreve
+  // isso). @default(false) garante que toda query existente (dashboard,
+  // alertas, fila de sugestões) continua só vendo isDemo = false sem
+  // precisar ser tocada — o filtro por dataMode ('REAL' | 'DEMO') vive na
+  // camada de repositório (PrismaAdsCampaignRepository/
+  // PrismaAdsActionSuggestionRepository), nunca a cargo de quem chama.
+  // AdsMetricSnapshot e AdsActionSuggestion (filhos, via campaignId) NÃO
+  // carregam o próprio isDemo — são filtrados transitivamente pelo join
+  // com a campanha-pai, mesmo racional de OrderItem/Order.
+  isDemo Boolean @default(false)
+
+  metrics           AdsMetricSnapshot[]
+  // Fase 3 (Safety Lock) — sugestões de ação de escrita geradas a partir do
+  // mesmo evento que dispara o alerta (ver AdsActionSuggestion abaixo).
+  actionSuggestions AdsActionSuggestion[]
+
+  @@unique([tenantId, channelCode, externalCampaignId])
+  @@index([tenantId, channelCode])
+  // Filtro por dataMode (REAL exclui isDemo, DEMO só isDemo) — mesmo
+  // racional do índice equivalente em Order.
+  @@index([tenantId, isDemo])
+  @@map("ads_campaigns")
+  @@schema("marketplace_ads")
+}
+
+// Granularidade DIÁRIA — mesma janela que a maioria das APIs de ads reporta
+// (ver AdsCapableProvider.fetchAdsMetrics). tenantId desnormalizado de
+// propósito (mesmo padrão de MarketplaceChangeEvent/ErpSyncChangeEvent):
+// toda tabela de negócio é filtrada por tenant direto, nunca via join
+// implícito.
+model AdsMetricSnapshot {
+  id          String      @id @default(uuid())
+  campaignId  String
+  campaign    AdsCampaign @relation(fields: [campaignId], references: [id])
+  tenantId    String
+  periodDate  DateTime    @db.Date
+  spend       Decimal     @db.Decimal(12, 2)
+  revenueAds  Decimal     @default(0) @db.Decimal(12, 2)
+  clicks      Int         @default(0)
+  impressions Int         @default(0)
+  syncedAt    DateTime    @default(now())
+
+  @@unique([campaignId, periodDate])
+  @@index([tenantId, periodDate])
+  @@map("ads_metric_snapshots")
+  @@schema("marketplace_ads")
+}
+
+// Fase 3 (automação de escrita — Safety Lock, ver
+// docs/marketplace-ads-architecture.md, seção 12). Único tipo de ação no
+// MVP: pausar a campanha — é a única recomendação ACIONÁVEL que
+// classifyCampaignHealth já dá para CUSTO_PERDIDO.
+enum AdsActionType {
+  PAUSE_CAMPAIGN
+
+  @@schema("marketplace_ads")
+}
+
+// PENDING é o único estado em que a ação AINDA NÃO foi executada — mesmo
+// racional de EnrollmentStatus (Promotion Intelligence)/StockMovementAuditEvent
+// (Hub de Provas): uma sugestão nasce persistida, nunca em memória, porque
+// quem a gera (AdsAlertingService, rodando num cron) não é quem a resolve
+// (o usuário, numa requisição HTTP futura). CONFIRMED é um estado
+// transitório interno (marcado no instante em que o usuário confirma, antes
+// da chamada ao provider resolver) — nunca fica visível como "pendente de
+// nada" por muito tempo; resolve para APPLIED ou FAILED na mesma chamada.
+enum AdsActionStatus {
+  PENDING
+  CONFIRMED
+  APPLIED
+  REJECTED
+  FAILED
+
+  @@schema("marketplace_ads")
+}
+
+// Fase 4 (sugestão via IA). Distingue quem originou a sugestão — não muda
+// NADA no fluxo de aprovação/aplicação (AdsActionDispatcherService trata as
+// duas origens de forma idêntica, sempre exigindo confirmação humana), é só
+// trilha de auditoria: útil para o admin (e para qualquer revisão futura)
+// saber se uma decisão passada veio de um threshold determinístico ou de um
+// modelo de linguagem, que têm perfis de confiabilidade diferentes.
+enum AdsActionSource {
+  RULE_BASED
+  AI
+
+  @@schema("marketplace_ads")
+}
+
+model AdsActionSuggestion {
+  id         String        @id @default(uuid())
+  tenantId   String
+  campaignId String
+  campaign   AdsCampaign   @relation(fields: [campaignId], references: [id])
+  actionType AdsActionType
+  status     AdsActionStatus @default(PENDING)
+  // Texto explicativo — mesmo `recommendation` já calculado por
+  // classifyCampaignHealth no momento da sugestão (não recalculado depois).
+  reason         String
+  suggestedAt    DateTime  @default(now())
+  resolvedAt     DateTime?
+  // Auditoria: quem confirmou/rejeitou — nunca aplicado automaticamente sem
+  // um usuário por trás (é o próprio Safety Lock).
+  resolvedByUserId String?
+  failureReason    String?
+
+  // --- Fase 4 (sugestão via IA) ---
+  source AdsActionSource @default(RULE_BASED)
+  // Só preenchido quando source = AI. 0-1, devolvido pelo modelo — nunca
+  // usado para decidir nada no backend (o Safety Lock não fica mais fraco
+  // com confidence alta), só para o admin priorizar o que revisar primeiro
+  // na fila e para auditoria futura.
+  confidenceScore Float?
+  // Só preenchido quando source = AI: contexto quantitativo que embasou a
+  // sugestão (tendência de ROAS, targetRoas usado, delta sugerido...) — só
+  // para leitura humana ao lado da sugestão, nunca reprocessado pelo
+  // dispatcher. Também é o ponto de extensão natural para parâmetros de
+  // ações futuras (ex.: REDUCE_BID.bidAdjustmentPct) sem nova migração.
+  metadata Json?
+
+  @@index([tenantId, status])
+  @@index([campaignId, actionType, status])
+  @@map("ads_action_suggestions")
+  @@schema("marketplace_ads")
 }

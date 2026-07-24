@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { TenantContextInterceptor } from './shared/prisma/tenant-context.interceptor';
 
 async function bootstrap() {
   // Tipado como NestExpressApplication (em vez do INestApplication genérico)
@@ -30,6 +31,14 @@ async function bootstrap() {
   );
 
   app.enableCors();
+
+  // Row-Level Security (docs/row-level-security-architecture.md) — abre o
+  // contexto de tenant ANTES de qualquer handler tocar o Prisma. Precisa
+  // rodar em toda requisição (por isso global, não por-controller); a
+  // extensão de RLS em shared/prisma/prisma.service.ts falha alto e
+  // explícito se alguma consulta acontecer sem este interceptor ter aberto
+  // o contexto primeiro.
+  app.useGlobalInterceptors(new TenantContextInterceptor());
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
   await app.listen(port);
