@@ -34,6 +34,13 @@ export interface FetchContext {
   marketplaceCode: string;
   tenantId?: string; // presente só quando a captura depende de credencial do vendedor
   since?: Date; // sync incremental, quando o provider suportar
+  // Sinaliza se este é o primeiro sync do canal para o tenant (nenhum pedido
+  // gravado ainda) — ver OrderSyncOrchestrator.syncTenant, que calcula isso
+  // via hasAnyOrderForChannel. Adicionado (25/07/2026) porque o Mercado
+  // Livre precisa filtrar por um CAMPO DE DATA diferente dependendo do caso
+  // (ver mercado-livre-order.provider.ts) — campo opcional e genérico o
+  // bastante para outros providers ignorarem sem quebrar nada.
+  isFirstSync?: boolean;
 }
 
 export interface ProviderHealthStatus {

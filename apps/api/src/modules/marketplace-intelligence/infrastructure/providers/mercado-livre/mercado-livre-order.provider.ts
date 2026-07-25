@@ -82,7 +82,14 @@ export class MercadoLivreOrderProvider implements OrderCapableProvider, Authenti
       return [];
     }
 
-    const rawOrders = await this.client.fetchOrders(sellerId, accessToken, ctx.since);
+    // Bug de produção (25/07/2026, ver README e aviso em
+    // MercadoLivreApiClient.fetchOrders) — backfill (primeira sync) precisa
+    // filtrar por `date_created` (pedidos CRIADOS na janela), não
+    // `date_last_updated` (qualquer pedido TOCADO, volume muito maior e
+    // imprevisível). Incremental continua em `date_last_updated` de
+    // propósito — quer pegar pedido antigo que só mudou de status agora.
+    const dateField = ctx.isFirstSync ? 'date_created' : 'date_last_updated';
+    const rawOrders = await this.client.fetchOrders(sellerId, accessToken, ctx.since, dateField);
 
     // Bug de produção (24/07/2026) — ver aviso de honestidade em
     // mercado-livre-order-normalizer.ts: `shipping.status` não vem no

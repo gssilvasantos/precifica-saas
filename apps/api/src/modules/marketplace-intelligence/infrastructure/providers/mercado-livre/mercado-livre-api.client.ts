@@ -158,14 +158,39 @@ export class MercadoLivreApiClient {
   // vendedor, ver exchangeCodeForToken/refreshAccessToken acima), diferente
   // de categories/listing_prices (públicos). Implementado por completo
   // seguindo a documentação pública (paginação via offset/limit +
-  // paging.total, filtro incremental via order.date_last_updated.from).
+  // paging.total).
+  //
+  // Bug de produção (25/07/2026) — CAUSA RAIZ real do backfill que nunca
+  // completava (ver README): o filtro sempre usou
+  // `order.date_last_updated.from`, mas esse campo reflete QUALQUER toque no
+  // pedido (reindexação/atualização interna do Mercado Livre), não só
+  // pedidos criados no período. Log de diagnóstico temporário confirmou:
+  // filtrando os últimos 90 dias por `date_last_updated`, a conta (com ~43
+  // pedidos realmente ativos) devolveu 4674 resultados — cada pedido pago
+  // ainda dispara uma consulta extra de status de envio (rate limit de 1
+  // req/s, ver fetchShipmentStatus), então só o enriquecimento desses
+  // milhares de "falsos positivos" levaria bem mais de uma hora, e nada é
+  // persistido até o lote inteiro terminar (ver
+  // OrderSyncOrchestrator.syncTenant). `dateField` agora é explícito: o
+  // BACKFILL (primeira sincronização) usa `date_created` — literalmente
+  // pedidos CRIADOS na janela, o volume real e esperado para um backfill.
+  // O INCREMENTAL continua em `date_last_updated` de propósito: aí sim
+  // queremos pegar qualquer pedido que mudou de status recentemente, mesmo
+  // que criado há mais tempo — e a janela curta (7 dias, ver
+  // order-sync-orchestrator.service.ts) mantém o volume seguro mesmo
+  // incluindo pedidos "só tocados".
   // Chamado por MercadoLivreOrderProvider.fetchOrders() sempre com um
   // accessToken já validado/renovado por MercadoLivreConnectionService.
-  async fetchOrders(sellerId: string, accessToken: string, since?: Date): Promise<unknown[]> {
+  async fetchOrders(
+    sellerId: string,
+    accessToken: string,
+    since?: Date,
+    dateField: 'date_created' | 'date_last_updated' = 'date_last_updated',
+  ): Promise<unknown[]> {
     const orders: unknown[] = [];
     let offset = 0;
     const limit = 50;
-    const sinceParam = since ? `&order.date_last_updated.from=${since.toISOString()}` : '';
+    const sinceParam = since ? `&order.${dateField}.from=${since.toISOString()}` : '';
 
     while (true) {
       const url = `${BASE_URL}/orders/search?seller=${sellerId}&offset=${offset}&limit=${limit}${sinceParam}`;
@@ -173,19 +198,8 @@ export class MercadoLivreApiClient {
       if (!response.ok) {
         throw new Error(`Mercado Livre /orders/search retornou HTTP ${response.status} (offset ${offset})`);
       }
-      const data = (await response.json()) as { results?: unknown[]; paging?: { total?: number }; [key: string]: unknown };
+      const data = (await response.json()) as { results?: unknown[]; paging?: { total?: number } };
       const batch = Array.isArray(data.results) ? data.results : [];
-
-      // LOG TEMPORÁRIO DE DIAGNÓSTICO (25/07/2026) — investigando por que
-      // ProviderSyncLog mostra candidatesFound: 0 em toda tentativa desde
-      // ontem à noite (com janela de 2 anos E de 90 dias), mesmo a conta
-      // tendo milhares de pedidos confirmados via handshake (que não usa
-      // `since`). Sem PII (só contagens/paging) — remover depois de
-      // diagnosticado, não é para ficar permanente.
-      this.logger.log(
-        `DEBUG-ML-SEARCH offset=${offset} batch.length=${batch.length} paging=${JSON.stringify(data.paging)} keys=${Object.keys(data).join(',')} since=${since?.toISOString() ?? '(nenhum)'} url=${url}`,
-      );
-
       if (batch.length === 0) break;
 
       orders.push(...batch);

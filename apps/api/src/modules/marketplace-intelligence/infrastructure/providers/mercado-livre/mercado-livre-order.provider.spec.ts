@@ -74,7 +74,7 @@ describe('MercadoLivreOrderProvider (Sprint 22 — OAuth2 real)', () => {
 
     expect(connection.getValidAccessToken).toHaveBeenCalledWith('tenant-1');
     expect(connection.getSellerId).toHaveBeenCalledWith('tenant-1');
-    expect(client.fetchOrders).toHaveBeenCalledWith('999', 'access-token-valido', undefined);
+    expect(client.fetchOrders).toHaveBeenCalledWith('999', 'access-token-valido', undefined, 'date_last_updated');
     // Pedido pago com shipping.id presente — consulta o status real do envio.
     expect(client.fetchShipmentStatus).toHaveBeenCalledWith('555', 'access-token-valido');
     expect(result).toHaveLength(1);

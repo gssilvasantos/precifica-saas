@@ -128,7 +128,7 @@ export class OrderSyncOrchestrator {
     providerCode: string,
     marketplaceCode: string,
     tenantId: string,
-    provider: { fetchOrders: (ctx: { marketplaceCode: string; tenantId: string; since?: Date }) => Promise<import('../../../shared/contracts/marketplace-provider.contract').RawOrderCandidate[]> },
+    provider: { fetchOrders: (ctx: { marketplaceCode: string; tenantId: string; since?: Date; isFirstSync?: boolean }) => Promise<import('../../../shared/contracts/marketplace-provider.contract').RawOrderCandidate[]> },
   ): Promise<void> {
     const correlationId = randomUUID();
     const logId = await this.syncLogs.start(providerCode, correlationId);
@@ -151,7 +151,7 @@ export class OrderSyncOrchestrator {
           `Primeira sincronização de ${providerCode} para tenant ${tenantId} — usando janela de backfill de ${Math.round(windowMs / (24 * 60 * 60 * 1000))} dias em vez da incremental.`,
         );
       }
-      const rawOrders = await provider.fetchOrders({ marketplaceCode, tenantId, since });
+      const rawOrders = await provider.fetchOrders({ marketplaceCode, tenantId, since, isFirstSync });
       candidatesFound = rawOrders.length;
       await this.health.recordSuccess(providerCode);
 
