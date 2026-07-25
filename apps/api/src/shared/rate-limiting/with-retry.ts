@@ -48,3 +48,16 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
 export function isRateLimitError(error: unknown): boolean {
   return error instanceof Error && /HTTP 429/.test(error.message);
 }
+
+// Predicado para timeout de rede (ver aviso em MercadoLivreApiClient —
+// nenhum fetch() desta plataforma tinha timeout explícito antes de
+// 25/07/2026; uma única chamada que nunca respondesse travava a
+// sincronização inteira PARA SEMPRE, sem nunca lançar erro nem terminar —
+// causa raiz real de vários backfills que nunca completavam). Casa com a
+// convenção de mensagem usada pelo wrapper de timeout (AbortController),
+// mesmo racional de isRateLimitError: retryable por padrão, porque um
+// timeout costuma ser transitório (rede instável, pico de latência do lado
+// do marketplace), não um erro permanente.
+export function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && /\(timeout\)/.test(error.message);
+}

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RateLimiter } from '../../../../../shared/rate-limiting/rate-limiter';
 import { getRateLimitConfig } from '../../../../../shared/rate-limiting/marketplace-rate-limits';
-import { isRateLimitError, withRetry } from '../../../../../shared/rate-limiting/with-retry';
+import { isRateLimitError, isTimeoutError, withRetry } from '../../../../../shared/rate-limiting/with-retry';
 
 const BASE_URL = 'https://api.mercadolibre.com';
 const SITE_ID = 'MLB'; // Brasil
@@ -64,24 +64,58 @@ export class MercadoLivreApiClient {
   // com o limite deste canal (ver getRateLimitConfig).
   private readonly rateLimiter = new RateLimiter(getRateLimitConfig('MERCADO_LIVRE'));
 
+  // Bug de produção (25/07/2026) — CAUSA RAIZ real de todo backfill que
+  // nunca completava, mesmo depois de corrigir o filtro de data (ver
+  // README): nenhum fetch() desta classe tinha timeout. `fetch` nativo do
+  // Node não tem timeout implícito — se a API do Mercado Livre (ou a rede
+  // entre o Render e ela) travasse numa única chamada sem nunca responder
+  // OK nem erro, a Promise correspondente ficava pendente PARA SEMPRE.
+  // Como o `Promise.all` de status de envio (ver mercado-livre-order.provider.ts)
+  // espera TODAS as chamadas resolverem, uma única travada travava a
+  // sincronização inteira: nunca lançava exceção (então `ProviderSyncLog`
+  // nunca recebia `finishedAt`/status FAILED) e nunca completava (então
+  // nunca recebia SUCCESS de verdade) — o padrão exato observado em
+  // produção (dezenas de tentativas, todas com `finishedAt: null` para
+  // sempre, mesmo após reduzir drasticamente o volume de pedidos). Timeout
+  // de 20s por requisição via AbortController: rápido o bastante pra não
+  // travar sozinho por muito tempo, folgado o bastante pra não confundir
+  // uma resposta lenta normal com travamento real.
+  private static readonly REQUEST_TIMEOUT_MS = 20_000;
+
   // Wrapper único por onde TODA chamada de rede desta classe passa —
   // agenda através do RateLimiter (nunca excede a cota configurada) e
   // retenta com backoff exponencial especificamente em HTTP 429 (a API
   // pode ter um limite mais estrito que o nosso, ou outro
-  // processo/tenant consumindo a mesma cota do lado do Mercado Livre).
-  // Qualquer outro status (404/500/...) é devolvido normalmente — cada
-  // método decide como reagir, exatamente como antes.
+  // processo/tenant consumindo a mesma cota do lado do Mercado Livre) OU
+  // timeout de rede (ver aviso acima — igualmente transitório, vale a
+  // pena tentar de novo). Qualquer outro status (404/500/...) é devolvido
+  // normalmente — cada método decide como reagir, exatamente como antes.
   private async request(url: string, init?: RequestInit): Promise<Response> {
     return withRetry(
       async () => {
-        const response = await this.rateLimiter.schedule(() => fetch(url, init));
+        const response = await this.rateLimiter.schedule(() => this.fetchWithTimeout(url, init));
         if (response.status === 429) {
           throw new Error(`Mercado Livre retornou HTTP 429 (rate limit) para ${url}`);
         }
         return response;
       },
-      { shouldRetry: isRateLimitError },
+      { shouldRetry: (error) => isRateLimitError(error) || isTimeoutError(error) },
     );
+  }
+
+  private async fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), MercadoLivreApiClient.REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        throw new Error(`Mercado Livre não respondeu em ${MercadoLivreApiClient.REQUEST_TIMEOUT_MS}ms (timeout) para ${url}`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
   }
 
   async fetchTopLevelCategories(): Promise<MlCategory[]> {
