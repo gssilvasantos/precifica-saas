@@ -29,10 +29,29 @@ const INCREMENTAL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 // meses/anos no marketplace, usava a mesma janela de 7 dias — o fetch
 // (order.date_last_updated.from) não encontrava NENHUM candidato, mesmo com
 // a conexão 100% funcional (confirmado via handshake, que não usa `since` e
-// achou milhares de pedidos). 2 anos é generoso o bastante para capturar o
-// histórico relevante de qualquer conta nova sem tornar a primeira chamada
-// ilimitada.
-const BACKFILL_WINDOW_MS = 2 * 365 * 24 * 60 * 60 * 1000;
+// achou milhares de pedidos).
+//
+// AJUSTADO em 24/07/2026 (de 2 anos para 90 dias) — segundo bug real
+// encontrado em produção, este mais sério: com 2 anos de janela, uma conta
+// com histórico de ~1000 pedidos nunca conseguia completar o backfill no
+// plano free do Render. Cada pedido pago precisa de uma consulta adicional
+// (GET /shipments/{id}, ver mercado-livre-api.client.ts) respeitando rate
+// limit de 1 req/s — 1000+ pedidos = 15-20+ minutos só de chamadas de rede.
+// O Render free tier hiberna/reinicia a instância por inatividade de
+// requisições HTTP (não enxerga o cron rodando em background como
+// "atividade"), matando o processo no meio. Como fetchOrders só retorna
+// (e só ENTÃO os pedidos são persistidos, um a um, em syncTenant) depois de
+// buscar E enriquecer TODOS os candidatos da janela, uma morte no meio do
+// caminho perde 100% do progresso — inclusive o de tentativas anteriores,
+// já que hasAnyOrderForChannel nunca vira true. Resultado observado nos
+// logs: dezenas de tentativas ao longo de horas, todas reiniciando do zero
+// ("Primeira sincronização..."), nenhuma pedido jamais persistido. 90 dias
+// cobre com folga qualquer pedido ainda operacionalmente relevante (em
+// aberto/aprovado/aguardando envio) e reduz o volume de chamadas o
+// suficiente para o backfill terminar dentro de uma única janela de
+// atividade do Render antes de hibernar. Histórico mais antigo que isso
+// não é recuperado automaticamente (limitação aceita, não um bug).
+const BACKFILL_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 
 // Pipeline por provider: Fetch (paginação já resolvida DENTRO do adapter,
 // ver marketplace-provider.contract.ts) -> Resolver SKU interno por item
@@ -43,6 +62,17 @@ const BACKFILL_WINDOW_MS = 2 * 365 * 24 * 60 * 60 * 1000;
 @Injectable()
 export class OrderSyncOrchestrator {
   private readonly logger = new Logger(OrderSyncOrchestrator.name);
+
+  // Guarda de sobreposição (24/07/2026) — em memória, por processo. Um sync
+  // de primeira sincronização (backfill) pode legitimamente levar minutos;
+  // se o cron de 10 em 10 min disparar de novo (ou o botão "Sincronizar
+  // agora" for clicado) enquanto o anterior ainda está em andamento NESTA
+  // mesma instância, as duas execuções concorrentes disputariam o mesmo
+  // RateLimiter e nunca convergiriam. Não protege contra múltiplas
+  // instâncias do processo rodando ao mesmo tempo (exigiria lock no banco),
+  // mas isso não é o caso aqui (Render free tier roda uma instância só) — o
+  // problema real observado era o MESMO processo dentro do mesmo tick.
+  private readonly providersInFlight = new Set<string>();
 
   constructor(
     private readonly registry: OrderProviderRegistry,
@@ -73,12 +103,24 @@ export class OrderSyncOrchestrator {
       return;
     }
 
-    // Bypass estreito só para descobrir quais tenants este provider atende —
-    // cada tenant reabre seu próprio contexto antes de tocar dado de pedido
-    // (ver docs/row-level-security-architecture.md, seção 3.3).
-    const tenantIds = await TenantContextStore.runAsService(() => provider.listTenantIdsToSync!());
-    for (const tenantId of tenantIds) {
-      await TenantContextStore.run(tenantId, () => this.syncTenant(provider.code, provider.marketplaceCode, tenantId, provider));
+    if (this.providersInFlight.has(providerCode)) {
+      this.logger.warn(
+        `Sync de ${providerCode} já está em andamento nesta instância — ignorando novo disparo (cron ou manual) até o anterior terminar.`,
+      );
+      return;
+    }
+    this.providersInFlight.add(providerCode);
+
+    try {
+      // Bypass estreito só para descobrir quais tenants este provider atende —
+      // cada tenant reabre seu próprio contexto antes de tocar dado de pedido
+      // (ver docs/row-level-security-architecture.md, seção 3.3).
+      const tenantIds = await TenantContextStore.runAsService(() => provider.listTenantIdsToSync!());
+      for (const tenantId of tenantIds) {
+        await TenantContextStore.run(tenantId, () => this.syncTenant(provider.code, provider.marketplaceCode, tenantId, provider));
+      }
+    } finally {
+      this.providersInFlight.delete(providerCode);
     }
   }
 
