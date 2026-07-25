@@ -173,8 +173,19 @@ export class MercadoLivreApiClient {
       if (!response.ok) {
         throw new Error(`Mercado Livre /orders/search retornou HTTP ${response.status} (offset ${offset})`);
       }
-      const data = (await response.json()) as { results?: unknown[]; paging?: { total?: number } };
+      const data = (await response.json()) as { results?: unknown[]; paging?: { total?: number }; [key: string]: unknown };
       const batch = Array.isArray(data.results) ? data.results : [];
+
+      // LOG TEMPORÁRIO DE DIAGNÓSTICO (25/07/2026) — investigando por que
+      // ProviderSyncLog mostra candidatesFound: 0 em toda tentativa desde
+      // ontem à noite (com janela de 2 anos E de 90 dias), mesmo a conta
+      // tendo milhares de pedidos confirmados via handshake (que não usa
+      // `since`). Sem PII (só contagens/paging) — remover depois de
+      // diagnosticado, não é para ficar permanente.
+      this.logger.log(
+        `DEBUG-ML-SEARCH offset=${offset} batch.length=${batch.length} paging=${JSON.stringify(data.paging)} keys=${Object.keys(data).join(',')} since=${since?.toISOString() ?? '(nenhum)'} url=${url}`,
+      );
+
       if (batch.length === 0) break;
 
       orders.push(...batch);
