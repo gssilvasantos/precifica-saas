@@ -3,6 +3,14 @@ import { MercadoLivreOrderProvider } from './mercado-livre-order.provider';
 import { MercadoLivreApiClient } from './mercado-livre-api.client';
 import { MercadoLivreConnectionService } from '../../../application/mercado-livre-connection.service';
 
+// Datas relativas a "agora" (nunca absolutas) — evita testes que quebram
+// sozinhos com o tempo (ver bug real de 25/07/2026: ENRICHMENT_WINDOW_MS
+// filtra por idade do pedido, então uma data hardcoded ficaria "velha" e
+// mudaria o comportamento testado sem ninguém mexer no teste).
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 describe('MercadoLivreOrderProvider (Sprint 22 — OAuth2 real)', () => {
   function buildProvider() {
     const client = { fetchOrders: jest.fn(), fetchShipmentStatus: jest.fn() } as unknown as jest.Mocked<MercadoLivreApiClient>;
@@ -60,7 +68,7 @@ describe('MercadoLivreOrderProvider (Sprint 22 — OAuth2 real)', () => {
         status: 'paid',
         total_amount: 100,
         currency_id: 'BRL',
-        date_created: '2026-07-01T10:00:00.000-04:00',
+        date_created: daysAgo(5),
         shipping: { id: 555 },
         order_items: [{ item: { id: 'MLB1', seller_sku: 'SKU-1' }, quantity: 1, unit_price: 100 }],
       },
@@ -91,7 +99,7 @@ describe('MercadoLivreOrderProvider (Sprint 22 — OAuth2 real)', () => {
         status: 'paid',
         total_amount: 50,
         currency_id: 'BRL',
-        date_created: '2026-06-01T10:00:00.000-04:00',
+        date_created: daysAgo(10),
         shipping: { id: 1 },
         order_items: [{ item: { id: 'MLB1', seller_sku: 'SKU-1' }, quantity: 1, unit_price: 50 }],
       },
@@ -100,7 +108,7 @@ describe('MercadoLivreOrderProvider (Sprint 22 — OAuth2 real)', () => {
         status: 'paid',
         total_amount: 60,
         currency_id: 'BRL',
-        date_created: '2026-06-02T10:00:00.000-04:00',
+        date_created: daysAgo(12),
         shipping: { id: 2 },
         order_items: [{ item: { id: 'MLB1', seller_sku: 'SKU-1' }, quantity: 1, unit_price: 60 }],
       },
@@ -126,7 +134,7 @@ describe('MercadoLivreOrderProvider (Sprint 22 — OAuth2 real)', () => {
         status: 'payment_in_process',
         total_amount: 30,
         currency_id: 'BRL',
-        date_created: '2026-07-20T10:00:00.000-04:00',
+        date_created: daysAgo(2),
         shipping: { id: 9 },
         order_items: [{ item: { id: 'MLB1', seller_sku: 'SKU-1' }, quantity: 1, unit_price: 30 }],
       },
@@ -136,6 +144,30 @@ describe('MercadoLivreOrderProvider (Sprint 22 — OAuth2 real)', () => {
 
     expect(client.fetchShipmentStatus).not.toHaveBeenCalled();
     expect(result[0]).toMatchObject({ status: 'EM_ABERTO' });
+  });
+
+  it('fetchOrders: NÃO consulta o envio para pedido pago há mais de 30 dias (bug de produção 25/07/2026 — evita travar o backfill numa conta de volume alto)', async () => {
+    const { provider, connection, client } = buildProvider();
+    connection.getValidAccessToken.mockResolvedValue('access-token-valido');
+    connection.getSellerId.mockResolvedValue('999');
+    client.fetchOrders.mockResolvedValue([
+      {
+        id: 444,
+        status: 'paid',
+        total_amount: 40,
+        currency_id: 'BRL',
+        date_created: daysAgo(45), // fora da janela de enriquecimento (30 dias)
+        shipping: { id: 10 },
+        order_items: [{ item: { id: 'MLB1', seller_sku: 'SKU-1' }, quantity: 1, unit_price: 40 }],
+      },
+    ]);
+
+    const result = await provider.fetchOrders({ marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1', isFirstSync: true });
+
+    expect(client.fetchShipmentStatus).not.toHaveBeenCalled();
+    // Sem consulta de envio, cai no fallback antigo do normalizador — nunca
+    // finge um status confirmado sem consultar a fonte real.
+    expect(result[0]).toMatchObject({ externalOrderId: '444', status: 'PREPARANDO_ENVIO' });
   });
 
   it('fetchOrders: token válido mas sellerId não resolvido (defesa em profundidade) — devolve [] sem chamar o client', async () => {
