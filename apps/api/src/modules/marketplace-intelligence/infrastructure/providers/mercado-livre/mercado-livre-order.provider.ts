@@ -89,7 +89,21 @@ export class MercadoLivreOrderProvider implements OrderCapableProvider, Authenti
     // imprevisível). Incremental continua em `date_last_updated` de
     // propósito — quer pegar pedido antigo que só mudou de status agora.
     const dateField = ctx.isFirstSync ? 'date_created' : 'date_last_updated';
+    // LOG TEMPORÁRIO DE DIAGNÓSTICO (25/07/2026) — investigando por que o
+    // sync continua nunca terminando mesmo depois da correção do campo de
+    // data (date_created) e do timeout no client. Objetivo: descobrir em
+    // qual FASE trava — busca de pedidos ou enriquecimento de envio. Sem
+    // PII (só contagens). Remover depois de diagnosticado.
+    this.logger.log(`DEBUG-ML-PHASE tenant=${ctx.tenantId} isFirstSync=${ctx.isFirstSync} dateField=${dateField} — iniciando busca de pedidos...`);
     const rawOrders = await this.client.fetchOrders(sellerId, accessToken, ctx.since, dateField);
+    const needsShipmentCheck = rawOrders.filter((raw) => {
+      const shippingId = extractShippingId(raw);
+      const orderStatus = extractOrderStatus(raw);
+      return shippingId && STATUSES_WORTH_CHECKING_SHIPMENT.has(orderStatus);
+    }).length;
+    this.logger.log(
+      `DEBUG-ML-PHASE tenant=${ctx.tenantId} busca de pedidos concluída: ${rawOrders.length} pedido(s) — ${needsShipmentCheck} precisam de consulta de envio. Iniciando enriquecimento...`,
+    );
 
     // Bug de produção (24/07/2026) — ver aviso de honestidade em
     // mercado-livre-order-normalizer.ts: `shipping.status` não vem no
@@ -115,6 +129,7 @@ export class MercadoLivreOrderProvider implements OrderCapableProvider, Authenti
         return normalizeMercadoLivreOrder(raw, resolvedShippingStatus);
       }),
     );
+    this.logger.log(`DEBUG-ML-PHASE tenant=${ctx.tenantId} enriquecimento concluído — ${candidates.length} candidato(s) normalizado(s).`);
 
     return candidates.filter((o): o is RawOrderCandidate => o !== null);
   }
