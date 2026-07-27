@@ -47,10 +47,16 @@ export default function OrderTable({ insights = [] }: Props) {
     queryKey: ['orders', filters, page],
     queryFn: () => fetchOrders(filters, page, PAGE_SIZE),
   });
+  // channelCode entra na queryKey (bug de produção 26/07/2026, ver
+  // features/orders/api.ts): antes disso, a contagem das abas nunca
+  // respeitava o canal selecionado no dropdown abaixo.
   const countsQuery = useQuery({
-    queryKey: ['orders-status-counts', mode],
-    queryFn: () => fetchOrderStatusCounts(mode),
+    queryKey: ['orders-status-counts', mode, channelCode],
+    queryFn: () => fetchOrderStatusCounts(mode, channelCode || undefined),
   });
+  const totalCount = countsQuery.data
+    ? Object.values(countsQuery.data).reduce((sum, n) => sum + n, 0)
+    : 0;
 
   const selectedChannelMeta = channelCode ? ORDER_CHANNELS.find((c) => c.code === channelCode) : undefined;
   const canSyncSelectedChannel = Boolean(selectedChannelMeta?.providerCode);
@@ -110,7 +116,7 @@ export default function OrderTable({ insights = [] }: Props) {
             status === '' ? 'bg-ink-900 text-white' : 'bg-canvas text-ink-700 hover:bg-ink-300/40',
           ].join(' ')}
         >
-          Todos
+          Todos <span className={status === '' ? 'text-white/70' : 'text-ink-500'}>({totalCount})</span>
         </button>
         {ORDER_STATUS_TABS.map((s) => {
           const meta = ORDER_STATUS_META[s];

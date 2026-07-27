@@ -82,8 +82,11 @@ export async function fetchOrders(
   return data;
 }
 
-export async function fetchOrderStatusCounts(mode?: AppDataMode): Promise<OrderStatusCounts> {
-  const { data } = await apiClient.get<OrderStatusCounts>('/orders/status-counts', { params: { mode } });
+// channelCode ausente = contagem de TODOS os canais (bug de produção
+// 26/07/2026: as abas de status ignoravam o canal selecionado no dropdown,
+// mostrando contagem global mesmo com um canal específico escolhido).
+export async function fetchOrderStatusCounts(mode?: AppDataMode, channelCode?: string): Promise<OrderStatusCounts> {
+  const { data } = await apiClient.get<OrderStatusCounts>('/orders/status-counts', { params: { mode, channelCode } });
   return data;
 }
 
