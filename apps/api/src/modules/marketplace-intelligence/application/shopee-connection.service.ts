@@ -193,8 +193,16 @@ export class ShopeeConnectionService implements AuthStrategy {
     return payload.tenantId;
   }
 
+  // .trim() é defensivo, não cosmético: um "Wrong sign" real em produção
+  // (27/07/2026) foi rastreado até aqui — copiar/colar credenciais em
+  // painéis como o do Render costuma deixar um espaço ou quebra de linha
+  // escondido no fim do valor, o que muda a chave HMAC usada em
+  // ShopeeApiClient.sign() sem que apareça na tela. `partner_id` não sofre
+  // esse problema porque é usado literalmente na URL (não como segredo de
+  // HMAC), então validar sozinho não garante que `SHOPEE_PARTNER_KEY` também
+  // está limpa.
   private requireEnv(name: string): string {
-    const value = process.env[name];
+    const value = process.env[name]?.trim();
     if (!value) {
       throw new InternalServerErrorException(
         `Variável de ambiente ${name} não configurada — a integração da Shopee não pode funcionar sem ela.`,

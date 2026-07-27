@@ -111,8 +111,11 @@ export class ShopeeHandshakeService {
     }
   }
 
+  // .trim() — mesmo racional defensivo de ShopeeConnectionService.requireEnv
+  // (ver comentário lá): espaço/quebra de linha escondida ao colar a chave
+  // num painel como o do Render muda a chave HMAC sem aparecer na tela.
   private requireEnv(name: string): string {
-    const value = process.env[name];
+    const value = process.env[name]?.trim();
     if (!value) {
       throw new InternalServerErrorException(`Variável de ambiente ${name} não configurada — a integração da Shopee não pode funcionar sem ela.`);
     }

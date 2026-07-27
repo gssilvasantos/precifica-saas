@@ -4,17 +4,19 @@ import { RateLimiter } from '../../../../../shared/rate-limiting/rate-limiter';
 import { getRateLimitConfig } from '../../../../../shared/rate-limiting/marketplace-rate-limits';
 import { isRateLimitError, isTimeoutError, withRetry } from '../../../../../shared/rate-limiting/with-retry';
 
-// Base do Shopee Open Platform. AVISO DE HONESTIDADE: `https://partner.shopeemobile.com`
-// é confirmadamente a base de PRODUÇÃO (documentação pública). A base de
-// SANDBOX/TESTE não foi validada contra uma chamada real neste sandbox (rede
-// bloqueada) — o app do Kyneti está em status "Developing" com credenciais
-// de TESTE (Test Partner_id/Test API Partner Key), o que segundo o próprio
-// painel do Shopee Open Platform ainda aponta para a base de produção com
-// throttling/dados de teste (não um subdomínio separado, ao contrário do
-// Mercado Livre) — mas isso PRECISA ser confirmado no primeiro handshake
-// real (ver ShopeeConnectionService), nunca assumido. SHOPEE_BASE_URL
-// permite sobrepor sem alterar código, caso a confirmação mostre outra
-// coisa (ex.: um domínio de sandbox dedicado).
+// Base do Shopee Open Platform.
+//
+// CONFIRMADO EM PRODUÇÃO (27/07/2026) — a suposição original deste
+// comentário estava ERRADA: as credenciais de TESTE (Test Partner_id/Test
+// API Partner Key) NÃO funcionam contra `https://partner.shopeemobile.com`
+// (primeiro handshake real devolveu `{"error":"invalid_partner_id"}`). A
+// Shopee usa um domínio de SANDBOX totalmente separado —
+// `https://partner.test-stable.shopeemobile.com` — para credenciais de
+// teste, ao contrário do que o painel do app sugeria. `DEFAULT_BASE_URL`
+// continua sendo a base de PRODUÇÃO (para quando o app for aprovado e
+// ganhar credenciais reais); `SHOPEE_BASE_URL` deve ser explicitamente
+// setada para a URL de sandbox acima enquanto o app estiver em modo de
+// teste — ver .env.example e docs/auth-security.md, seção 9.
 const DEFAULT_BASE_URL = 'https://partner.shopeemobile.com';
 
 // Resposta de POST /api/v2/auth/token/get (troca de code) e de
