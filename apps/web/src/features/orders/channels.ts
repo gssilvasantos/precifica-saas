@@ -3,14 +3,15 @@
 // marcas — mesmo aviso de honestidade de features/pricing/channels.ts, não
 // validadas pixel a pixel contra guideline oficial.
 //
-// AVISO DE HONESTIDADE — ATUALIZADO em 24/07/2026: NUVEMSHOP e
-// MERCADO_LIVRE têm adapter real (`NuvemshopOrderProvider`/
-// `MercadoLivreOrderProvider`) — os outros 5 códigos abaixo são os canais
-// que a arquitetura do provider já suporta plugar (Interface Segregation
-// via `OrderCapableProvider`, ver docs/orders-architecture.md §11.1), mas
-// ainda SEM implementação. Aparecem no filtro/badge porque o pedido do
-// usuário foi que a UI já reflita o hub completo — a tabela simplesmente
-// não vai retornar pedidos desses canais até o respectivo provider existir.
+// AVISO DE HONESTIDADE — ATUALIZADO em 27/07/2026: NUVEMSHOP,
+// MERCADO_LIVRE e SHOPEE têm adapter real (`NuvemshopOrderProvider`/
+// `MercadoLivreOrderProvider`/`ShopeeOrderProvider`) — os outros 4 códigos
+// abaixo são os canais que a arquitetura do provider já suporta plugar
+// (Interface Segregation via `OrderCapableProvider`, ver
+// docs/orders-architecture.md §11.1), mas ainda SEM implementação. Aparecem
+// no filtro/badge porque o pedido do usuário foi que a UI já reflita o hub
+// completo — a tabela simplesmente não vai retornar pedidos desses canais
+// até o respectivo provider existir.
 //
 // `providerCode` (novo) — só existe para canais com sync REAL de pedidos;
 // usado pelo botão "Sincronizar agora" (OrderTable.tsx) para saber qual
@@ -47,7 +48,15 @@ export const ORDER_CHANNELS: OrderChannelMeta[] = [
     implemented: true,
     providerCode: 'MERCADO_LIVRE_ORDERS',
   },
-  { code: 'SHOPEE', label: 'Shopee', initial: 'S', brandColor: '#EE4D2D', brandInk: '#FFFFFF', implemented: false },
+  {
+    code: 'SHOPEE',
+    label: 'Shopee',
+    initial: 'S',
+    brandColor: '#EE4D2D',
+    brandInk: '#FFFFFF',
+    implemented: true,
+    providerCode: 'SHOPEE_ORDERS',
+  },
   { code: 'TIKTOK_SHOP', label: 'TikTok Shop', initial: 'TT', brandColor: '#000000', brandInk: '#FFFFFF', implemented: false },
   { code: 'AMAZON', label: 'Amazon', initial: 'A', brandColor: '#FF9900', brandInk: '#131921', implemented: false },
   { code: 'MAGALU', label: 'Magalu', initial: 'M', brandColor: '#0086FF', brandInk: '#FFFFFF', implemented: false },
