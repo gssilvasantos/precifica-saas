@@ -667,6 +667,50 @@ model MercadoLivreConnection {
   @@schema("marketplace_intelligence")
 }
 
+// Integração Shopee Open Platform (27/07/2026) — mesmo racional estrutural
+// de MercadoLivreConnection acima (um registro por tenant, credenciais
+// SEMPRE criptografadas em repouso via CredentialEncryptionService), mas
+// para um mecanismo de auth diferente: Shopee não usa OAuth2 "clássico"
+// (RFC 6749) com client_id/client_secret — usa HMAC-SHA256 sobre
+// partner_id+path+timestamp com uma partner_key de APP (ver
+// ShopeeApiClient). shopId é o equivalente ao sellerId do ML: identificador
+// da LOJA (não do vendedor em si) devolvido no redirect de autorização e
+// confirmado na troca do `code`, necessário em toda chamada autenticada.
+//
+// AVISO DE HONESTIDADE: mesmo padrão de toda integração nova deste projeto
+// — o fluxo abaixo segue a documentação pública do Shopee Open Platform
+// (partner.shopeemobile.com) e guias de terceiros (não foi possível ler a
+// documentação oficial completa, renderizada via JS, a partir deste
+// sandbox), e NUNCA foi exercitado contra uma chamada real (app em status
+// "Developing", só com credenciais de TESTE). Ver ShopeeApiClient para o
+// detalhamento exato do que está e não está validado.
+model ShopeeConnection {
+  tenantId String @id
+
+  // ID numérico da loja Shopee — devolvido como `shop_id` no redirect de
+  // /api/v2/shop/auth_partner e confirmado na resposta de /auth/token/get.
+  shopId String
+
+  accessTokenEnc  String // criptografado em repouso (CredentialEncryptionService)
+  refreshTokenEnc String // idem — permite renovar sem nova autorização do lojista
+
+  // Quando o access_token expira (agora + expire_in da resposta do Shopee,
+  // tipicamente 4h — MAIS CURTO que o do Mercado Livre, ~6h). O
+  // refresh_token em si expira em ~1 mês (Shopee); se a renovação falhar
+  // depois disso, o lojista precisa reautorizar do zero (mesmo tratamento
+  // de falha usado em MercadoLivreConnectionService: alerta ERROR, nunca
+  // silencioso).
+  expiresAt DateTime
+
+  isActive        Boolean   @default(true)
+  lastRefreshedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("shopee_connections")
+  @@schema("marketplace_intelligence")
+}
+
 // ============================================================================
 // Integration Ops — infraestrutura genérica de sincronização com fontes
 // externas (scheduler, log, health). Vivia dentro de marketplace_intelligence

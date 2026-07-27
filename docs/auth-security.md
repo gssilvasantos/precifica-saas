@@ -1,6 +1,6 @@
 # Segurança de Autenticação e Credenciais de Integração
 
-**Status:** cobre a criptografia em repouso usada por toda credencial de integração (Olist, Nuvemshop, Mercado Livre) e o fluxo OAuth2 completo do Mercado Livre (Sprint 22) — autorização, callback, renovação automática. Não é um documento de segurança da aplicação inteira (autenticação de usuário/JWT já é tratada em `identity-access`); o escopo aqui é especificamente "como o Kyneti guarda e usa a chave de outra empresa em nome do tenant".
+**Status:** cobre a criptografia em repouso usada por toda credencial de integração (Olist, Nuvemshop, Mercado Livre, Shopee) e os dois fluxos de autorização por navegador implementados até aqui: OAuth2 completo do Mercado Livre (Sprint 22) e HMAC-SHA256 da Shopee (27/07/2026) — ver seção 9. Não é um documento de segurança da aplicação inteira (autenticação de usuário/JWT já é tratada em `identity-access`); o escopo aqui é especificamente "como o Kyneti guarda e usa a chave de outra empresa em nome do tenant".
 
 ## 1. Por que este documento existe agora
 
@@ -101,3 +101,49 @@ Nenhuma dessas é lida via um `ConfigModule` tipado — segue o mesmo padrão j�
 - Fluxo nunca exercitado contra credenciais reais de um app Mercado Livre neste ambiente (sandbox sem rede) — a implementação segue a documentação pública (RFC 6749 + extensões do ML) à risca, mas a primeira conexão real de um tenant é o teste definitivo de que o formato de resposta bate exatamente com o assumido em `MlOAuthTokenResponse`.
 
 Testes: `mercado-livre-connection.service.spec.ts` (URL de autorização não vaza tenantId, callback decodifica/valida state, state adulterado/expirado rejeitado, renovação automática quando vencido ou perto de vencer, token válido nunca renova, disconnect/getStatus/listActiveTenantIds), `mercado-livre-order.provider.spec.ts` (atualizado para consumir a conexão real em vez de lançar `NotImplementedException`).
+
+## 9. Fluxo de autorização da Shopee (27/07/2026) — HMAC-SHA256, não OAuth2 clássico
+
+Mesma estrutura de camada de conexão do Mercado Livre (um registro por tenant em `ShopeeConnection`, credenciais sempre criptografadas via o mesmo `CredentialEncryptionService` da seção 2), mas o mecanismo de autenticação da Shopee Open Platform é fundamentalmente diferente: não há `client_id`/`client_secret` trocados por um `access_token` via `grant_type` (RFC 6749). Em vez disso, **toda** chamada — autenticada ou não — carrega `partner_id` + `timestamp` + uma assinatura `sign = HMAC-SHA256(mensagem, partner_key)` como query params; a mensagem assinada muda conforme o tipo de chamada:
+
+- **Chamadas públicas/de auth** (antes de uma loja estar autorizada): `mensagem = partner_id + path + timestamp`.
+- **Chamadas de loja já autorizada** (fora de escopo desta sprint — reservado para o futuro `ShopeeOrderProvider`): `mensagem = partner_id + path + timestamp + access_token + shop_id`.
+
+```
+1. AUTORIZAÇÃO (frontend, autenticado)
+   GET /marketplace-intelligence/shopee/authorize  [JWT, ADMIN]
+        │ ShopeeConnectionService.buildAuthorizationUrl(tenantId)
+        │   state = encrypt({ tenantId, issuedAt: now })       — MESMO mecanismo da seção 4
+        │   redirect = SHOPEE_REDIRECT_URI + "?state=" + state  — a Shopee NÃO tem `state` nativo
+        │   sign = HMAC-SHA256(partner_id + "/api/v2/shop/auth_partner" + timestamp, partner_key)
+        ▼
+   { authorizeUrl: "https://partner.shopeemobile.com/api/v2/shop/auth_partner?partner_id=...&sign=...&redirect=<nosso state embutido>" }
+        ▼
+2. TELA DE LOGIN/APROVAÇÃO — 100% no domínio da Shopee
+        ▼
+3. CALLBACK (público, SEM guard JWT)
+   GET /marketplace-intelligence/shopee/callback?code=...&shop_id=...&state=...
+        │ ShopeeConnectionService.handleCallback(code, shopId, state)
+        │   1. decrypt(state) -> { tenantId, issuedAt }  (mesma validação de integridade/janela da seção 4)
+        │   2. ShopeeApiClient.exchangeCodeForToken(...)  POST /api/v2/auth/token/get {code, shop_id, partner_id}
+        │   3. encrypt(access_token) + encrypt(refresh_token) -> upsert em ShopeeConnection
+        ▼
+4. RENOVAÇÃO AUTOMÁTICA — mesma margem de segurança (5 min) da seção 5, mas o access_token da
+   Shopee expira em ~4h (contra ~6h do Mercado Livre) — a janela de renovação é proporcionalmente
+   mais apertada. refresh_token da Shopee expira em ~1 mês; se a renovação falhar depois disso,
+   só reautorização manual resolve (mesmo tratamento de falha: alerta ERROR, nunca silencioso).
+```
+
+**Diferença de design deliberada — `state` embutido no `redirect`, não um parâmetro OAuth nativo:** a Shopee Open Platform não devolve um `state` próprio no callback (ao contrário do Mercado Livre). A solução adotada é embutir nosso `state` criptografado como query param do próprio `redirect` passado a `/api/v2/shop/auth_partner` — a Shopee apenas ANEXA `code`/`shop_id` ao redirecionar de volta, preservando query params já presentes (técnica padrão de integradores terceiros). **Isso ainda não foi validado contra um redirect real da Shopee** — é o primeiro item a confirmar no handshake real do usuário.
+
+**AVISO DE HONESTIDADE (mais forte que o do Mercado Livre, de propósito):** diferente do Sprint 22 (onde a documentação pública do Mercado Livre pôde ser lida por completo), o fluxo acima foi montado a partir da documentação pública do Shopee Open Platform e de um guia de terceiro (não foi possível ler a documentação oficial renderizada via JS a partir deste sandbox) — e nunca foi exercitado contra uma chamada real (app "Kyneti" em status "Developing", só com credenciais de TESTE). Pontos especificamente não confirmados, cada um flagado no código-fonte:
+
+- Se a base de teste (`Test Partner_id`/`Test API Partner Key`) usa a mesma `https://partner.shopeemobile.com` ou um subdomínio de sandbox dedicado (`SHOPEE_BASE_URL` permite sobrepor sem alterar código).
+- Se a técnica de embutir `state` no `redirect` sobrevive ao redirect real da Shopee.
+- O formato exato da resposta de erro de negócio (`ShopeeOAuthTokenResponse.error`/`message`) em cenários de `code` inválido/expirado.
+
+Escopo desta sprint: **só a camada de conexão** (autorização/callback/renovação/desconexão) — nenhum endpoint de pedidos/produtos/preços da Shopee foi implementado ainda (`ShopeeOrderProvider` etc. ficam para depois que o handshake real confirmar os pontos acima, mesmo racional de o Sprint 21 do Mercado Livre — `MercadoLivreOrderProvider` — ter precedido o Sprint 22 de OAuth2 real).
+
+Variáveis de ambiente novas: `SHOPEE_PARTNER_ID`, `SHOPEE_PARTNER_KEY`, `SHOPEE_REDIRECT_URI`, `SHOPEE_BASE_URL` (opcional). Ver `.env.example`.
+
+Testes: `shopee-api-client.spec.ts` (assinatura HMAC bate com a fórmula documentada, `SHOPEE_BASE_URL` sobrepõe corretamente, partner_key nunca vaza na URL), `shopee-connection.service.spec.ts` (mesma cobertura de `mercado-livre-connection.service.spec.ts`: URL de autorização não vaza tenantId, callback decodifica/valida state, state adulterado/expirado rejeitado, renovação automática quando vencido ou perto de vencer, token válido nunca renova, disconnect/getStatus/listActiveTenantIds).

@@ -7,26 +7,32 @@ import { ChangeEventsQueryService } from './application/change-events-query.serv
 import { PriceUpdateDispatcherService } from './application/price-update-dispatcher.service';
 import { MercadoLivreConnectionService } from './application/mercado-livre-connection.service';
 import { MercadoLivreHandshakeService } from './application/mercado-livre-handshake.service';
+import { ShopeeConnectionService } from './application/shopee-connection.service';
+import { ShopeeHandshakeService } from './application/shopee-handshake.service';
 
 import { PrismaMarketplaceRepository } from './infrastructure/prisma-marketplace.repository';
 import { PrismaMarketplaceRuleRepository } from './infrastructure/prisma-marketplace-rule.repository';
 import { PrismaChangeEventRepository } from './infrastructure/prisma-change-event.repository';
 import { PrismaMercadoLivreConnectionRepository } from './infrastructure/prisma-mercado-livre-connection.repository';
+import { PrismaShopeeConnectionRepository } from './infrastructure/prisma-shopee-connection.repository';
 import { MercadoLivreApiClient } from './infrastructure/providers/mercado-livre/mercado-livre-api.client';
 import { MercadoLivreFeeRuleProvider } from './infrastructure/providers/mercado-livre/mercado-livre-fee-rule.provider';
 import { MercadoLivreOrderProvider } from './infrastructure/providers/mercado-livre/mercado-livre-order.provider';
 import { MercadoLivreAdsProvider } from './infrastructure/providers/mercado-livre/mercado-livre-ads.provider';
+import { ShopeeApiClient } from './infrastructure/providers/shopee/shopee-api-client';
 import { SyncSchedulerJob } from './infrastructure/scheduler/sync-scheduler.job';
 
 import { MarketplaceRulesAdminController } from './interface/controllers/marketplace-rules-admin.controller';
 import { MarketplaceChangeEventsController } from './interface/controllers/marketplace-change-events.controller';
 import { MarketplaceProvidersController } from './interface/controllers/marketplace-providers.controller';
 import { MercadoLivreConnectionController } from './interface/controllers/mercado-livre-connection.controller';
+import { ShopeeConnectionController } from './interface/controllers/shopee-connection.controller';
 
 import { MARKETPLACE_REPOSITORY } from './application/ports/marketplace-repository.port';
 import { MARKETPLACE_RULE_REPOSITORY } from './application/ports/marketplace-rule-repository.port';
 import { CHANGE_EVENT_REPOSITORY } from './application/ports/change-event-repository.port';
 import { MERCADO_LIVRE_CONNECTION_REPOSITORY } from './application/ports/mercado-livre-connection-repository.port';
+import { SHOPEE_CONNECTION_REPOSITORY } from './application/ports/shopee-connection-repository.port';
 import { FEE_RULE_RESOLVER, PRICE_UPDATE_DISPATCHER } from '../../shared/contracts/tokens';
 import { SyncOpsModule } from '../../shared/sync-ops/sync-ops.module';
 import { ErpIntegrationModule } from '../erp-integration/erp-integration.module';
@@ -51,6 +57,7 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     MarketplaceChangeEventsController,
     MarketplaceProvidersController,
     MercadoLivreConnectionController,
+    ShopeeConnectionController,
   ],
   providers: [
     MarketplaceProviderRegistry,
@@ -87,6 +94,19 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // que isto é uma classe separada de MercadoLivreConnectionService.
     MercadoLivreHandshakeService,
     { provide: MERCADO_LIVRE_CONNECTION_REPOSITORY, useClass: PrismaMercadoLivreConnectionRepository },
+
+    // Integração Shopee Open Platform (27/07/2026) — mesmo racional
+    // estrutural de MercadoLivreConnectionService/ApiClient acima, mas com
+    // auth HMAC-SHA256 (type='API_KEY_HMAC') em vez de OAuth2 clássico. Só a
+    // camada de conexão por enquanto (sem ShopeeOrderProvider ainda) — ver
+    // README.
+    ShopeeApiClient,
+    ShopeeConnectionService,
+    // Diagnóstico read-only da conexão (GET /shop/get_shop_info) — mesmo
+    // racional de MercadoLivreHandshakeService, classe separada de
+    // ShopeeConnectionService.
+    ShopeeHandshakeService,
+    { provide: SHOPEE_CONNECTION_REPOSITORY, useClass: PrismaShopeeConnectionRepository },
     // Registro central de providers (seção 12 do documento de arquitetura do
     // módulo): adicionar um marketplace novo = adicionar uma linha aqui,
     // nunca alterar MarketplaceProviderRegistry/RuleSyncOrchestrator.

@@ -25,8 +25,14 @@ import { RateLimiterConfig } from './rate-limiter';
 // mesmo os já buscados). Sem confirmação do limite oficial documentado,
 // mantido deliberadamente no DEFAULT_RATE_LIMIT (1 req/s) — conservador,
 // nunca o contrário.
+// SHOPEE (27/07/2026) — mesmo aviso de honestidade acima: limite oficial não
+// verificado contra documentação ao vivo neste sandbox. Valor idêntico ao
+// DEFAULT_RATE_LIMIT (1 req/s) de propósito — declarado explicitamente aqui
+// (em vez de deixar cair no fallback) só para documentar que a decisão foi
+// consciente, não uma omissão, seguindo a convenção descrita acima.
 export const MARKETPLACE_RATE_LIMITS: Record<string, RateLimiterConfig> = {
   NUVEMSHOP: { requestsPerInterval: 2, intervalMs: 1000 },
+  SHOPEE: { requestsPerInterval: 1, intervalMs: 1000 },
 };
 
 // Fail-safe para qualquer canal sem entrada explícita acima — conservador
