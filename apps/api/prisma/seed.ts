@@ -134,6 +134,25 @@ async function main() {
     });
   }
 
+  // Shopee (27/07/2026) — mesmo bug de produção documentado acima para
+  // Mercado Livre/Nuvemshop: sem esta linha, ShopeeOrderProvider nunca é
+  // sincronizado pelo cron, mesmo já registrado em ORDER_CAPABLE_PROVIDERS.
+  console.log('Configurando schedule de sincronização de PEDIDOS da Shopee...');
+  const shopeeId = marketplacesByCode.get('SHOPEE');
+  if (shopeeId) {
+    await prisma.providerSyncSchedule.upsert({
+      where: { providerCode: 'SHOPEE_ORDERS' },
+      create: {
+        providerCode: 'SHOPEE_ORDERS',
+        marketplaceId: shopeeId,
+        capability: 'ORDERS',
+        intervalMinutes: 10,
+        autoTrust: false,
+      },
+      update: {},
+    });
+  }
+
   console.log('Configurando schedule de monitoramento do Competition Intelligence...');
   await prisma.providerSyncSchedule.upsert({
     where: { providerCode: 'COMPETITION_RADAR_MONITOR' },

@@ -28,10 +28,10 @@ export interface ShopeeHandshakeResult {
 // camada de conexão, ver README) — get_shop_info é o endpoint autenticado
 // mais leve disponível para provar que o access_token/shop_id funcionam.
 //
-// AVISO DE HONESTIDADE: mesmo aviso de ShopeeApiClient — a cadeia inteira
-// nunca foi exercitada contra uma chamada real (app "Developing",
-// credenciais de teste). Este serviço é exatamente a ferramenta para o
-// usuário validar isso pela primeira vez.
+// CONFIRMADO (27/07/2026): a cadeia inteira foi exercitada com sucesso via
+// este serviço contra a Shopee real (sandbox) — testConnection retornou
+// success=true, com shop_name/status reais devolvidos por get_shop_info. Ver
+// docs/auth-security.md, seção 9, para o histórico completo da validação.
 @Injectable()
 export class ShopeeHandshakeService {
   private readonly logger = new Logger(ShopeeHandshakeService.name);

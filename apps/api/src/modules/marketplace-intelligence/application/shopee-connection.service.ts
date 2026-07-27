@@ -33,12 +33,11 @@ export interface ShopeeConnectionStatus {
 // cada chamada com HMAC-SHA256, não usa Bearer/OAuth2 clássico — ver
 // ShopeeApiClient).
 //
-// AVISO DE HONESTIDADE: ver o cabeçalho de shopee-api-client.ts — o fluxo
-// completo (auth_partner -> callback -> token/get -> access_token/get)
-// segue a documentação pública do Shopee Open Platform e nunca foi
-// exercitado contra uma chamada real neste sandbox. Precisa ser validado no
-// primeiro handshake real feito pelo usuário (app "Developing", credenciais
-// de teste).
+// CONFIRMADO (27/07/2026, ver docs/auth-security.md seção 9): o fluxo completo
+// (auth_partner -> callback -> token/get -> access_token/get) foi exercitado
+// contra a Shopee real (sandbox) com sucesso — conexão persistida, token
+// renovado automaticamente, handshake de diagnóstico confirmou shop_name/status
+// reais. Ver ShopeeHandshakeService para o teste de ponta a ponta.
 @Injectable()
 export class ShopeeConnectionService implements AuthStrategy {
   readonly type = 'API_KEY_HMAC' as const;

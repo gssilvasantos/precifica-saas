@@ -278,8 +278,25 @@ Testes novos: `mercado-livre-order-status.mapper.spec.ts` (10 casos), `mercado-l
 - Dados do comprador (nome, documento, endereço de entrega) — não capturados ainda; aditivo ao contrato quando pedido.
 - Verificação de assinatura de webhook por canal + parsing dirigido pelo payload (hoje é só um nudge, seção 6).
 - `FATURADO` automático via integração fiscal real.
-- Mercado Livre ORDERS operacional desde a Sprint 22 (OAuth2 completo, ver `docs/auth-security.md`). Providers para Shopee/TikTok Shop/Amazon/Magalu/SHEIN seguem só com a estrutura pronta desde a Etapa 17, sem implementação nem conexão.
+- Mercado Livre ORDERS operacional desde a Sprint 22 (OAuth2 completo, ver `docs/auth-security.md`). Shopee ORDERS implementado em 27/07/2026 (ver seção 16) — TikTok Shop/Amazon/Magalu/SHEIN seguem só com a estrutura pronta desde a Etapa 17, sem implementação nem conexão.
 - Rate limiter por `storeId`/conta em vez de global por client, se o volume multi-tenant justificar (seção 11.3).
 - Emissão de NF-e real consumindo `fiscalResponsibility`/`buyerTaxId`/`invoiceNumber`/`OrderItem.taxAmount` — hoje são só os campos do contrato, sem consumidor ainda (mesmo padrão de extensão do `ORDER_EVENTS.READY_FOR_FULFILLMENT`, seção 8).
 - Frontend consumindo `GET /orders/:id/margin` (Etapa 19) — hoje só o backend existe; a tabela de pedidos do `apps/web` (Etapa 18) ainda mostra só `netAmount`, não a margem por custo.
 - `npx prisma migrate dev` real (com Postgres/rede disponíveis) para confirmar que a migração escrita à mão (`20260711130000_order_cost_and_fiscal_catchup`) bate exatamente com o diff que o Prisma geraria — ela foi cuidadosamente escrita para isso, mas nunca foi executada de fato neste ambiente.
+
+## 16. Shopee ORDERS (27/07/2026) — depois do handshake real confirmado
+
+Terceiro `OrderCapableProvider` do hub (`ShopeeOrderProvider`, `marketplace-intelligence/infrastructure/providers/shopee/`), construído só depois de a camada de conexão da Shopee (`ShopeeConnectionService`) ter sido validada de ponta a ponta contra a Shopee de verdade (ver `docs/auth-security.md`, seção 9) — mesma sequência de maturidade já usada com o Mercado Livre: conexão primeiro, pedidos depois.
+
+**Duas diferenças estruturais da Shopee em relação a Mercado Livre/Nuvemshop, ambas isoladas dentro do `ShopeeApiClient`, nunca vazadas para o orquestrador genérico:**
+
+- **Janela de tempo fatiada:** `get_order_list` da Shopee não aceita `time_from`/`time_to` maior que 15 dias por chamada (documentação pública) — diferente do Mercado Livre/Nuvemshop, que filtram a janela inteira de uma vez. `ShopeeApiClient.fetchOrderList` fatia a janela pedida em blocos de até 15 dias internamente, paginando por cursor dentro de cada bloco, e devolve a lista completa de `order_sn` já deduplicada — o `OrderSyncOrchestrator` nunca sabe que isso aconteceu.
+- **Duas chamadas em vez de uma:** a Shopee separa listagem (`get_order_list`, só devolve `order_sn`/status) de detalhe (`get_order_detail`, devolve itens/valores/datas) — por isso `ShopeeOrderProvider.fetchOrders` faz as duas chamadas em sequência (lista -> detalhe em lotes de até 50 `order_sn`, limite documentado da Shopee), diferente do Mercado Livre/Nuvemshop, que trazem tudo numa única chamada paginada.
+
+**Mesmo racional de backfill/incremental do Mercado Livre:** `ctx.isFirstSync` decide o campo de data (`create_time` no backfill, `update_time` no incremental) — ver `mercado-livre-order.provider.ts` para o racional completo de por que os dois campos existem.
+
+**AVISO DE HONESTIDADE:** diferente da camada de conexão (auth_partner/token/get_shop_info), a captura de pedidos em si (`get_order_list`/`get_order_detail`) nunca foi exercitada contra a Shopee real — segue a documentação pública do Shopee Open Platform v2. `feeAmount` é deliberadamente `0` (a comissão real da Shopee só é exposta pelo endpoint de escrow, `/api/v2/payment/get_escrow_detail`, não implementado nesta passada) — mesmo princípio de nunca inventar uma taxa já seguido em toda a plataforma. O primeiro sync real de pedidos do usuário é quem confirma ou refuta os formatos assumidos em `shopee-order-normalizer.ts`/`shopee-order-status.mapper.ts`.
+
+**Wiring:** `ShopeeOrderProvider` registrado em `marketplace-intelligence.module.ts` (exportado) e injetado em `ORDER_CAPABLE_PROVIDERS` (`orders.module.ts`) — nenhuma linha de `OrderProviderRegistry`/`OrderSyncOrchestrator` mudou. Seed de `ProviderSyncSchedule` (`SHOPEE_ORDERS`, capability `ORDERS`, 10 min) adicionado ao `prisma/seed.ts`, mesmo bug de produção documentado na seção 11 (sem essa linha, o cron nunca dispara sync nenhum para o canal).
+
+Testes novos: `shopee-order-status.mapper.spec.ts` (8 casos, incluindo fallback conservador para status desconhecido), `shopee-order-normalizer.spec.ts` (payload completo, sem pay_time não fabrica data, item sem SKU descartado), `shopee-order.provider.spec.ts` (capacidade declarada, gate de shopId não resolvido, backfill vs incremental, propagação de exceção sem conexão ativa).

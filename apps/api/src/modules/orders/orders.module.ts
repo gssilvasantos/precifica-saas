@@ -16,6 +16,7 @@ import { ErpIntegrationModule } from '../erp-integration/erp-integration.module'
 import { NuvemshopOrderProvider } from '../erp-integration/infrastructure/nuvemshop/nuvemshop-order.provider';
 import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marketplace-intelligence.module';
 import { MercadoLivreOrderProvider } from '../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-order.provider';
+import { ShopeeOrderProvider } from '../marketplace-intelligence/infrastructure/providers/shopee/shopee-order.provider';
 import { WebhooksController } from './interface/controllers/webhooks.controller';
 import { ORDER_FINANCIALS_READER } from '../../shared/contracts/tokens';
 import { ObservabilityModule } from '../../shared/observability/observability.module';
@@ -53,8 +54,15 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     AuditSeederService,
     {
       provide: ORDER_CAPABLE_PROVIDERS,
-      useFactory: (nuvemshop: NuvemshopOrderProvider, mercadoLivre: MercadoLivreOrderProvider) => [nuvemshop, mercadoLivre],
-      inject: [NuvemshopOrderProvider, MercadoLivreOrderProvider],
+      // Shopee (27/07/2026) — mesma receita comentada acima: nenhuma linha de
+      // OrderProviderRegistry/OrderSyncOrchestrator mudou para este canal
+      // entrar, só mais um provider nesta lista + injeção abaixo.
+      useFactory: (nuvemshop: NuvemshopOrderProvider, mercadoLivre: MercadoLivreOrderProvider, shopee: ShopeeOrderProvider) => [
+        nuvemshop,
+        mercadoLivre,
+        shopee,
+      ],
+      inject: [NuvemshopOrderProvider, MercadoLivreOrderProvider, ShopeeOrderProvider],
     },
     { provide: ORDER_REPOSITORY, useClass: PrismaOrderRepository },
     // Etapa 20 — expõe OrdersService também como a implementação da porta

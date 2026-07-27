@@ -20,6 +20,7 @@ import { MercadoLivreFeeRuleProvider } from './infrastructure/providers/mercado-
 import { MercadoLivreOrderProvider } from './infrastructure/providers/mercado-livre/mercado-livre-order.provider';
 import { MercadoLivreAdsProvider } from './infrastructure/providers/mercado-livre/mercado-livre-ads.provider';
 import { ShopeeApiClient } from './infrastructure/providers/shopee/shopee-api-client';
+import { ShopeeOrderProvider } from './infrastructure/providers/shopee/shopee-order.provider';
 import { SyncSchedulerJob } from './infrastructure/scheduler/sync-scheduler.job';
 
 import { MarketplaceRulesAdminController } from './interface/controllers/marketplace-rules-admin.controller';
@@ -97,15 +98,19 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
 
     // Integração Shopee Open Platform (27/07/2026) — mesmo racional
     // estrutural de MercadoLivreConnectionService/ApiClient acima, mas com
-    // auth HMAC-SHA256 (type='API_KEY_HMAC') em vez de OAuth2 clássico. Só a
-    // camada de conexão por enquanto (sem ShopeeOrderProvider ainda) — ver
-    // README.
+    // auth HMAC-SHA256 (type='API_KEY_HMAC') em vez de OAuth2 clássico.
     ShopeeApiClient,
     ShopeeConnectionService,
     // Diagnóstico read-only da conexão (GET /shop/get_shop_info) — mesmo
     // racional de MercadoLivreHandshakeService, classe separada de
     // ShopeeConnectionService.
     ShopeeHandshakeService,
+    // Segunda capacidade da Shopee (ORDERS), depois do handshake de conexão
+    // confirmado em produção (27/07/2026) — classe separada de
+    // ShopeeConnectionService, mesmo racional de MercadoLivreOrderProvider.
+    // Exportada abaixo para o módulo Orders registrar em
+    // ORDER_CAPABLE_PROVIDERS.
+    ShopeeOrderProvider,
     { provide: SHOPEE_CONNECTION_REPOSITORY, useClass: PrismaShopeeConnectionRepository },
     // Registro central de providers (seção 12 do documento de arquitetura do
     // módulo): adicionar um marketplace novo = adicionar uma linha aqui,
@@ -141,6 +146,9 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     MercadoLivreAdsProvider,
     MercadoLivreApiClient,
     MercadoLivreConnectionService,
+    // Shopee ORDERS — mesmo racional de MercadoLivreOrderProvider: OrdersModule
+    // importa este módulo só para consumir esta classe já registrada aqui.
+    ShopeeOrderProvider,
   ],
 })
 export class MarketplaceIntelligenceModule {}

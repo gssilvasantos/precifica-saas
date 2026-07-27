@@ -45,16 +45,13 @@ export interface ShopeeOAuthTokenResponse {
 // requisição, autenticada ou não. `sign` varia conforme o tipo de chamada
 // (ver `sign()` abaixo).
 //
-// AVISO DE HONESTIDADE (mesmo padrão do MercadoLivreApiClient): o formato de
-// assinatura, os paths de troca/renovação de token e o formato da resposta
-// seguem a documentação pública do Shopee Open Platform e um guia de
-// terceiro (developer.inlinex.com.sg) consultados neste sandbox — nunca
-// exercitados contra uma chamada real (app em status "Developing", só
-// credenciais de teste). Isso deve ser validado no primeiro
-// handshake/conexão real feita pelo usuário, ANTES de confiar neste client
-// para qualquer fluxo de produção (pedidos, preços). Nenhum endpoint de
-// pedidos/produtos foi implementado ainda de propósito — só o necessário
-// para a camada de conexão OAuth (ver Pending Tasks / README).
+// CONFIRMADO em handshake real (27/07/2026, ver docs/auth-security.md, seção 9):
+// assinatura HMAC, troca/renovação de token e fetchShopInfo (get_shop_info)
+// foram exercitados contra a Shopee de verdade (sandbox) e retornaram
+// respostas reais no formato assumido aqui — não é mais só suposição de
+// documentação pública/guia de terceiro. Nenhum endpoint de pedidos/produtos
+// foi implementado ainda de propósito — só o necessário para a camada de
+// conexão OAuth (ver Pending Tasks / README); esses seguem não validados.
 @Injectable()
 export class ShopeeApiClient {
   private readonly logger = new Logger(ShopeeApiClient.name);
@@ -223,5 +220,139 @@ export class ShopeeApiClient {
       throw new Error(`Shopee ${path} retornou erro de negócio: ${data.error} — ${data.message ?? ''}`);
     }
     return data;
+  }
+
+  // --- Pedidos (ShopeeOrderProvider — hub de pedidos multicanal) ---
+  //
+  // AVISO DE HONESTIDADE: diferente de auth_partner/token/get_shop_info (já
+  // validados num handshake real, ver docs/auth-security.md seção 9), os
+  // dois métodos abaixo NUNCA foram exercitados contra a Shopee de verdade —
+  // seguem a documentação pública do Shopee Open Platform v2
+  // (get_order_list/get_order_detail), mas o primeiro sync real de pedidos
+  // do usuário é quem confirma ou refuta os formatos assumidos aqui. Mesmo
+  // racional de honestidade já usado no Mercado Livre (Sprint 21).
+  //
+  // Limite documentado da Shopee: time_from/time_to de get_order_list não
+  // pode exceder 15 dias por chamada — diferente do Mercado Livre/Nuvemshop,
+  // que aceitam a janela inteira num único filtro. Por isso este método
+  // fatia a janela pedida (`since` até `until`) em blocos de até 15 dias e
+  // pagina (cursor) DENTRO de cada bloco — mesmo racional de "paginação é
+  // responsabilidade do provider" do contrato (marketplace-provider.contract.ts),
+  // só que aqui há uma dimensão extra (tempo) além da página.
+  private static readonly ORDER_LIST_CHUNK_MS = 15 * 24 * 60 * 60 * 1000;
+
+  async fetchOrderList(
+    partnerId: string,
+    partnerKey: string,
+    shopId: string,
+    accessToken: string,
+    since: Date,
+    timeRangeField: 'create_time' | 'update_time',
+    until: Date = new Date(),
+  ): Promise<string[]> {
+    const path = '/api/v2/order/get_order_list';
+    const orderSns = new Set<string>();
+
+    let chunkStartMs = since.getTime();
+    const untilMs = until.getTime();
+
+    while (chunkStartMs < untilMs) {
+      const chunkEndMs = Math.min(chunkStartMs + ShopeeApiClient.ORDER_LIST_CHUNK_MS, untilMs);
+      let cursor = '';
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const sign = this.sign(path, timestamp, partnerId, partnerKey, accessToken, shopId);
+        const params = new URLSearchParams({
+          partner_id: partnerId,
+          timestamp: String(timestamp),
+          sign,
+          access_token: accessToken,
+          shop_id: shopId,
+          time_range_field: timeRangeField,
+          time_from: String(Math.floor(chunkStartMs / 1000)),
+          time_to: String(Math.floor(chunkEndMs / 1000)),
+          page_size: '100',
+        });
+        if (cursor) params.set('cursor', cursor);
+
+        const response = await this.request(`${this.baseUrl}${path}?${params.toString()}`, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (!response.ok) {
+          const text = await response.text().catch(() => '');
+          throw new Error(`Shopee ${path} retornou HTTP ${response.status}: ${text}`);
+        }
+        const data = (await response.json()) as {
+          response?: { order_list?: { order_sn?: string }[]; next_cursor?: string; more?: boolean };
+          error?: string;
+          message?: string;
+        };
+        if (data.error) {
+          throw new Error(`Shopee ${path} retornou erro de negócio: ${data.error} — ${data.message ?? ''}`);
+        }
+
+        const batch = data.response?.order_list ?? [];
+        for (const item of batch) {
+          if (item.order_sn) orderSns.add(item.order_sn);
+        }
+
+        if (!data.response?.more || !data.response?.next_cursor) break;
+        cursor = data.response.next_cursor;
+      }
+
+      chunkStartMs = chunkEndMs;
+    }
+
+    return Array.from(orderSns);
+  }
+
+  // Limite documentado da Shopee: order_sn_list de get_order_detail aceita no
+  // máximo 50 pedidos por chamada — por isso este método fatia internamente,
+  // mesmo padrão de "paginação é responsabilidade do provider/client", nunca
+  // do orquestrador genérico.
+  private static readonly ORDER_DETAIL_BATCH_SIZE = 50;
+
+  async fetchOrderDetail(
+    partnerId: string,
+    partnerKey: string,
+    shopId: string,
+    accessToken: string,
+    orderSns: string[],
+  ): Promise<unknown[]> {
+    const path = '/api/v2/order/get_order_detail';
+    const orders: unknown[] = [];
+
+    for (let i = 0; i < orderSns.length; i += ShopeeApiClient.ORDER_DETAIL_BATCH_SIZE) {
+      const batch = orderSns.slice(i, i + ShopeeApiClient.ORDER_DETAIL_BATCH_SIZE);
+      const timestamp = Math.floor(Date.now() / 1000);
+      const sign = this.sign(path, timestamp, partnerId, partnerKey, accessToken, shopId);
+      const params = new URLSearchParams({
+        partner_id: partnerId,
+        timestamp: String(timestamp),
+        sign,
+        access_token: accessToken,
+        shop_id: shopId,
+        order_sn_list: batch.join(','),
+        response_optional_fields: 'item_list,total_amount,currency,create_time,update_time,pay_time,buyer_user_id',
+      });
+
+      const response = await this.request(`${this.baseUrl}${path}?${params.toString()}`, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Shopee ${path} retornou HTTP ${response.status}: ${text}`);
+      }
+      const data = (await response.json()) as { response?: { order_list?: unknown[] }; error?: string; message?: string };
+      if (data.error) {
+        throw new Error(`Shopee ${path} retornou erro de negócio: ${data.error} — ${data.message ?? ''}`);
+      }
+
+      orders.push(...(data.response?.order_list ?? []));
+    }
+
+    return orders;
   }
 }
