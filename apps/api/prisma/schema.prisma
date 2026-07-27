@@ -1108,6 +1108,19 @@ model Order {
   deliveredAt DateTime?
   cancelledAt DateTime?
 
+  // Bug de produção (25/07/2026) — ver README, "Reestruturação do sync ML":
+  // null = nunca tivemos uma confirmação REAL do status de envio via
+  // GET /shipments/{id} pra este pedido (só o status bruto de /orders/search,
+  // que não traz envio). Usado por MercadoLivreShipmentEnrichmentJob (novo)
+  // pra achar, de forma resumível e sem estado em memória, os pedidos que
+  // ainda faltam enriquecer — sobrevive a qualquer reinício/interrupção do
+  // processo, ao contrário de um cursor guardado só em memória. Nunca setado
+  // pelo caminho rápido de ingestão inicial (que deliberadamente pula a
+  // consulta de envio pra não travar o backfill); setado sempre que QUALQUER
+  // caminho (sync normal ou a varredura dedicada) recebe uma resposta real
+  // do sub-recurso de envio.
+  shippingStatusCheckedAt DateTime?
+
   // Payload cru do canal, para auditoria/depuração — nunca lido pelo resto
   // do sistema, só existe para investigar um mapeamento que deu errado sem
   // precisar re-chamar a API externa.
@@ -1145,6 +1158,10 @@ model Order {
   // Filtro por dataMode (REAL exclui isDemo, DEMO só isDemo) em toda query —
   // worklist, contadores e DRE.
   @@index([tenantId, isDemo])
+  // Consulta da varredura dedicada de enriquecimento de envio
+  // (MercadoLivreShipmentEnrichmentJob) — "pedidos PREPARANDO_ENVIO deste
+  // canal, nunca checados, dos mais recentes pra trás, limitado a N por vez".
+  @@index([tenantId, channelCode, status, shippingStatusCheckedAt, orderedAt])
   @@map("orders")
   @@schema("orders")
 }

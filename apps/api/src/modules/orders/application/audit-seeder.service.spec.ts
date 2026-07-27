@@ -17,6 +17,7 @@ describe('AuditSeederService', () => {
       deleteDemoOrders: jest.fn().mockResolvedValue(10),
       findItemsByOrderIds: jest.fn().mockResolvedValue([]),
       hasAnyOrderForChannel: jest.fn().mockResolvedValue(true),
+      findPendingShipmentEnrichment: jest.fn().mockResolvedValue([]),
     };
     const service = new AuditSeederService(orderRepository);
     return { service, orderRepository };

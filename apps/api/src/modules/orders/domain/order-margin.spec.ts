@@ -45,6 +45,8 @@ function buildOrder(items: OrderItem[]): Order {
     createdAt: new Date(),
     updatedAt: new Date(),
     isDemo: false,
+    shippingStatusCheckedAt: null,
+    rawPayload: null,
     items,
   };
 }

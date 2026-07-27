@@ -48,6 +48,8 @@ function buildOrder(items: OrderItem[]): Order {
     createdAt: new Date(),
     updatedAt: new Date(),
     isDemo: false,
+    shippingStatusCheckedAt: null,
+    rawPayload: null,
     items,
   };
 }
@@ -63,6 +65,7 @@ describe('OrdersService', () => {
       deleteDemoOrders: jest.fn(),
       findItemsByOrderIds: jest.fn().mockResolvedValue([]),
       hasAnyOrderForChannel: jest.fn().mockResolvedValue(true),
+      findPendingShipmentEnrichment: jest.fn().mockResolvedValue([]),
     };
     const catalog: jest.Mocked<ProductCatalogReader> = {
       findBySku: jest.fn(),

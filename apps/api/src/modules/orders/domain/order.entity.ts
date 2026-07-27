@@ -75,6 +75,17 @@ export interface Order {
   // Modo de Demonstração (ver AppDataMode acima) — true só para pedidos
   // injetados por AuditSeederService, nunca por um sync real.
   isDemo: boolean;
+  // Reestruturação do sync ML (25-26/07/2026, ver README) — null = nunca
+  // tivemos confirmação REAL do status de envio (GET /shipments/{id}) pra
+  // este pedido. Usado por MercadoLivreShipmentEnrichmentJob pra achar, de
+  // forma resumível (estado no banco, não em memória), os pedidos que ainda
+  // faltam enriquecer. Sempre null/ausente para canais que não têm esse
+  // conceito de enriquecimento assíncrono (ex.: Nuvemshop).
+  shippingStatusCheckedAt: Date | null;
+  // Payload cru do canal (auditoria/depuração) — também reaproveitado pelo
+  // MercadoLivreShipmentEnrichmentJob pra extrair o shipping.id sem precisar
+  // de uma coluna dedicada nem rechamar /orders/search.
+  rawPayload: unknown;
   items: OrderItem[];
 }
 
@@ -122,6 +133,13 @@ export interface OrderUpsertData {
   // Ausente/false em todo upsert de um OrderSyncOrchestrator real — só
   // AuditSeederService passa `true` aqui (Modo de Demonstração/Audit Mode).
   isDemo?: boolean;
+  // Reestruturação do sync ML (25-26/07/2026) — AUSENTE em todo upsert do
+  // caminho rápido normal (fast path do MercadoLivreOrderProvider, e
+  // qualquer outro canal): o repositório PRESERVA o valor já gravado nesse
+  // caso, nunca reseta pra null (ver PrismaOrderRepository.upsert). Só
+  // MercadoLivreShipmentEnrichmentJob passa um valor explícito aqui, sempre
+  // que consulta de verdade o sub-recurso de envio.
+  shippingStatusCheckedAt?: Date;
 }
 
 export interface OrderListFilters {

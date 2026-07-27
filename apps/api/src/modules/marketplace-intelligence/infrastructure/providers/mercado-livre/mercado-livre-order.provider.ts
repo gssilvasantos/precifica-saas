@@ -8,38 +8,8 @@ import {
   RawOrderCandidate,
 } from '../../../../../shared/contracts/marketplace-provider.contract';
 import { MercadoLivreApiClient } from './mercado-livre-api.client';
-import {
-  extractOrderCreatedAt,
-  extractOrderStatus,
-  extractShippingId,
-  normalizeMercadoLivreOrder,
-} from './mercado-livre-order-normalizer';
+import { normalizeMercadoLivreOrder } from './mercado-livre-order-normalizer';
 import { MercadoLivreConnectionService } from '../../../application/mercado-livre-connection.service';
-
-// Só vale a pena consultar o status REAL do envio (uma chamada de API a
-// mais por pedido, ver MercadoLivreApiClient.fetchShipmentStatus) para
-// pedidos que já chegaram a este estágio — pedido em aberto/aguardando
-// pagamento/cancelado não tem shipping relevante ainda. Reduz
-// drasticamente o número de consultas extras num backfill grande.
-const STATUSES_WORTH_CHECKING_SHIPMENT = new Set(['paid', 'partially_paid']);
-
-// Bug de produção (25/07/2026) — mesmo depois de corrigir o campo de data do
-// backfill (date_created em vez de date_last_updated, ver
-// MercadoLivreApiClient), uma conta com volume real alto (~4.500 pedidos
-// criados nos últimos 90 dias, dos quais ~4.244 pagos) tornava o
-// enriquecimento de status de envio inviável: a 1 req/s (rate limit
-// conservador, ver mercado-livre-api.client.ts), só essa fase levaria mais
-// de 1 hora — muito além do que uma chamada síncrona (ou o Render free
-// tier) aguenta, e o sync nunca chegava a persistir um pedido sequer.
-// Trade-off consciente, confirmado com o usuário: pedido pago há mais de
-// ENRICHMENT_WINDOW_MS quase certamente já foi enviado/entregue — não vale
-// gastar uma chamada de API nele a cada backfill. Só pedidos pagos CRIADOS
-// dentro dessa janela recente recebem a consulta extra; os demais entram
-// com o status derivado só do que a busca já traz (fallback antigo,
-// ver mercado-livre-order-normalizer.ts) — podem ficar temporariamente
-// menos precisos, mas o sync deixa de travar. Aceito como limitação
-// documentada, não escondida.
-const ENRICHMENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 // Segunda capacidade do Mercado Livre no hub de pedidos (Sprint 21) — classe
 // SEPARADA de MercadoLivreFeeRuleProvider (mesmo racional de
@@ -49,13 +19,49 @@ const ENRICHMENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 // que prova que o hub de pedidos é "plug-and-play": nenhuma linha de
 // OrderSyncOrchestrator/OrderProviderRegistry muda para o canal entrar.
 //
-// Sprint 22 — o gap de autenticação documentado no Sprint 21 (OAuth2 por
-// vendedor não implementado) está resolvido: `ensureValidCredentials()` e
-// `listTenantIdsToSync()` agora consultam `MercadoLivreConnectionService`
-// (`MercadoLivreConnection`, ver docs/auth-security.md) em vez de lançar
-// `NotImplementedException`. `getValidAccessToken()` já cuida do refresh
-// automático — este provider nunca precisa saber se o token estava perto
-// de vencer.
+// Sprint 22 — OAuth2 por vendedor (docs/auth-security.md): `ensureValidCredentials()`
+// e `listTenantIdsToSync()` consultam `MercadoLivreConnectionService`, que
+// também cuida do refresh automático de token.
+//
+// REESTRUTURAÇÃO DO SYNC (25-26/07/2026, ver README, "Reestruturação do sync
+// ML") — mudança de arquitetura, não apenas mais um ajuste de bug: este
+// provider NÃO consulta mais o status real de envio (GET /shipments/{id})
+// durante fetchOrders(). Antes fazia isso inline, um `Promise.all` por
+// pedido pago recente (ver histórico no README) — o que tornava o tempo
+// total de fetchOrders() proporcional ao volume de pedidos pagos da janela,
+// inviável em qualquer hospedagem sem processo de longa duração em segundo
+// plano (Render free tier hiberna por inatividade de requisição HTTP — ver
+// README). Comprovado em produção: mesmo depois de limitar o enriquecimento
+// a pedidos pagos dos últimos 30 dias, o log permanente de conclusão de
+// fetchOrders() NUNCA apareceu nos logs — a fase de enriquecimento sozinha
+// já excedia a janela de atividade do Render.
+//
+// Agora fetchOrders() só BUSCA e NORMALIZA — sempre rápido, custo
+// proporcional ao número de PÁGINAS da busca (não ao número de pedidos
+// pagos), nunca faz uma chamada de rede por pedido. Todo pedido pago entra
+// com o status-fallback PREPARANDO_ENVIO (ver mapMercadoLivreStatus) e fica
+// imediatamente PERSISTIDO pelo OrderSyncOrchestrator — o vendedor já vê o
+// pedido na worklist, mesmo que o status de envio ainda não esteja
+// confirmado.
+//
+// O enriquecimento de status de envio virou uma responsabilidade SEPARADA,
+// RESUMÍVEL e limitada por lote: MercadoLivreShipmentEnrichmentJob (módulo
+// orders/infrastructure/scheduler), que a cada execução processa um número
+// pequeno e fixo de pedidos "PREPARANDO_ENVIO ainda não conferidos"
+// (Order.shippingStatusCheckedAt IS NULL — ver domain/order.entity.ts e o
+// índice composto em schema.prisma). O progresso fica gravado NO BANCO, por
+// pedido, nunca num cursor em memória — uma interrupção a qualquer momento
+// (inclusive a hibernação do Render) perde no máximo o lote em andamento,
+// nunca o trabalho já persistido. Isso é o que torna o sync funcional em
+// QUALQUER hospedagem, inclusive a gratuita: cada execução (busca OU
+// enriquecimento) processa um pedaço pequeno e delimitado, nunca tudo de
+// uma vez.
+//
+// Ver domain/order-status-guard.ts para o cuidado correspondente do lado do
+// repositório: como fetchOrders() agora nunca resolve o status real de
+// envio, uma resync incremental (que roda a cada poucos minutos) precisa
+// NUNCA regredir um pedido já confirmado ENVIADO/ENTREGUE de volta pro
+// fallback PREPARANDO_ENVIO.
 @Injectable()
 export class MercadoLivreOrderProvider implements OrderCapableProvider, AuthenticatedProvider {
   readonly code = 'MERCADO_LIVRE_ORDERS';
@@ -93,8 +99,8 @@ export class MercadoLivreOrderProvider implements OrderCapableProvider, Authenti
       return [];
     }
 
-    // getValidAccessToken já faz o refresh automático se necessário (item 2
-    // do pedido da Sprint 22) — este provider nunca decide isso sozinho.
+    // getValidAccessToken já faz o refresh automático se necessário — este
+    // provider nunca decide isso sozinho.
     const accessToken = await this.connection.getValidAccessToken(ctx.tenantId);
     const sellerId = await this.connection.getSellerId(ctx.tenantId);
     if (!sellerId) {
@@ -105,47 +111,18 @@ export class MercadoLivreOrderProvider implements OrderCapableProvider, Authenti
       return [];
     }
 
-    // Bug de produção (25/07/2026, ver README e aviso em
-    // MercadoLivreApiClient.fetchOrders) — backfill (primeira sync) precisa
-    // filtrar por `date_created` (pedidos CRIADOS na janela), não
-    // `date_last_updated` (qualquer pedido TOCADO, volume muito maior e
-    // imprevisível). Incremental continua em `date_last_updated` de
-    // propósito — quer pegar pedido antigo que só mudou de status agora.
+    // Backfill (primeira sync) filtra por `date_created` (pedidos CRIADOS na
+    // janela); incremental continua em `date_last_updated` de propósito —
+    // quer pegar pedido antigo que só mudou de status agora. Ver README e
+    // aviso em MercadoLivreApiClient.fetchOrders.
     const dateField = ctx.isFirstSync ? 'date_created' : 'date_last_updated';
     const rawOrders = await this.client.fetchOrders(sellerId, accessToken, ctx.since, dateField);
-    const enrichmentCutoff = Date.now() - ENRICHMENT_WINDOW_MS;
 
-    // Bug de produção (24/07/2026) — ver aviso de honestidade em
-    // mercado-livre-order-normalizer.ts: `shipping.status` não vem no
-    // payload de `/orders/search` (é só uma referência), então todo pedido
-    // pago ficava para sempre em "Preparando envio", mesmo já
-    // enviado/entregue há meses. Aqui, para cada pedido PAGO e RECENTE (ver
-    // ENRICHMENT_WINDOW_MS acima), consultamos o status real do envio
-    // (`/shipments/{id}`) antes de normalizar — as chamadas passam pelo
-    // MESMO RateLimiter do client (nunca estouram a cota configurada), mas
-    // ainda assim são uma chamada extra por pedido; por isso os dois
-    // filtros acima (status + idade) — pedido em aberto/cancelado, ou pago
-    // há muito tempo, não precisa consultar nada.
-    let enrichedCount = 0;
-    const candidates = await Promise.all(
-      rawOrders.map(async (raw) => {
-        const shippingId = extractShippingId(raw);
-        const orderStatus = extractOrderStatus(raw);
-        const createdAt = extractOrderCreatedAt(raw);
-        const isRecentEnough = createdAt ? createdAt.getTime() >= enrichmentCutoff : true; // sem data confiável: mais seguro tentar do que ignorar
-        let resolvedShippingStatus: string | undefined;
-
-        if (shippingId && STATUSES_WORTH_CHECKING_SHIPMENT.has(orderStatus) && isRecentEnough) {
-          enrichedCount++;
-          const shipment = await this.client.fetchShipmentStatus(shippingId, accessToken);
-          resolvedShippingStatus = shipment?.status;
-        }
-
-        return normalizeMercadoLivreOrder(raw, resolvedShippingStatus);
-      }),
-    );
+    // Normalização SEM consulta de envio (ver aviso de reestruturação acima)
+    // — sempre rápido, nunca uma chamada de rede por pedido.
+    const candidates = rawOrders.map((raw) => normalizeMercadoLivreOrder(raw));
     this.logger.log(
-      `Sync ML tenant=${ctx.tenantId}: ${rawOrders.length} pedido(s) buscado(s) (${dateField}), ${enrichedCount} enriquecido(s) com status real de envio (janela de ${Math.round(ENRICHMENT_WINDOW_MS / (24 * 60 * 60 * 1000))} dias).`,
+      `Sync ML tenant=${ctx.tenantId}: ${rawOrders.length} pedido(s) buscado(s) (${dateField}) — status de envio será conferido separadamente por MercadoLivreShipmentEnrichmentJob.`,
     );
 
     return candidates.filter((o): o is RawOrderCandidate => o !== null);

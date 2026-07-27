@@ -11,6 +11,7 @@ import {
   OrderStatusCounts,
   OrderUpsertData,
 } from '../domain/order.entity';
+import { resolveEffectiveStatus } from '../domain/order-status-guard';
 
 const ALL_STATUSES: OrderStatus[] = ['EM_ABERTO', 'PREPARANDO_ENVIO', 'FATURADO', 'ENVIADO', 'ENTREGUE', 'CANCELADO'];
 
@@ -30,14 +31,23 @@ export class PrismaOrderRepository implements OrderRepository {
           externalOrderId: data.externalOrderId,
         },
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, shippingStatusCheckedAt: true },
     });
+
+    // Reestruturação do sync ML (25-26/07/2026, ver README e
+    // domain/order-status-guard.ts) — nunca aplica o status recebido
+    // diretamente: uma resync sem informação nova de envio (fast path)
+    // devolve sempre o fallback PREPARANDO_ENVIO para pedido pago, o que
+    // regrediria um pedido já confirmado ENVIADO/ENTREGUE pelo
+    // MercadoLivreShipmentEnrichmentJob de volta. resolveEffectiveStatus
+    // nunca deixa o status andar pra trás (exceto virar CANCELADO).
+    const effectiveStatus = resolveEffectiveStatus((existing?.status as OrderStatus) ?? null, data.status);
 
     const orderData = {
       tenantId: data.tenantId,
       channelCode: data.channelCode,
       externalOrderId: data.externalOrderId,
-      status: data.status,
+      status: effectiveStatus,
       externalStatus: data.externalStatus,
       subtotalAmount: data.subtotalAmount,
       shippingAmount: data.shippingAmount,
@@ -56,6 +66,12 @@ export class PrismaOrderRepository implements OrderRepository {
       deliveredAt: data.deliveredAt ?? null,
       cancelledAt: data.cancelledAt ?? null,
       rawPayload: (data.rawPayload as never) ?? undefined,
+      // PRESERVA o valor existente quando o chamador não passa nada
+      // (fast path normal, qualquer canal) — nunca reseta pra null "de
+      // graça". Só MercadoLivreShipmentEnrichmentJob passa um valor
+      // explícito aqui, sempre que consulta de verdade o sub-recurso de
+      // envio (ver domain/order.entity.ts, comentário de OrderUpsertData).
+      shippingStatusCheckedAt: data.shippingStatusCheckedAt !== undefined ? data.shippingStatusCheckedAt : existing?.shippingStatusCheckedAt ?? null,
       syncedAt: new Date(),
       // Audit Mode — ausente/false em todo sync real (OrderSyncOrchestrator
       // nunca passa isDemo); só AuditSeederService passa true.
@@ -240,6 +256,27 @@ export class PrismaOrderRepository implements OrderRepository {
     return existing !== null;
   }
 
+  // Reestruturação do sync ML (25-26/07/2026, ver README e port) — usa o
+  // índice composto (tenantId, channelCode, status, shippingStatusCheckedAt,
+  // orderedAt) declarado em schema.prisma. isDemo=false explícito (mesmo
+  // padrão do resto do repositório): a varredura de enriquecimento nunca
+  // gasta uma chamada de API real num pedido fictício do Audit Mode.
+  async findPendingShipmentEnrichment(tenantId: string, channelCode: string, limit: number): Promise<Order[]> {
+    const records = await this.prisma.order.findMany({
+      where: {
+        tenantId,
+        channelCode,
+        status: 'PREPARANDO_ENVIO',
+        shippingStatusCheckedAt: null,
+        isDemo: false,
+      },
+      include: { items: true },
+      orderBy: { orderedAt: 'asc' },
+      take: limit,
+    });
+    return records.map((r) => this.toDomain(r));
+  }
+
   // Ausente = 'REAL' (isDemo=false) — o padrão seguro: qualquer chamador que
   // esqueça de passar dataMode nunca vê pedido de demonstração.
   private isDemoFlag(dataMode?: AppDataMode): boolean {
@@ -273,6 +310,8 @@ export class PrismaOrderRepository implements OrderRepository {
     createdAt: Date;
     updatedAt: Date;
     isDemo: boolean;
+    shippingStatusCheckedAt: Date | null;
+    rawPayload: unknown;
     items: Array<{
       id: string;
       orderId: string;
@@ -312,6 +351,8 @@ export class PrismaOrderRepository implements OrderRepository {
       syncedAt: record.syncedAt,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
+      shippingStatusCheckedAt: record.shippingStatusCheckedAt,
+      rawPayload: record.rawPayload,
       isDemo: record.isDemo,
       items: record.items.map(
         (item): OrderItem => ({

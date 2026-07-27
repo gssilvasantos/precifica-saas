@@ -4,6 +4,7 @@ import { OrderSyncOrchestrator } from './application/order-sync-orchestrator.ser
 import { OrderProviderRegistry, ORDER_CAPABLE_PROVIDERS } from './application/order-provider-registry.service';
 import { PrismaOrderRepository } from './infrastructure/prisma-order.repository';
 import { OrdersSyncSchedulerJob } from './infrastructure/scheduler/orders-sync-scheduler.job';
+import { MercadoLivreShipmentEnrichmentJob } from './infrastructure/scheduler/mercado-livre-shipment-enrichment.job';
 import { OrdersController } from './interface/controllers/orders.controller';
 import { OrdersSyncController } from './interface/controllers/orders-sync.controller';
 import { AuditModeController } from './interface/controllers/audit-mode.controller';
@@ -43,6 +44,12 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     OrderSyncOrchestrator,
     OrderProviderRegistry,
     OrdersSyncSchedulerJob,
+    // Reestruturação do sync ML (25-26/07/2026, ver README) — a metade
+    // resumível/assíncrona do enriquecimento de status de envio. Consome
+    // MercadoLivreApiClient/MercadoLivreConnectionService, ambos exportados
+    // por MarketplaceIntelligenceModule (import acima) especificamente para
+    // este job.
+    MercadoLivreShipmentEnrichmentJob,
     AuditSeederService,
     {
       provide: ORDER_CAPABLE_PROVIDERS,

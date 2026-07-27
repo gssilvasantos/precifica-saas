@@ -54,6 +54,17 @@ export interface OrderRepository {
   // funcional — silenciosamente. Este método existe só para decidir a
   // largura da janela de busca, nunca para nenhuma outra lógica de negócio.
   hasAnyOrderForChannel(tenantId: string, channelCode: string): Promise<boolean>;
+  // Reestruturação do sync ML (25-26/07/2026, ver README) — consulta central
+  // do MercadoLivreShipmentEnrichmentJob: pedidos deste canal, PAGOS mas
+  // ainda sem confirmação real de envio (status='PREPARANDO_ENVIO' E
+  // shippingStatusCheckedAt IS NULL), em lotes pequenos e limitados
+  // (`limit`). Usa o índice composto (tenantId, channelCode, status,
+  // shippingStatusCheckedAt, orderedAt) — ver schema.prisma. Ordenado do
+  // mais ANTIGO pro mais novo (orderedAt asc), de propósito: se a fila for
+  // maior que `limit` numa execução, garante que pedidos antigos não fiquem
+  // pra sempre atrás de pedidos novos que chegam a cada sync — eventualmente
+  // todo pedido pendente é alcançado.
+  findPendingShipmentEnrichment(tenantId: string, channelCode: string, limit: number): Promise<Order[]>;
 }
 
 export const ORDER_REPOSITORY = Symbol('ORDER_REPOSITORY');

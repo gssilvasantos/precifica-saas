@@ -198,10 +198,19 @@ export class OrderSyncOrchestrator {
     }
   }
 
-  private async upsertAndEmit(
+  // Reestruturação do sync ML (25-26/07/2026, ver README) — PÚBLICO (era
+  // privado) para ser reaproveitado por MercadoLivreShipmentEnrichmentJob
+  // (módulo orders/infrastructure/scheduler): o re-upsert de um pedido já
+  // existente, depois de confirmar o status real de envio, precisa da MESMA
+  // lógica de resolução de SKU/custo e emissão de eventos de transição —
+  // nunca duplicada numa segunda implementação. `overrides` é o único jeito
+  // de o chamador influenciar campos que RawOrderCandidate não carrega
+  // (hoje, só shippingStatusCheckedAt — ver domain/order.entity.ts).
+  async upsertAndEmit(
     tenantId: string,
     channelCode: string,
     raw: import('../../../shared/contracts/marketplace-provider.contract').RawOrderCandidate,
+    overrides?: Pick<OrderUpsertData, 'shippingStatusCheckedAt'>,
   ): Promise<void> {
     // Resolução de SKU best-effort: casa o identificador bruto do canal
     // contra o catálogo interno via PRODUCT_CATALOG_READER — mesma porta que
@@ -248,6 +257,7 @@ export class OrderSyncOrchestrator {
       cancelledAt: raw.cancelledAt,
       rawPayload: raw.rawPayload,
       items,
+      ...overrides,
     };
 
     const result = await this.orders.upsert(upsertData);

@@ -95,16 +95,14 @@ export function extractOrderStatus(raw: unknown): string {
   return String((raw as Record<string, unknown>).status ?? 'confirmed').toLowerCase();
 }
 
-// Data de criação do pedido — usada pelo PROVIDER (25/07/2026) para decidir
-// se vale a pena consultar o status real de envio (ver
-// SHIPMENT_ENRICHMENT_WINDOW_MS em mercado-livre-order.provider.ts). Achado
-// real de produção: uma conta com volume alto (~4.500 pedidos criados nos
-// últimos 90 dias) tornaria o enriquecimento pedido-a-pedido inviável
-// (1h+ só nessa fase, a 1 req/s) se aplicado a TODO pedido pago da janela de
-// backfill. Pedido pago há muitas semanas quase certamente já foi
-// enviado/entregue — não vale gastar uma chamada de API nele toda vez que o
-// backfill roda; só pedidos pagos RECENTES (ainda plausivelmente em
-// trânsito) valem a consulta extra.
+// Data de criação do pedido — usada até 25/07/2026 pelo PROVIDER para
+// decidir se valia a pena consultar o status real de envio inline (janela de
+// enriquecimento). Reestruturação do sync ML (25-26/07/2026, ver README):
+// esse enriquecimento inline foi removido do provider — fetchOrders() agora
+// só busca e normaliza, nunca consulta envio pedido-a-pedido. Mantida aqui
+// (função pura, sem custo de manter) para uso futuro caso algum consumidor
+// precise da data de criação a partir do payload bruto; não é mais chamada
+// pelo provider nem pelo MercadoLivreShipmentEnrichmentJob hoje.
 export function extractOrderCreatedAt(raw: unknown): Date | null {
   if (!raw || typeof raw !== 'object') return null;
   const dateCreated = (raw as Record<string, unknown>).date_created;

@@ -36,6 +36,8 @@ function buildOrder(overrides: Partial<Order> = {}): Order {
     createdAt: new Date(),
     updatedAt: new Date(),
     isDemo: false,
+    shippingStatusCheckedAt: null,
+    rawPayload: null,
     items: [{ id: 'item-1', orderId: 'order-1', skuCode: 'SKU-1', externalSku: 'EXT-SKU-1', productName: 'Produto', quantity: 1, unitPrice: 100, totalPrice: 100, taxAmount: null, costPrice: null }],
     ...overrides,
   };
@@ -85,6 +87,7 @@ describe('OrderSyncOrchestrator', () => {
       // dos testes existentes na janela incremental de 7 dias. O teste novo
       // do backfill sobrescreve isto para `false`.
       hasAnyOrderForChannel: jest.fn().mockResolvedValue(true),
+      findPendingShipmentEnrichment: jest.fn().mockResolvedValue([]),
     };
 
     const syncLogs: jest.Mocked<ProviderSyncLogRepository> = {

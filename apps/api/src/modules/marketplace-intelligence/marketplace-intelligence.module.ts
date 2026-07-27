@@ -107,6 +107,20 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // Pricing Engine conhece só PRICE_UPDATE_DISPATCHER + a interface.
     { provide: PRICE_UPDATE_DISPATCHER, useExisting: PriceUpdateDispatcherService },
   ],
-  exports: [FEE_RULE_RESOLVER, PRICE_UPDATE_DISPATCHER, MercadoLivreOrderProvider, MercadoLivreAdsProvider],
+  // Reestruturação do sync ML (25-26/07/2026, ver README) — MercadoLivreApiClient
+  // e MercadoLivreConnectionService agora também exportados: o novo
+  // MercadoLivreShipmentEnrichmentJob mora no módulo Orders (mesmo racional
+  // de MercadoLivreOrderProvider — OrdersModule importa este módulo, nunca o
+  // contrário) e precisa das DUAS classes concretas para consultar
+  // /shipments/{id} com um token válido, sem duplicar nenhuma lógica de
+  // OAuth2/refresh já existente aqui.
+  exports: [
+    FEE_RULE_RESOLVER,
+    PRICE_UPDATE_DISPATCHER,
+    MercadoLivreOrderProvider,
+    MercadoLivreAdsProvider,
+    MercadoLivreApiClient,
+    MercadoLivreConnectionService,
+  ],
 })
 export class MarketplaceIntelligenceModule {}
