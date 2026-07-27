@@ -6,17 +6,22 @@ import { isRateLimitError, isTimeoutError, withRetry } from '../../../../../shar
 
 // Base do Shopee Open Platform.
 //
-// CONFIRMADO EM PRODUÇÃO (27/07/2026) — a suposição original deste
-// comentário estava ERRADA: as credenciais de TESTE (Test Partner_id/Test
-// API Partner Key) NÃO funcionam contra `https://partner.shopeemobile.com`
-// (primeiro handshake real devolveu `{"error":"invalid_partner_id"}`). A
-// Shopee usa um domínio de SANDBOX totalmente separado —
-// `https://partner.test-stable.shopeemobile.com` — para credenciais de
-// teste, ao contrário do que o painel do app sugeria. `DEFAULT_BASE_URL`
-// continua sendo a base de PRODUÇÃO (para quando o app for aprovado e
-// ganhar credenciais reais); `SHOPEE_BASE_URL` deve ser explicitamente
-// setada para a URL de sandbox acima enquanto o app estiver em modo de
-// teste — ver .env.example e docs/auth-security.md, seção 9.
+// CONFIRMADO EM PRODUÇÃO (27/07/2026), em duas etapas — a suposição
+// original deste comentário estava ERRADA duas vezes seguidas:
+// (1) credenciais de TESTE não funcionam contra `https://partner.shopeemobile.com`
+//     (produção) — primeiro handshake real devolveu `{"error":"invalid_partner_id"}`.
+// (2) a URL de sandbox documentada em blogs de terceiros
+//     (`https://partner.test-stable.shopeemobile.com`) aceitava o
+//     partner_id mas rejeitava TODA assinatura HMAC com "Wrong sign" —
+//     mesmo com a fórmula e a chave verificadas byte a byte como corretas.
+// A URL de sandbox REAL só apareceu ao usar a "Ferramenta de teste de API"
+// dentro do próprio Shopee Open Platform Console (não documentada nos
+// blogs de terceiros consultados antes): um domínio `.sg` completamente
+// diferente —`https://openplatform.sandbox.test-stable.shopee.sg`.
+// `DEFAULT_BASE_URL` continua sendo a base de PRODUÇÃO (para quando o app
+// for aprovado e ganhar credenciais reais); `SHOPEE_BASE_URL` deve ser
+// explicitamente setada para a URL de sandbox acima enquanto o app estiver
+// em modo de teste — ver .env.example e docs/auth-security.md, seção 9.
 const DEFAULT_BASE_URL = 'https://partner.shopeemobile.com';
 
 // Resposta de POST /api/v2/auth/token/get (troca de code) e de
