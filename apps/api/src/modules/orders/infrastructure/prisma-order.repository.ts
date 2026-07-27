@@ -196,10 +196,16 @@ export class PrismaOrderRepository implements OrderRepository {
     return records.map((r) => this.toDomain(r));
   }
 
-  async countByStatus(tenantId: string, dataMode?: AppDataMode): Promise<OrderStatusCounts> {
+  // channelCode ausente/vazio = TODOS os canais (bug de produção 26/07/2026:
+  // este método nunca aceitou channelCode — as abas de status da tela de
+  // Pedidos sempre mostraram contagem global, mesmo com um canal específico
+  // selecionado no dropdown do frontend, que já filtra findWithFilters
+  // corretamente por channelCode. Corrigido tornando o filtro explícito e
+  // consistente com o resto do repositório.
+  async countByStatus(tenantId: string, dataMode?: AppDataMode, channelCode?: string): Promise<OrderStatusCounts> {
     const groups = await this.prisma.order.groupBy({
       by: ['status'],
-      where: { tenantId, isDemo: this.isDemoFlag(dataMode) },
+      where: { tenantId, isDemo: this.isDemoFlag(dataMode), ...(channelCode ? { channelCode } : {}) },
       _count: { _all: true },
     });
 

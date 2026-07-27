@@ -32,13 +32,20 @@ export class OrdersController {
     );
   }
 
-  // mode aceito solto (sem passar pelo OrderListQueryDto inteiro, que carrega
-  // page/pageSize/filtros irrelevantes para um endpoint agregado) — mesmo
-  // valor 'REAL'|'DEMO' do Audit Mode, sem validação extra: um valor
-  // inválido aqui só faz isDemoFlag tratar como 'REAL' (padrão seguro).
+  // mode/channelCode aceitos soltos (sem passar pelo OrderListQueryDto
+  // inteiro, que carrega page/pageSize/filtros irrelevantes para um
+  // endpoint agregado). channelCode adicionado (26/07/2026, bug de
+  // produção): as abas de status da tela de Pedidos nunca respeitaram o
+  // canal selecionado no dropdown, mostrando contagem GLOBAL mesmo com um
+  // canal específico escolhido — ausente aqui = todos os canais (mesmo
+  // comportamento de antes, agora explícito).
   @Get('status-counts')
-  countByStatus(@CurrentUser() user: AuthenticatedUser, @Query('mode') mode?: AppDataMode) {
-    return this.orders.countByStatus(user.tenantId, mode);
+  countByStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('mode') mode?: AppDataMode,
+    @Query('channelCode') channelCode?: string,
+  ) {
+    return this.orders.countByStatus(user.tenantId, mode, channelCode);
   }
 
   @Get(':id')

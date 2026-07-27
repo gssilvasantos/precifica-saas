@@ -28,7 +28,12 @@ export interface OrderRepository {
   findWithFilters(tenantId: string, filters: OrderListFilters, page: number, pageSize: number): Promise<OrderListPage>;
   // Alimenta os contadores das abas da worklist — um GROUP BY, não N queries.
   // dataMode ausente = 'REAL' (Audit Mode, ver domain/order.entity.ts).
-  countByStatus(tenantId: string, dataMode?: AppDataMode): Promise<OrderStatusCounts>;
+  // channelCode ausente = conta de TODOS os canais (bug de produção
+  // 26/07/2026: as abas de status nunca respeitaram o filtro de canal
+  // selecionado na tela de Pedidos, mostrando contagem global mesmo com
+  // "Mercado Livre" escolhido no dropdown — corrigido tornando o parâmetro
+  // explícito em vez de implícito "sempre todos os canais").
+  countByStatus(tenantId: string, dataMode?: AppDataMode, channelCode?: string): Promise<OrderStatusCounts>;
   // Etapa 20 (DRE) — busca TODOS os pedidos do período, sem paginação de
   // propósito: relatório agregado, não tela de worklist. Aviso de escala:
   // aceitável para o volume de MVP (mesmo racional documentado em

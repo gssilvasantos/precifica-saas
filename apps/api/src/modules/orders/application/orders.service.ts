@@ -30,8 +30,8 @@ export class OrdersService implements OrderFinancialsReader {
     return this.orders.findWithFilters(tenantId, filters, page, pageSize);
   }
 
-  async countByStatus(tenantId: string, dataMode?: AppDataMode): Promise<OrderStatusCounts> {
-    return this.orders.countByStatus(tenantId, dataMode);
+  async countByStatus(tenantId: string, dataMode?: AppDataMode, channelCode?: string): Promise<OrderStatusCounts> {
+    return this.orders.countByStatus(tenantId, dataMode, channelCode);
   }
 
   async findById(tenantId: string, id: string): Promise<Order> {
