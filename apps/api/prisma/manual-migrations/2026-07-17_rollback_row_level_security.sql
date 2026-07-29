@@ -119,6 +119,10 @@ DROP POLICY IF EXISTS tenant_isolation ON "financial_intelligence"."receivable_r
 ALTER TABLE "financial_intelligence"."receivable_records" NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE "financial_intelligence"."receivable_records" DISABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS tenant_isolation ON "financial_intelligence"."accounts_payable";
+ALTER TABLE "financial_intelligence"."accounts_payable" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "financial_intelligence"."accounts_payable" DISABLE ROW LEVEL SECURITY;
+
 -- ---- orders ----
 DROP POLICY IF EXISTS tenant_isolation ON "orders"."orders";
 ALTER TABLE "orders"."orders" NO FORCE ROW LEVEL SECURITY;
@@ -153,6 +157,10 @@ DROP POLICY IF EXISTS tenant_isolation ON "logistics_fulfillment"."stock_ledger_
 ALTER TABLE "logistics_fulfillment"."stock_ledger_entries" NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE "logistics_fulfillment"."stock_ledger_entries" DISABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS tenant_isolation ON "logistics_fulfillment"."product_warehouse_locations";
+ALTER TABLE "logistics_fulfillment"."product_warehouse_locations" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "logistics_fulfillment"."product_warehouse_locations" DISABLE ROW LEVEL SECURITY;
+
 -- ---- promotion_intelligence ----
 DROP POLICY IF EXISTS tenant_isolation ON "promotion_intelligence"."promotion_campaigns";
 ALTER TABLE "promotion_intelligence"."promotion_campaigns" NO FORCE ROW LEVEL SECURITY;
@@ -174,6 +182,59 @@ ALTER TABLE "marketplace_ads"."ads_metric_snapshots" DISABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON "marketplace_ads"."ads_action_suggestions";
 ALTER TABLE "marketplace_ads"."ads_action_suggestions" NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE "marketplace_ads"."ads_action_suggestions" DISABLE ROW LEVEL SECURITY;
+
+-- ---- tagging ----
+DROP POLICY IF EXISTS tenant_isolation ON "tagging"."tags";
+ALTER TABLE "tagging"."tags" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "tagging"."tags" DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON "tagging"."tag_assignments";
+ALTER TABLE "tagging"."tag_assignments" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "tagging"."tag_assignments" DISABLE ROW LEVEL SECURITY;
+
+-- ---- procurement ----
+DROP POLICY IF EXISTS tenant_isolation ON "procurement"."purchase_orders";
+ALTER TABLE "procurement"."purchase_orders" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "procurement"."purchase_orders" DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON "procurement"."purchase_order_items";
+ALTER TABLE "procurement"."purchase_order_items" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "procurement"."purchase_order_items" DISABLE ROW LEVEL SECURITY;
+
+-- ---- catalog (Lista de Preços) ----
+DROP POLICY IF EXISTS tenant_isolation ON "catalog"."price_lists";
+ALTER TABLE "catalog"."price_lists" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."price_lists" DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON "catalog"."price_list_exceptions";
+ALTER TABLE "catalog"."price_list_exceptions" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."price_list_exceptions" DISABLE ROW LEVEL SECURITY;
+
+-- ---- fiscal (Emissão de NF-e) ----
+DROP POLICY IF EXISTS tenant_isolation ON "fiscal"."fiscal_settings";
+ALTER TABLE "fiscal"."fiscal_settings" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "fiscal"."fiscal_settings" DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON "fiscal"."fiscal_invoices";
+ALTER TABLE "fiscal"."fiscal_invoices" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "fiscal"."fiscal_invoices" DISABLE ROW LEVEL SECURITY;
+
+-- ---- Publicar anúncio novo em marketplace (Fase 4) ----
+DROP POLICY IF EXISTS tenant_isolation ON "catalog"."product_categories";
+ALTER TABLE "catalog"."product_categories" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."product_categories" DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON "catalog"."category_attributes";
+ALTER TABLE "catalog"."category_attributes" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."category_attributes" DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON "marketplace_publishing"."channel_category_mappings";
+ALTER TABLE "marketplace_publishing"."channel_category_mappings" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "marketplace_publishing"."channel_category_mappings" DISABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON "marketplace_publishing"."listing_publications";
+ALTER TABLE "marketplace_publishing"."listing_publications" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "marketplace_publishing"."listing_publications" DISABLE ROW LEVEL SECURITY;
 
 COMMIT;
 

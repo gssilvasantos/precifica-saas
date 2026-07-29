@@ -2,7 +2,9 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { StockMovementAuditEventService } from './stock-movement-audit-event.service';
 import { StockMovementAuditEventRepository } from './ports/stock-movement-audit-event-repository.port';
 import { StockMovementAuditEventItemRepository } from './ports/stock-movement-audit-event-item-repository.port';
+import { StockLedgerRepository } from './ports/stock-ledger-repository.port';
 import { OrderFinancialsReader } from '../../../shared/contracts/order-financials-reader.port';
+import { ProductLotReader } from '../../../shared/contracts/product-lot-reader.port';
 import { StockMovementAuditEvent, StockMovementAuditEventItem } from '../domain/stock-movement-audit-event.entity';
 
 function buildEvent(overrides: Partial<StockMovementAuditEvent> = {}): StockMovementAuditEvent {
@@ -19,6 +21,7 @@ function buildEvent(overrides: Partial<StockMovementAuditEvent> = {}): StockMove
     conferredAt: null,
     divergenceNotes: null,
     invoiceNumber: null,
+    notes: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     orderIds: ['order-1'],
@@ -50,6 +53,7 @@ describe('StockMovementAuditEventService', () => {
       approveWithLedger: jest.fn(),
       markDivergent: jest.fn(),
       findPending: jest.fn().mockResolvedValue([]),
+      listReservedByWarehouse: jest.fn().mockResolvedValue([]),
     };
     const checklistItems: jest.Mocked<StockMovementAuditEventItemRepository> = {
       createMany: jest.fn().mockResolvedValue([]),
@@ -62,8 +66,17 @@ describe('StockMovementAuditEventService', () => {
       findItemsForOrders: jest.fn().mockResolvedValue([]),
     };
     const alerts = { emitAlert: jest.fn() };
-    const service = new StockMovementAuditEventService(events, checklistItems, orderItemsReader, alerts);
-    return { service, events, checklistItems, orderItemsReader, alerts };
+    const ledger: jest.Mocked<StockLedgerRepository> = {
+      getBalance: jest.fn().mockResolvedValue(0),
+      listBalancesByWarehouse: jest.fn().mockResolvedValue([]),
+      listBalancesByLot: jest.fn().mockResolvedValue([]),
+    };
+    const lotReader: jest.Mocked<ProductLotReader> = {
+      getLots: jest.fn().mockResolvedValue([]),
+      findLot: jest.fn().mockResolvedValue({ lotCode: 'L1', dataValidade: new Date('2026-12-01'), diasPermitidoVenda: 0, status: 'ATIVO' }),
+    };
+    const service = new StockMovementAuditEventService(events, checklistItems, orderItemsReader, alerts, ledger, lotReader);
+    return { service, events, checklistItems, orderItemsReader, alerts, ledger, lotReader };
   }
 
   describe('createPending — Sprint 27: montagem do checklist de bipagem', () => {
@@ -257,6 +270,170 @@ describe('StockMovementAuditEventService', () => {
 
       expect(events.findPending).toHaveBeenCalledWith('tenant-1');
       expect(result).toBe(pending);
+    });
+  });
+
+  describe('receivePurchase — Ordem de Compra (Fase 1): entrada de mercadoria comprada', () => {
+    it('cria e aprova o evento no mesmo passo, gerando ledger de CRÉDITO', async () => {
+      const pendingEvent = buildEvent({
+        eventType: 'PURCHASE_RECEIPT',
+        invoiceNumber: 'NF-123',
+        destinationWarehouseId: null,
+      });
+      const { service, events } = buildService(pendingEvent);
+      events.create.mockResolvedValue(pendingEvent);
+      events.approveWithLedger.mockResolvedValue({ ...pendingEvent, conferenceStatus: 'APROVADO' });
+
+      const result = await service.receivePurchase('tenant-1', 'wh-physical', 'NF-123', 'user-1', [
+        { skuCode: 'SKU-1', quantity: 10 },
+      ]);
+
+      expect(events.create).toHaveBeenCalledWith(
+        expect.objectContaining({ tenantId: 'tenant-1', eventType: 'PURCHASE_RECEIPT', sourceWarehouseId: 'wh-physical', invoiceNumber: 'NF-123' }),
+      );
+      expect(events.approveWithLedger).toHaveBeenCalledWith(
+        pendingEvent.id,
+        'user-1',
+        expect.arrayContaining([expect.objectContaining({ warehouseId: 'wh-physical', skuCode: 'SKU-1', quantityDelta: 10 })]),
+      );
+      expect(result).toEqual({ auditEventId: pendingEvent.id });
+    });
+
+    it('rejeita lista de linhas vazia sem tocar o repositório', async () => {
+      const { service, events } = buildService(null);
+      await expect(service.receivePurchase('tenant-1', 'wh-physical', 'NF-123', 'user-1', [])).rejects.toThrow(BadRequestException);
+      expect(events.create).not.toHaveBeenCalled();
+    });
+
+    it('propaga a recusa do gate (sem invoiceNumber) sem gravar ledger', async () => {
+      const pendingEvent = buildEvent({ eventType: 'PURCHASE_RECEIPT', invoiceNumber: null });
+      const { service, events } = buildService(pendingEvent);
+      events.create.mockResolvedValue(pendingEvent);
+
+      await expect(
+        service.receivePurchase('tenant-1', 'wh-physical', '', 'user-1', [{ skuCode: 'SKU-1', quantity: 1 }]),
+      ).rejects.toThrow(BadRequestException);
+      expect(events.approveWithLedger).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('produceOutput — Ordem de Produção (Projeto Estruturante 1): conclusão debita componentes e credita o produto acabado', () => {
+    it('cria e aprova o evento no mesmo passo, gerando débito dos componentes + crédito do produto acabado', async () => {
+      const pendingEvent = buildEvent({
+        eventType: 'PRODUCTION_OUTPUT',
+        sourceWarehouseId: 'wh-physical',
+        destinationWarehouseId: 'wh-physical',
+      });
+      const { service, events } = buildService(pendingEvent);
+      events.create.mockResolvedValue(pendingEvent);
+      events.approveWithLedger.mockResolvedValue({ ...pendingEvent, conferenceStatus: 'APROVADO' });
+
+      const result = await service.produceOutput(
+        'tenant-1',
+        'wh-physical',
+        'wh-physical',
+        'user-1',
+        [{ skuCode: 'COMPONENTE-1', quantity: 20 }],
+        { skuCode: 'KIT-1', quantity: 10 },
+      );
+
+      expect(events.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          eventType: 'PRODUCTION_OUTPUT',
+          sourceWarehouseId: 'wh-physical',
+          destinationWarehouseId: 'wh-physical',
+        }),
+      );
+      expect(events.approveWithLedger).toHaveBeenCalledWith(
+        pendingEvent.id,
+        'user-1',
+        expect.arrayContaining([
+          expect.objectContaining({ warehouseId: 'wh-physical', skuCode: 'COMPONENTE-1', quantityDelta: -20 }),
+          expect.objectContaining({ warehouseId: 'wh-physical', skuCode: 'KIT-1', quantityDelta: 10 }),
+        ]),
+      );
+      expect(result).toEqual({ auditEventId: pendingEvent.id });
+    });
+
+    it('rejeita lista de componentes vazia sem tocar o repositório', async () => {
+      const { service, events } = buildService(null);
+      await expect(
+        service.produceOutput('tenant-1', 'wh-physical', 'wh-physical', 'user-1', [], { skuCode: 'KIT-1', quantity: 1 }),
+      ).rejects.toThrow(BadRequestException);
+      expect(events.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('adjustLot — Produtos-Lotes (Projeto Estruturante 2): lançamento manual por lote', () => {
+    it('rejeita lotCode que não existe para o SKU/tenant, sem criar evento', async () => {
+      const { service, events, lotReader } = buildService(null);
+      lotReader.findLot.mockResolvedValue(null);
+
+      await expect(
+        service.adjustLot('tenant-1', 'wh-physical', 'SKU-1', 'L-INEXISTENTE', 'ENTRADA', 10, 'user-1', 'justificativa'),
+      ).rejects.toThrow(BadRequestException);
+      expect(events.create).not.toHaveBeenCalled();
+    });
+
+    it('ENTRADA: cria e aprova gerando crédito (positivo) no ledger, com lotCode', async () => {
+      const pendingEvent = buildEvent({ eventType: 'LOT_ADJUSTMENT', sourceWarehouseId: 'wh-physical', notes: 'entrada avulsa' });
+      const { service, events } = buildService(pendingEvent);
+      events.create.mockResolvedValue(pendingEvent);
+      events.approveWithLedger.mockResolvedValue({ ...pendingEvent, conferenceStatus: 'APROVADO' });
+
+      const result = await service.adjustLot('tenant-1', 'wh-physical', 'SKU-1', 'L1', 'ENTRADA', 10, 'user-1', 'entrada avulsa');
+
+      expect(events.create).toHaveBeenCalledWith(
+        expect.objectContaining({ tenantId: 'tenant-1', eventType: 'LOT_ADJUSTMENT', sourceWarehouseId: 'wh-physical', notes: 'entrada avulsa' }),
+      );
+      expect(events.approveWithLedger).toHaveBeenCalledWith(pendingEvent.id, 'user-1', [
+        expect.objectContaining({ warehouseId: 'wh-physical', skuCode: 'SKU-1', lotCode: 'L1', quantityDelta: 10 }),
+      ]);
+      expect(result).toEqual({ auditEventId: pendingEvent.id });
+    });
+
+    it('SAIDA: gera débito (negativo) no ledger', async () => {
+      const pendingEvent = buildEvent({ eventType: 'LOT_ADJUSTMENT', notes: 'baixa de vencido' });
+      const { service, events } = buildService(pendingEvent);
+      events.create.mockResolvedValue(pendingEvent);
+      events.approveWithLedger.mockResolvedValue({ ...pendingEvent, conferenceStatus: 'APROVADO' });
+
+      await service.adjustLot('tenant-1', 'wh-physical', 'SKU-1', 'L1', 'SAIDA', 5, 'user-1', 'baixa de vencido');
+
+      expect(events.approveWithLedger).toHaveBeenCalledWith(pendingEvent.id, 'user-1', [
+        expect.objectContaining({ quantityDelta: -5 }),
+      ]);
+    });
+
+    it('BALANCO: calcula o delta contra o saldo atual DAQUELE LOTE (não o SKU inteiro)', async () => {
+      const pendingEvent = buildEvent({ eventType: 'LOT_ADJUSTMENT', notes: 'contagem física' });
+      const { service, events, ledger } = buildService(pendingEvent);
+      events.create.mockResolvedValue(pendingEvent);
+      events.approveWithLedger.mockResolvedValue({ ...pendingEvent, conferenceStatus: 'APROVADO' });
+      // Dois lotes do mesmo SKU no mesmo depósito — só o saldo de L1 pode
+      // entrar na conta do BALANCO de L1.
+      ledger.listBalancesByLot.mockResolvedValue([
+        { lotCode: 'L1', balance: 8 },
+        { lotCode: 'L2', balance: 100 },
+      ]);
+
+      await service.adjustLot('tenant-1', 'wh-physical', 'SKU-1', 'L1', 'BALANCO', 6, 'user-1', 'contagem física');
+
+      expect(events.approveWithLedger).toHaveBeenCalledWith(pendingEvent.id, 'user-1', [
+        expect.objectContaining({ quantityDelta: -2 }),
+      ]);
+    });
+
+    it('rejeita sem justificativa (notes vazio), sem gravar ledger', async () => {
+      const pendingEvent = buildEvent({ eventType: 'LOT_ADJUSTMENT', notes: null });
+      const { service, events } = buildService(pendingEvent);
+      events.create.mockResolvedValue(pendingEvent);
+
+      await expect(
+        service.adjustLot('tenant-1', 'wh-physical', 'SKU-1', 'L1', 'ENTRADA', 10, 'user-1', ''),
+      ).rejects.toThrow(BadRequestException);
+      expect(events.approveWithLedger).not.toHaveBeenCalled();
     });
   });
 });

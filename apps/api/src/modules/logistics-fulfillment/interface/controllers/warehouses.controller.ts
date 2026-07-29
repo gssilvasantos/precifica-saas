@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Inject, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Put, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
 import { WarehouseService } from '../../application/warehouse.service';
-import { STOCK_LEDGER_REPOSITORY, StockLedgerRepository } from '../../application/ports/stock-ledger-repository.port';
+import { ProductWarehouseLocationService } from '../../application/product-warehouse-location.service';
 import { UpdateLeadTimeDto } from '../dto/update-lead-time.dto';
 import { UpdateLogisticsCostDto } from '../dto/update-logistics-cost.dto';
+import { SetProductLocationDto } from '../dto/set-product-location.dto';
 
 // Leitura — qualquer papel autenticado pode consultar depósitos e saldo
 // (mesmo padrão de outras telas só-leitura da plataforma); só as ações do
@@ -14,7 +15,7 @@ import { UpdateLogisticsCostDto } from '../dto/update-logistics-cost.dto';
 export class WarehousesController {
   constructor(
     private readonly warehouses: WarehouseService,
-    @Inject(STOCK_LEDGER_REPOSITORY) private readonly ledger: StockLedgerRepository,
+    private readonly locations: ProductWarehouseLocationService,
   ) {}
 
   @Get()
@@ -22,11 +23,14 @@ export class WarehousesController {
     return this.warehouses.listByTenant(user.tenantId);
   }
 
-  // Saldo por SKU de um depósito específico — soma de StockLedgerEntry.quantityDelta,
-  // nunca uma coluna separada (ver stock-ledger.entity.ts).
+  // Saldo por SKU de um depósito específico. Quick Win 3 (benchmark Bling,
+  // 29/07/2026) — cada linha agora traz `balance` (saldoFisico, campo já
+  // existente, nunca renomeado) mais `reserved`/`available` (saldoVirtual):
+  // o que já está comprometido com pedidos aguardando conferência e o que
+  // ainda pode ser prometido a um cliente novo. Ver domain/stock-balance.ts.
   @Get(':id/balances')
   listBalances(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    return this.ledger.listBalancesByWarehouse(user.tenantId, id);
+    return this.warehouses.listStockBalances(user.tenantId, id);
   }
 
   // Configuração do lead time (Sprint 25) — pedido explícito do usuário
@@ -51,5 +55,26 @@ export class WarehousesController {
     @Body() dto: UpdateLogisticsCostDto,
   ) {
     return this.warehouses.updateLogisticsCostPerUnit(user.tenantId, id, dto.logisticsCostPerUnit);
+  }
+
+  // Benchmark Tiny ERP (28/07/2026, docs/tiny-erp-benchmark-analysis.md,
+  // seção 1.6) — localização física (corredor/prateleira/bin) do SKU dentro
+  // deste depósito. Leitura liberada pra qualquer papel autenticado (mesmo
+  // racional de list/listBalances acima); escrita exige ADMIN/PRICING_EDITOR,
+  // mesmo padrão de lead-time/logistics-cost.
+  @Get(':id/locations')
+  listLocations(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.locations.listByWarehouse(user.tenantId, id);
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.PRICING_EDITOR)
+  @Put(':id/locations/:skuCode')
+  setLocation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('skuCode') skuCode: string,
+    @Body() dto: SetProductLocationDto,
+  ) {
+    return this.locations.setLocation(user.tenantId, id, skuCode, dto.location);
   }
 }

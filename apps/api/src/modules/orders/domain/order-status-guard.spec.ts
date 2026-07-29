@@ -27,4 +27,26 @@ describe('resolveEffectiveStatus (Reestruturação do sync ML, 25-26/07/2026)', 
     expect(resolveEffectiveStatus('CANCELADO', 'EM_ABERTO')).toBe('CANCELADO');
     expect(resolveEffectiveStatus('CANCELADO', 'PREPARANDO_ENVIO')).toBe('CANCELADO');
   });
+
+  it('APROVADO entra na escada linear normal, entre EM_ABERTO e PREPARANDO_ENVIO', () => {
+    expect(resolveEffectiveStatus('EM_ABERTO', 'APROVADO')).toBe('APROVADO');
+    expect(resolveEffectiveStatus('APROVADO', 'PREPARANDO_ENVIO')).toBe('PREPARANDO_ENVIO');
+    expect(resolveEffectiveStatus('PREPARANDO_ENVIO', 'APROVADO')).toBe('PREPARANDO_ENVIO'); // não regride
+  });
+
+  it('NAO_ENTREGUE só é aplicado a partir de ENVIADO (sinal incoerente antes disso é ignorado)', () => {
+    expect(resolveEffectiveStatus('ENVIADO', 'NAO_ENTREGUE')).toBe('NAO_ENTREGUE');
+    expect(resolveEffectiveStatus('PREPARANDO_ENVIO', 'NAO_ENTREGUE')).toBe('PREPARANDO_ENVIO');
+    expect(resolveEffectiveStatus('EM_ABERTO', 'NAO_ENTREGUE')).toBe('EM_ABERTO');
+  });
+
+  it('NAO_ENTREGUE não é terminal: uma reentrega pode levar de volta a ENVIADO ou direto a ENTREGUE', () => {
+    expect(resolveEffectiveStatus('NAO_ENTREGUE', 'ENVIADO')).toBe('ENVIADO');
+    expect(resolveEffectiveStatus('NAO_ENTREGUE', 'ENTREGUE')).toBe('ENTREGUE');
+    expect(resolveEffectiveStatus('NAO_ENTREGUE', 'PREPARANDO_ENVIO')).toBe('NAO_ENTREGUE'); // não regride antes de ENVIADO
+  });
+
+  it('cancelamento é aplicado mesmo a partir de NAO_ENTREGUE', () => {
+    expect(resolveEffectiveStatus('NAO_ENTREGUE', 'CANCELADO')).toBe('CANCELADO');
+  });
 });

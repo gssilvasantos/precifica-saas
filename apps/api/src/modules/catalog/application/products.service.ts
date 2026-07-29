@@ -12,22 +12,43 @@ import { PRODUCT_REPOSITORY, ProductRepository } from './ports/product-repositor
 import { SUPPLIER_REPOSITORY, SupplierRepository } from './ports/supplier-repository.port';
 import { TAX_PROFILE_REPOSITORY, TaxProfileRepository } from './ports/tax-profile-repository.port';
 import { PACKAGING_REPOSITORY, PackagingRepository } from './ports/packaging-repository.port';
+import { PRODUCT_CATEGORY_REPOSITORY, ProductCategoryRepository } from './ports/product-category-repository.port';
 import { SHIPPING_WEIGHT_CALCULATOR } from '../../../shared/contracts/tokens';
 import { ShippingWeightCalculator } from '../../../shared/contracts/shipping-weight-calculator.port';
 import { assertMarginsAreConsistent, InconsistentMarginError } from '../domain/margin-rules';
 import { assertEditableFields, LockedFieldEditError } from '../domain/product-ownership-rules';
 import { resolveShippingDimensions } from '../domain/shipping-dimensions-resolver';
 import { diffGovernanceFields, ProductAuditSource } from '../domain/product-audit';
+import {
+  canSetParent,
+  isValidVariantAttributes,
+  isValidAttributeDefinitions,
+  generateVariantCombinations,
+  buildVariantSkuCode,
+  buildVariantName,
+  VariantAttributeDefinition,
+} from '../domain/product-variant';
 import { Packaging } from '../domain/packaging.entity';
+import { Product } from '../domain/product.entity';
 import { ProductAuditLogService } from './product-audit-log.service';
 
 export interface CreateProductInput {
   skuCode: string;
   name: string;
   internalCategory?: string;
+  // Árvore de categoria (Fase 4, benchmark Tiny ERP) — ver domain/product.entity.ts.
+  // Aceita `null` explícito para desvincular (mesmo racional de mapPrice/ncm/gtin).
+  categoryId?: string | null;
   supplierId?: string;
   taxProfileId?: string;
   packagingId?: string;
+  // Controle de Lote/Validade (Projeto Estruturante 2, benchmark Bling ERP,
+  // 29/07/2026) — ver domain/product.entity.ts, campo controlaLote.
+  controlaLote?: boolean;
+  // Produto Pai + Variação (Fase 2, benchmark Tiny ERP,
+  // docs/tiny-erp-benchmark-analysis.md, seção 2.3) — ver domain/product-variant.ts.
+  parentProductId?: string | null;
+  variantAttributes?: Record<string, string> | null;
   costPrice: number;
   desiredMarginPct: number;
   minimumMarginPct: number;
@@ -40,6 +61,16 @@ export interface CreateProductInput {
   lengthCm: number;
   widthCm: number;
   heightCm: number;
+  // Campos fiscais (benchmark Tiny ERP, docs/tiny-erp-benchmark-analysis.md,
+  // seções 1.1/2.1) — opcionais, pré-requisito para NF-e (Fase 3) e
+  // publicação de anúncio em marketplace (Fase 4).
+  ncm?: string | null;
+  gtin?: string | null;
+  fiscalOriginCode?: number | null;
+  // CEST (benchmark Bling, docs/bling-erp-benchmark-analysis.md, seção 2) —
+  // obrigatório na NF-e de item sujeito a Substituição Tributária. null é
+  // válido (nem todo produto tem ST).
+  cest?: string | null;
 }
 
 export type UpdateProductInput = Partial<CreateProductInput>;
@@ -62,6 +93,7 @@ export class ProductsService {
     @Inject(SUPPLIER_REPOSITORY) private readonly suppliers: SupplierRepository,
     @Inject(TAX_PROFILE_REPOSITORY) private readonly taxProfiles: TaxProfileRepository,
     @Inject(PACKAGING_REPOSITORY) private readonly packagings: PackagingRepository,
+    @Inject(PRODUCT_CATEGORY_REPOSITORY) private readonly categories: ProductCategoryRepository,
     @Inject(SHIPPING_WEIGHT_CALCULATOR) private readonly shippingWeight: ShippingWeightCalculator,
     private readonly auditLog: ProductAuditLogService,
   ) {}
@@ -69,7 +101,17 @@ export class ProductsService {
   async create(tenantId: string, input: CreateProductInput) {
     this.assertMargins(input.desiredMarginPct, input.minimumMarginPct);
     await this.assertReferencesBelongToTenant(tenantId, input.supplierId, input.taxProfileId);
+    await this.assertCategoryBelongsToTenant(tenantId, input.categoryId);
     const packaging = await this.resolvePackaging(tenantId, input.packagingId);
+
+    if (input.parentProductId) {
+      // Criação: productId '' nunca colide com um id real (o produto ainda
+      // não existe) — a checagem de auto-referência do gate passa trivial,
+      // e "já tem filhos" é sempre false (produto novo). Resta validar que
+      // o pai existe, pertence ao tenant, não é ele mesmo uma variação, e
+      // que a grade de atributos foi informada.
+      await this.assertValidParentAssignment(tenantId, '', input.parentProductId, input.variantAttributes, null);
+    }
 
     const weights = await this.shippingWeight.calculate(
       tenantId,
@@ -91,9 +133,13 @@ export class ProductsService {
         skuCode: input.skuCode,
         name: input.name,
         internalCategory: input.internalCategory,
+        categoryId: input.categoryId ?? null,
         supplierId: input.supplierId,
         taxProfileId: input.taxProfileId,
         packagingId: input.packagingId,
+        controlaLote: input.controlaLote,
+        parentProductId: input.parentProductId ?? null,
+        variantAttributes: input.variantAttributes ?? null,
         costPrice: input.costPrice,
         desiredMarginPct: input.desiredMarginPct,
         minimumMarginPct: input.minimumMarginPct,
@@ -107,6 +153,10 @@ export class ProductsService {
         packedWeightKg: weights.packedWeightKg,
         cubicWeightKg: weights.cubicWeightKg,
         shippingWeightKg: weights.shippingWeightKg,
+        ncm: input.ncm ?? null,
+        gtin: input.gtin ?? null,
+        fiscalOriginCode: input.fiscalOriginCode ?? null,
+        cest: input.cest ?? null,
       });
     } catch (error) {
       throw this.translateError(error);
@@ -141,6 +191,18 @@ export class ProductsService {
     const minimumMarginPct = input.minimumMarginPct ?? current.minimumMarginPct;
     this.assertMargins(desiredMarginPct, minimumMarginPct);
     await this.assertReferencesBelongToTenant(tenantId, input.supplierId, input.taxProfileId);
+    if (input.categoryId !== undefined) {
+      await this.assertCategoryBelongsToTenant(tenantId, input.categoryId);
+    }
+
+    // Produto Pai + Variação — só roda o gate quando parentProductId está
+    // sendo de fato SETADO (string). undefined = não está sendo tocado;
+    // null explícito = "desvincular do pai", sempre permitido sem gate (uma
+    // variação virar produto normal de novo nunca quebra a hierarquia de
+    // ninguém).
+    if (input.parentProductId) {
+      await this.assertValidParentAssignment(tenantId, id, input.parentProductId, input.variantAttributes, current.variantAttributes);
+    }
 
     // Trocar de embalagem muda as dimensões/peso efetivos mesmo que nenhum
     // campo físico do PRODUTO em si tenha sido tocado neste update — por
@@ -211,6 +273,99 @@ export class ProductsService {
     return this.products.deactivate(id);
   }
 
+  // Produto Pai + Variação — grade de variações de um pai (tela de
+  // cadastro mostra "Camiseta Azul P / Camiseta Azul M / ..." juntas).
+  // Confirma que o produto existe no tenant antes de listar (mesmo erro
+  // 404 de findOne para um id inexistente/de outro tenant).
+  async findVariants(tenantId: string, id: string): Promise<Product[]> {
+    await this.findOne(tenantId, id);
+    return this.products.findChildren(tenantId, id);
+  }
+
+  // Geração automática de combinações de variação (Quick Win 5, benchmark
+  // Bling, docs/bling-erp-benchmark-analysis.md, seção 1.5 — espelha
+  // `POST /produtos/variacoes/atributos/gerar-combinacoes`). Dado o produto
+  // pai + uma grade de atributos (ex.: Cor:[Azul,Verde], Tamanho:[P,M,G]),
+  // cria uma variação para cada combinação, herdando do pai tudo que não é
+  // a própria grade (custo, margens, dimensões, dados fiscais) — o lojista
+  // ajusta o que precisar depois via PATCH em cada variação individual.
+  // Reaproveita create() ponto a ponto: cada variação passa pelo MESMO gate
+  // canSetParent/isValidVariantAttributes que uma criação manual passaria,
+  // nenhuma lógica de hierarquia duplicada aqui.
+  async generateVariantCombinations(
+    tenantId: string,
+    parentId: string,
+    attributes: VariantAttributeDefinition[],
+  ): Promise<Product[]> {
+    if (!isValidAttributeDefinitions(attributes)) {
+      throw new BadRequestException(
+        'Informe ao menos um atributo com nome e ao menos uma opção cada (ex.: [{"name":"Cor","options":["Azul","Verde"]}]).',
+      );
+    }
+
+    const parent = await this.findOne(tenantId, parentId);
+    if (parent.parentProductId !== null) {
+      throw new BadRequestException(
+        'Só é possível gerar combinações de variação a partir de um produto pai (que não seja, ele mesmo, uma variação).',
+      );
+    }
+
+    const combinations = generateVariantCombinations(attributes);
+
+    // Duas combinações diferentes nunca deveriam colidir no mesmo skuCode —
+    // se colidirem (ex.: mesma opção repetida com grafia diferente que
+    // normaliza igual, tipo "P" e "p"), é erro de cadastro do próprio
+    // lojista na grade informada, melhor recusar tudo de uma vez do que
+    // criar uma leva parcial e deixar a duplicata estourar no meio do loop.
+    const skuCodes = combinations.map((combo) => buildVariantSkuCode(parent.skuCode, combo, attributes));
+    if (new Set(skuCodes).size !== skuCodes.length) {
+      throw new BadRequestException(
+        'A grade de atributos gera SKUs duplicados para variações diferentes — revise as opções informadas.',
+      );
+    }
+
+    // Sequencial, não em lote atômico: cada variação é um produto
+    // independente (diferente de AccountsPayable.createMany, onde as
+    // parcelas do MESMO parcelamento precisam nascer juntas). Se uma
+    // combinação falhar no meio (ex.: SKU já usado por outro produto do
+    // tenant), as anteriores já criadas permanecem — limitação MVP
+    // consciente, documentada em docs/product-variants-architecture.md.
+    const created: Product[] = [];
+    for (let i = 0; i < combinations.length; i++) {
+      const combo = combinations[i];
+      const skuCode = skuCodes[i];
+      const name = buildVariantName(parent.name, combo, attributes);
+      created.push(
+        await this.create(tenantId, {
+          skuCode,
+          name,
+          internalCategory: parent.internalCategory ?? undefined,
+          categoryId: parent.categoryId,
+          supplierId: parent.supplierId ?? undefined,
+          taxProfileId: parent.taxProfileId ?? undefined,
+          packagingId: parent.packagingId ?? undefined,
+          parentProductId: parent.id,
+          variantAttributes: combo,
+          costPrice: parent.costPrice,
+          desiredMarginPct: parent.desiredMarginPct,
+          minimumMarginPct: parent.minimumMarginPct,
+          autoRepricingEnabled: parent.autoRepricingEnabled,
+          mapPrice: parent.mapPrice,
+          weightKg: parent.weightKg,
+          packagingWeightKg: parent.packagingWeightKg,
+          lengthCm: parent.lengthCm,
+          widthCm: parent.widthCm,
+          heightCm: parent.heightCm,
+          ncm: parent.ncm,
+          gtin: parent.gtin,
+          fiscalOriginCode: parent.fiscalOriginCode,
+          cest: parent.cest,
+        }),
+      );
+    }
+    return created;
+  }
+
   private assertMargins(desiredMarginPct: number, minimumMarginPct: number) {
     try {
       assertMarginsAreConsistent(desiredMarginPct, minimumMarginPct);
@@ -233,6 +388,15 @@ export class ProductsService {
     }
   }
 
+  // categoryId aceita `null` explícito (desvincular) — só valida quando de
+  // fato é uma string (mesmo racional de mapPrice/parentProductId: undefined
+  // nunca chega aqui, filtrado pelo `!== undefined` no chamador de update()).
+  private async assertCategoryBelongsToTenant(tenantId: string, categoryId: string | null | undefined): Promise<void> {
+    if (!categoryId) return;
+    const category = await this.categories.findById(tenantId, categoryId);
+    if (!category) throw new BadRequestException('Categoria inválida para esta conta.');
+  }
+
   // Diferente de assertReferencesBelongToTenant (só valida) — aqui
   // precisamos da ENTIDADE de volta, para alimentar resolveShippingDimensions.
   private async resolvePackaging(tenantId: string, packagingId: string | null | undefined): Promise<Packaging | null> {
@@ -240,6 +404,39 @@ export class ProductsService {
     const packaging = await this.packagings.findById(tenantId, packagingId);
     if (!packaging) throw new BadRequestException('Embalagem inválida para esta conta.');
     return packaging;
+  }
+
+  // Produto Pai + Variação — monta o contexto (pai candidato + se o próprio
+  // produto já tem filhos) e delega a decisão para o gate puro canSetParent.
+  // productId '' (usado por create(), onde o produto ainda não tem id) faz
+  // a checagem de auto-referência e de filhos existentes passar trivial —
+  // ver comentário nos dois pontos de chamada.
+  private async assertValidParentAssignment(
+    tenantId: string,
+    productId: string,
+    candidateParentId: string,
+    variantAttributesInput: Record<string, string> | null | undefined,
+    fallbackAttributes: Record<string, string> | null,
+  ): Promise<void> {
+    const candidateParent = await this.products.findById(tenantId, candidateParentId);
+    const children = productId ? await this.products.findChildren(tenantId, productId) : [];
+
+    const check = canSetParent({
+      productId: productId || '(novo produto)',
+      candidateParentId,
+      candidateParent,
+      productHasChildren: children.length > 0,
+    });
+    if (!check.ok) {
+      throw new BadRequestException(check.reason);
+    }
+
+    const effectiveAttributes = variantAttributesInput !== undefined ? variantAttributesInput : fallbackAttributes;
+    if (!isValidVariantAttributes(effectiveAttributes)) {
+      throw new BadRequestException(
+        'variantAttributes é obrigatório e precisa de ao menos um par chave/valor não vazio quando o produto é uma variação (ex.: {"Cor": "Azul", "Tamanho": "P"}).',
+      );
+    }
   }
 
   private translateError(error: unknown) {

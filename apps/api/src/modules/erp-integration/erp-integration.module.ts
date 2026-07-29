@@ -30,7 +30,7 @@ import { OLIST_CONNECTION_REPOSITORY } from './application/ports/olist-connectio
 import { ERP_SYNC_CHANGE_EVENT_REPOSITORY } from './application/ports/erp-sync-change-event-repository.port';
 import { NUVEMSHOP_CONNECTION_REPOSITORY } from './application/ports/nuvemshop-connection-repository.port';
 import { CHANNEL_LISTING_REPOSITORY } from './application/ports/channel-listing-repository.port';
-import { FILE_STORAGE, CHANNEL_LISTING_READER } from '../../shared/contracts/tokens';
+import { FILE_STORAGE, CHANNEL_LISTING_READER, CHANNEL_LISTING_WRITER } from '../../shared/contracts/tokens';
 import { CredentialEncryptionService } from '../../shared/security/credential-encryption.service';
 import { SyncOpsModule } from '../../shared/sync-ops/sync-ops.module';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -82,6 +82,10 @@ import { CatalogModule } from '../catalog/catalog.module';
       useFactory: () => (resolveStorageDriver() === 'r2' ? new R2FileStorageService() : new LocalFileStorageService()),
     },
     { provide: CHANNEL_LISTING_READER, useExisting: ChannelListingReaderService },
+    // Fase 4 (benchmark Tiny ERP) — irmã de escrita de CHANNEL_LISTING_READER,
+    // MESMA instância (useExisting), consumida pelo ListingPublicationService
+    // (marketplace-publishing) para vincular o SKU ao anúncio recém-criado.
+    { provide: CHANNEL_LISTING_WRITER, useExisting: ChannelListingReaderService },
   ],
   // FILE_STORAGE exportado a partir da Sprint 24 — o módulo
   // logistics-fulfillment (Hub de Provas) precisa persistir a mídia
@@ -99,6 +103,6 @@ import { CatalogModule } from '../catalog/catalog.module';
   // repouso — sem exportar aqui, o Nest não consegue resolver essa
   // dependência fora deste módulo, mesmo com a classe registrada em
   // `providers`. Ver docs/auth-security.md.
-  exports: [CHANNEL_LISTING_READER, NuvemshopFeeRuleProvider, NuvemshopOrderProvider, FILE_STORAGE, CredentialEncryptionService],
+  exports: [CHANNEL_LISTING_READER, CHANNEL_LISTING_WRITER, NuvemshopFeeRuleProvider, NuvemshopOrderProvider, FILE_STORAGE, CredentialEncryptionService],
 })
 export class ErpIntegrationModule {}

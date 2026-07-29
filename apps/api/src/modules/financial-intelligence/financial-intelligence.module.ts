@@ -4,17 +4,23 @@ import { ReceivablesService } from './application/receivables.service';
 import { ReceivableReconciliationService } from './application/receivable-reconciliation.service';
 import { ReceivableFromOrderListener } from './application/receivable-from-order.listener';
 import { FinancialOrchestrator } from './application/financial-orchestrator.service';
+import { AccountsPayableService } from './application/accounts-payable.service';
 import { SettlementParserRegistry, SETTLEMENT_REPORT_PARSERS } from './application/settlement-parser-registry.service';
 import { PrismaFixedExpenseRepository } from './infrastructure/prisma-fixed-expense.repository';
 import { PrismaReceivableRecordRepository } from './infrastructure/prisma-receivable-record.repository';
+import { PrismaAccountsPayableRepository } from './infrastructure/prisma-accounts-payable.repository';
 import { GenericSettlementParser } from './infrastructure/generic-settlement-parser';
 import { FixedExpensesController } from './interface/controllers/fixed-expenses.controller';
 import { ReceivablesController } from './interface/controllers/receivables.controller';
 import { SettlementImportController } from './interface/controllers/settlement-import.controller';
 import { DreController } from './interface/controllers/dre.controller';
+import { AccountsPayableController } from './interface/controllers/accounts-payable.controller';
 import { FIXED_EXPENSE_REPOSITORY } from './application/ports/fixed-expense-repository.port';
 import { RECEIVABLE_RECORD_REPOSITORY } from './application/ports/receivable-record-repository.port';
+import { ACCOUNTS_PAYABLE_REPOSITORY } from './application/ports/accounts-payable-repository.port';
+import { ACCOUNTS_PAYABLE_WRITER } from '../../shared/contracts/accounts-payable-writer.port';
 import { OrdersModule } from '../orders/orders.module';
+import { CatalogModule } from '../catalog/catalog.module';
 
 // Bounded context próprio (DRE + Contas a Receber) — ver
 // docs/financial-intelligence-architecture.md. A reconciliação lê só as
@@ -34,18 +40,31 @@ import { OrdersModule } from '../orders/orders.module';
 // REAGIR a um evento (zero import de módulo), enquanto o DRE precisa
 // CONSULTAR dados consolidados sob demanda — um import de módulo pela porta
 // certa é a forma correta de resolver isso, não uma exceção à disciplina.
+//
+// Importa CatalogModule (Contas a Pagar, 28/07/2026) só para consumir
+// SUPPLIER_REPOSITORY — AccountsPayableService.create valida que o
+// supplierId informado pertence ao tenant antes de gravar, mesmo racional de
+// FinancialOrchestrator consumindo ORDER_FINANCIALS_READER do OrdersModule.
 @Module({
-  imports: [OrdersModule],
-  controllers: [FixedExpensesController, ReceivablesController, SettlementImportController, DreController],
+  imports: [OrdersModule, CatalogModule],
+  controllers: [
+    FixedExpensesController,
+    ReceivablesController,
+    SettlementImportController,
+    DreController,
+    AccountsPayableController,
+  ],
   providers: [
     FixedExpensesService,
     ReceivablesService,
     ReceivableReconciliationService,
     ReceivableFromOrderListener,
     FinancialOrchestrator,
+    AccountsPayableService,
     SettlementParserRegistry,
     { provide: FIXED_EXPENSE_REPOSITORY, useClass: PrismaFixedExpenseRepository },
     { provide: RECEIVABLE_RECORD_REPOSITORY, useClass: PrismaReceivableRecordRepository },
+    { provide: ACCOUNTS_PAYABLE_REPOSITORY, useClass: PrismaAccountsPayableRepository },
     // Registry multi-provider (mesmo padrão de MARKETPLACE_PROVIDERS/
     // COMPETITION_RADARS) — hoje só o parser de referência, registrado para
     // NUVEMSHOP (o único canal com integração real hoje). Adicionar um
@@ -55,6 +74,16 @@ import { OrdersModule } from '../orders/orders.module';
       provide: SETTLEMENT_REPORT_PARSERS,
       useFactory: () => [new GenericSettlementParser('NUVEMSHOP')],
     },
+    // Ordem de Compra (Fase 1) — AccountsPayableService implementa
+    // AccountsPayableWriter (createSingle); exporta a PORTA, nunca a classe
+    // concreta, mesmo padrão de LOGISTICS_COST_READER/STOCK_RECEIPT_WRITER em
+    // LogisticsFulfillmentModule.
+    { provide: ACCOUNTS_PAYABLE_WRITER, useExisting: AccountsPayableService },
+  ],
+  exports: [
+    // Ordem de Compra (Fase 1) — PurchaseOrderService lança a conta a pagar
+    // do fornecedor ao confirmar recebimento via esta porta.
+    ACCOUNTS_PAYABLE_WRITER,
   ],
 })
 export class FinancialIntelligenceModule {}

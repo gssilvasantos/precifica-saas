@@ -17,6 +17,13 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { LogisticsFulfillmentModule } from './modules/logistics-fulfillment/logistics-fulfillment.module';
 import { PromotionIntelligenceModule } from './modules/promotion-intelligence/promotion-intelligence.module';
 import { MarketplaceAdsModule } from './modules/marketplace-ads/marketplace-ads.module';
+import { TaggingModule } from './modules/tagging/tagging.module';
+import { ProcurementModule } from './modules/procurement/procurement.module';
+import { FiscalModule } from './modules/fiscal/fiscal.module';
+import { MarketplacePublishingModule } from './modules/marketplace-publishing/marketplace-publishing.module';
+import { ProductionModule } from './modules/production/production.module';
+import { FreightShippingModule } from './modules/freight-shipping/freight-shipping.module';
+import { SellersModule } from './modules/sellers/sellers.module';
 import { AppController } from './app.controller';
 import { resolveStorageDriver } from './shared/config/storage-environment';
 
@@ -55,6 +62,13 @@ const STORAGE_ROOT = process.env.ERP_STORAGE_ROOT ?? join(process.cwd(), 'storag
     LogisticsFulfillmentModule,
     PromotionIntelligenceModule,
     MarketplaceAdsModule,
+    TaggingModule,
+    ProcurementModule,
+    FiscalModule,
+    MarketplacePublishingModule,
+    ProductionModule,
+    FreightShippingModule,
+    SellersModule,
   ],
   controllers: [AppController],
 })

@@ -22,4 +22,17 @@ export class PrismaStockLedgerRepository implements StockLedgerRepository {
     });
     return groups.map((g) => ({ skuCode: g.skuCode, balance: g._sum.quantityDelta ?? 0 }));
   }
+
+  async listBalancesByLot(
+    tenantId: string,
+    warehouseId: string,
+    skuCode: string,
+  ): Promise<Array<{ lotCode: string; balance: number }>> {
+    const groups = await this.prisma.stockLedgerEntry.groupBy({
+      by: ['lotCode'],
+      where: { tenantId, warehouseId, skuCode, lotCode: { not: null } },
+      _sum: { quantityDelta: true },
+    });
+    return groups.map((g) => ({ lotCode: g.lotCode as string, balance: g._sum.quantityDelta ?? 0 }));
+  }
 }

@@ -16,6 +16,10 @@ function buildItem(overrides: Partial<OrderItem> = {}): OrderItem {
     totalPrice: 100,
     taxAmount: null,
     costPrice: null,
+    vendedorId: null,
+    comissaoAliquotaPct: null,
+    comissaoValor: null,
+    comissaoPagaEm: null,
     ...overrides,
   };
 }
@@ -66,6 +70,10 @@ describe('OrdersService', () => {
       findItemsByOrderIds: jest.fn().mockResolvedValue([]),
       hasAnyOrderForChannel: jest.fn().mockResolvedValue(true),
       findPendingShipmentEnrichment: jest.fn().mockResolvedValue([]),
+      findItemForCommission: jest.fn(),
+      assignVendedorToItem: jest.fn(),
+      findCommissionLines: jest.fn().mockResolvedValue([]),
+      markCommissionsPaid: jest.fn().mockResolvedValue(0),
     };
     const catalog: jest.Mocked<ProductCatalogReader> = {
       findBySku: jest.fn(),
@@ -109,6 +117,12 @@ describe('OrdersService', () => {
         packagingId: null,
         isKit: false,
         mapPrice: null,
+        ncm: null,
+        fiscalOriginCode: null,
+        cest: null,
+        categoryId: null,
+        photoUrls: [],
+        weightKg: 1,
       });
 
       const summary = await service.getMarginSummary('tenant-1', 'order-1');
@@ -138,6 +152,12 @@ describe('OrdersService', () => {
         packagingId: null,
         isKit: false,
         mapPrice: null,
+        ncm: null,
+        fiscalOriginCode: null,
+        cest: null,
+        categoryId: null,
+        photoUrls: [],
+        weightKg: 1,
       });
 
       await service.getMarginSummary('tenant-1', 'order-1');
@@ -199,6 +219,12 @@ describe('OrdersService', () => {
         packagingId: null,
         isKit: false,
         mapPrice: null,
+        ncm: null,
+        fiscalOriginCode: null,
+        cest: null,
+        categoryId: null,
+        photoUrls: [],
+        weightKg: 1,
       });
 
       const lines = await service.listForPeriod('tenant-1');

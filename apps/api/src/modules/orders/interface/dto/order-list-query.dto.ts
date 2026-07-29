@@ -2,7 +2,16 @@ import { Type } from 'class-transformer';
 import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { AppDataMode, OrderStatus } from '../../domain/order.entity';
 
-const ORDER_STATUSES: OrderStatus[] = ['EM_ABERTO', 'PREPARANDO_ENVIO', 'FATURADO', 'ENVIADO', 'ENTREGUE', 'CANCELADO'];
+const ORDER_STATUSES: OrderStatus[] = [
+  'EM_ABERTO',
+  'APROVADO',
+  'PREPARANDO_ENVIO',
+  'FATURADO',
+  'ENVIADO',
+  'ENTREGUE',
+  'NAO_ENTREGUE',
+  'CANCELADO',
+];
 const APP_DATA_MODES: AppDataMode[] = ['REAL', 'DEMO'];
 
 // Filtros da worklist (docs/orders-architecture.md, seção 4) — todos

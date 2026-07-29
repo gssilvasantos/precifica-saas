@@ -53,6 +53,12 @@ export class CatalogReaderService implements ProductCatalogReader, PackagingLink
       packagingId: product.packagingId,
       isKit: product.isKit,
       mapPrice: product.mapPrice,
+      ncm: product.ncm,
+      fiscalOriginCode: product.fiscalOriginCode,
+      cest: product.cest,
+      categoryId: product.categoryId,
+      photoUrls: product.photoUrls,
+      weightKg: product.weightKg,
     };
   }
 

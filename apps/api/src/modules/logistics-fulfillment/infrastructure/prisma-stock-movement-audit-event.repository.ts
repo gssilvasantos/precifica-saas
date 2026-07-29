@@ -24,6 +24,7 @@ type RawEvent = {
   conferredAt: Date | null;
   divergenceNotes: string | null;
   invoiceNumber: string | null;
+  notes: string | null;
   createdAt: Date;
   updatedAt: Date;
   orders: Array<{ orderId: string }>;
@@ -42,6 +43,7 @@ export class PrismaStockMovementAuditEventRepository implements StockMovementAud
         sourceWarehouseId: data.sourceWarehouseId,
         destinationWarehouseId: data.destinationWarehouseId ?? null,
         invoiceNumber: data.invoiceNumber ?? null,
+        notes: data.notes ?? null,
         // Join N:N criado junto, na mesma escrita — nunca em dois passos
         // separados (evitaria uma janela onde o evento existe sem vínculo
         // nenhum a pedido, no caso comum de RETAIL_SHIPMENT).
@@ -129,6 +131,23 @@ export class PrismaStockMovementAuditEventRepository implements StockMovementAud
     return this.toDomain(record as RawEvent);
   }
 
+  // Quick Win 3 (benchmark Bling) — agrupa StockMovementAuditEventItem por
+  // SKU, filtrando pelos eventos PENDENTE que têm este depósito como
+  // origem (sourceWarehouseId). Um evento aprovado já debitou o ledger, por
+  // isso não entra na soma (deixaria de "reservar" e passaria a compor o
+  // saldoFisico normalmente).
+  async listReservedByWarehouse(tenantId: string, warehouseId: string): Promise<Array<{ skuCode: string; reservedQuantity: number }>> {
+    const groups = await this.prisma.stockMovementAuditEventItem.groupBy({
+      by: ['skuCode'],
+      where: {
+        tenantId,
+        auditEvent: { sourceWarehouseId: warehouseId, conferenceStatus: 'PENDENTE' },
+      },
+      _sum: { expectedQuantity: true },
+    });
+    return groups.map((g) => ({ skuCode: g.skuCode, reservedQuantity: g._sum.expectedQuantity ?? 0 }));
+  }
+
   private toDomain(record: RawEvent): StockMovementAuditEvent {
     return {
       id: record.id,
@@ -143,6 +162,7 @@ export class PrismaStockMovementAuditEventRepository implements StockMovementAud
       conferredAt: record.conferredAt,
       divergenceNotes: record.divergenceNotes,
       invoiceNumber: record.invoiceNumber,
+      notes: record.notes,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       orderIds: record.orders.map((o) => o.orderId),

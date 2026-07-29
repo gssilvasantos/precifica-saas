@@ -19,8 +19,10 @@ import { MercadoLivreApiClient } from './infrastructure/providers/mercado-livre/
 import { MercadoLivreFeeRuleProvider } from './infrastructure/providers/mercado-livre/mercado-livre-fee-rule.provider';
 import { MercadoLivreOrderProvider } from './infrastructure/providers/mercado-livre/mercado-livre-order.provider';
 import { MercadoLivreAdsProvider } from './infrastructure/providers/mercado-livre/mercado-livre-ads.provider';
+import { MercadoLivreListingProvider } from './infrastructure/providers/mercado-livre/mercado-livre-listing.provider';
 import { ShopeeApiClient } from './infrastructure/providers/shopee/shopee-api-client';
 import { ShopeeOrderProvider } from './infrastructure/providers/shopee/shopee-order.provider';
+import { ShopeeListingProvider } from './infrastructure/providers/shopee/shopee-listing.provider';
 import { SyncSchedulerJob } from './infrastructure/scheduler/sync-scheduler.job';
 
 import { MarketplaceRulesAdminController } from './interface/controllers/marketplace-rules-admin.controller';
@@ -85,6 +87,12 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // Exportada abaixo para o módulo marketplace-ads registrar em
     // ADS_CAPABLE_PROVIDERS.
     MercadoLivreAdsProvider,
+    // Fase 4 (Publicar anúncio novo em marketplace, benchmark Tiny ERP) —
+    // quarta/quinta capacidade do Mercado Livre (CATEGORY_DISCOVERY +
+    // LISTING_CREATE), mesmo racional de MercadoLivreOrderProvider/
+    // MercadoLivreAdsProvider: classe separada, reaproveita a MESMA conexão
+    // OAuth2. Exportada abaixo para o futuro módulo marketplace-publishing.
+    MercadoLivreListingProvider,
     // Sprint 22 — OAuth2 real por vendedor (docs/auth-security.md). Injetada
     // diretamente em MercadoLivreOrderProvider/MercadoLivreAdsProvider (mesmo
     // módulo, sem precisar de token em shared/contracts) e usada pelo
@@ -111,6 +119,12 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // Exportada abaixo para o módulo Orders registrar em
     // ORDER_CAPABLE_PROVIDERS.
     ShopeeOrderProvider,
+    // Fase 4 (Publicar anúncio novo em marketplace, benchmark Tiny ERP) —
+    // quarta/quinta capacidade da Shopee (CATEGORY_DISCOVERY +
+    // LISTING_CREATE), mesmo racional de ShopeeOrderProvider: classe
+    // separada, reaproveita a MESMA conexão. Exportada abaixo para o futuro
+    // módulo marketplace-publishing.
+    ShopeeListingProvider,
     { provide: SHOPEE_CONNECTION_REPOSITORY, useClass: PrismaShopeeConnectionRepository },
     // Registro central de providers (seção 12 do documento de arquitetura do
     // módulo): adicionar um marketplace novo = adicionar uma linha aqui,
@@ -144,11 +158,16 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     PRICE_UPDATE_DISPATCHER,
     MercadoLivreOrderProvider,
     MercadoLivreAdsProvider,
+    MercadoLivreListingProvider,
     MercadoLivreApiClient,
     MercadoLivreConnectionService,
+    MercadoLivreListingProvider,
     // Shopee ORDERS — mesmo racional de MercadoLivreOrderProvider: OrdersModule
     // importa este módulo só para consumir esta classe já registrada aqui.
     ShopeeOrderProvider,
+    // Fase 4 — futuro módulo marketplace-publishing importa este módulo só
+    // para consumir estas duas classes já registradas aqui.
+    ShopeeListingProvider,
   ],
 })
 export class MarketplaceIntelligenceModule {}

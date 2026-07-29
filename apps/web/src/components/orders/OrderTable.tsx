@@ -8,6 +8,7 @@ import type { AIInsight } from '../../features/insights/types';
 import ChannelBadge from './ChannelBadge';
 import OrderStatusBadge from './OrderStatusBadge';
 import AIInsightBadge from '../insights/AIInsightBadge';
+import { Pagination } from '../ui/pagination';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -251,26 +252,11 @@ export default function OrderTable({ insights = [] }: Props) {
         </table>
 
         {total > PAGE_SIZE && (
-          <div className="flex items-center justify-between border-t border-ink-300/60 px-5 py-3 text-xs text-ink-500">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink-300/60 px-5 py-3 text-xs text-ink-500">
             <span>
               Página {page} de {totalPages} — {total} pedido(s)
             </span>
-            <div className="flex gap-2">
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="rounded-lg border border-ink-300 px-3 py-1 font-medium text-ink-700 transition hover:border-neon disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Anterior
-              </button>
-              <button
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                className="rounded-lg border border-ink-300 px-3 py-1 font-medium text-ink-700 transition hover:border-neon disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Próxima
-              </button>
-            </div>
+            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} className="text-xs" />
           </div>
         )}
       </div>

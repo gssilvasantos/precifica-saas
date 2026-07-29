@@ -39,6 +39,14 @@ export class PrismaProductRepository implements ProductRepository {
     return record ? this.toDomain(record) : null;
   }
 
+  async findChildren(tenantId: string, parentProductId: string): Promise<Product[]> {
+    const records = await this.prisma.product.findMany({
+      where: { tenantId, parentProductId },
+      orderBy: { name: 'asc' },
+    });
+    return records.map((record) => this.toDomain(record));
+  }
+
   async update(id: string, data: ProductUpdateData): Promise<Product> {
     const record = await this.prisma.product.update({ where: { id }, data: data as never });
     return this.toDomain(record);

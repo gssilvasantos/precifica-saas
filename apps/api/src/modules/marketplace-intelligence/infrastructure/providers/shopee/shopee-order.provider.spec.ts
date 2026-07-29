@@ -22,6 +22,9 @@ describe('ShopeeOrderProvider (segunda capacidade da Shopee — ORDERS, depois d
     const client = {
       fetchOrderList: jest.fn(),
       fetchOrderDetail: jest.fn(),
+      createShippingDocument: jest.fn(),
+      getShippingDocumentResult: jest.fn(),
+      buildDownloadShippingDocumentPath: jest.fn(),
     } as unknown as jest.Mocked<ShopeeApiClient>;
     const connection = {
       listActiveTenantIds: jest.fn(),
@@ -32,10 +35,11 @@ describe('ShopeeOrderProvider (segunda capacidade da Shopee — ORDERS, depois d
     return { provider, client, connection };
   }
 
-  it('declara a capacidade ORDERS e o marketplaceCode correto', () => {
+  it('declara as capacidades ORDERS e SHIPPING_LABEL e o marketplaceCode correto', () => {
     const { provider } = buildProvider();
     expect(provider.marketplaceCode).toBe('SHOPEE');
     expect(provider.capabilities).toContain('ORDERS');
+    expect(provider.capabilities).toContain('SHIPPING_LABEL');
     expect(provider.code).toBe('SHOPEE_ORDERS');
   });
 
@@ -136,5 +140,62 @@ describe('ShopeeOrderProvider (segunda capacidade da Shopee — ORDERS, depois d
 
     await provider.fetchOrders({ marketplaceCode: 'SHOPEE', tenantId: 'tenant-1', since: daysAgo(7), isFirstSync: false });
     expect(client.fetchOrderList).toHaveBeenCalledWith(expect.any(String), expect.any(String), 'shop-1', 'access-token-valido', expect.any(Date), 'update_time');
+  });
+
+  describe('getShippingLabel (Fase 5, Expedição em lote)', () => {
+    it('sem tenantId: devolve success false sem chamar nada', async () => {
+      const { provider, client } = buildProvider();
+      const result = await provider.getShippingLabel({ marketplaceCode: 'SHOPEE' }, 'ORDER-1');
+      expect(result.success).toBe(false);
+      expect(client.createShippingDocument).not.toHaveBeenCalled();
+    });
+
+    it('sem loja conectada: devolve success false com mensagem explicativa', async () => {
+      const { provider, client, connection } = buildProvider();
+      connection.getValidAccessToken.mockResolvedValue('token-valido');
+      connection.getShopId.mockResolvedValue(null);
+
+      const result = await provider.getShippingLabel({ marketplaceCode: 'SHOPEE', tenantId: 'tenant-1' }, 'ORDER-1');
+
+      expect(result.success).toBe(false);
+      expect(client.createShippingDocument).not.toHaveBeenCalled();
+    });
+
+    it('documento ainda não pronto: devolve success false sem lançar', async () => {
+      const { provider, client, connection } = buildProvider();
+      connection.getValidAccessToken.mockResolvedValue('token-valido');
+      connection.getShopId.mockResolvedValue('shop-1');
+      client.createShippingDocument.mockResolvedValue(undefined);
+      client.getShippingDocumentResult.mockResolvedValue({ status: 'PROCESSING' });
+
+      const result = await provider.getShippingLabel({ marketplaceCode: 'SHOPEE', tenantId: 'tenant-1' }, 'ORDER-1');
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/processing/);
+    });
+
+    it('documento pronto (READY): devolve success true com o path de download', async () => {
+      const { provider, client, connection } = buildProvider();
+      connection.getValidAccessToken.mockResolvedValue('token-valido');
+      connection.getShopId.mockResolvedValue('shop-1');
+      client.createShippingDocument.mockResolvedValue(undefined);
+      client.getShippingDocumentResult.mockResolvedValue({ status: 'READY' });
+      client.buildDownloadShippingDocumentPath.mockReturnValue('/api/v2/logistics/download_shipping_document');
+
+      const result = await provider.getShippingLabel({ marketplaceCode: 'SHOPEE', tenantId: 'tenant-1' }, 'ORDER-1');
+
+      expect(result).toEqual({ success: true, labelUrl: '/api/v2/logistics/download_shipping_document' });
+    });
+
+    it('falha do client (ex.: HTTP não-ok): devolve success false com a mensagem do erro, nunca lança', async () => {
+      const { provider, client, connection } = buildProvider();
+      connection.getValidAccessToken.mockResolvedValue('token-valido');
+      connection.getShopId.mockResolvedValue('shop-1');
+      client.createShippingDocument.mockRejectedValue(new Error('Shopee retornou erro'));
+
+      const result = await provider.getShippingLabel({ marketplaceCode: 'SHOPEE', tenantId: 'tenant-1' }, 'ORDER-1');
+
+      expect(result).toEqual({ success: false, message: 'Shopee retornou erro' });
+    });
   });
 });

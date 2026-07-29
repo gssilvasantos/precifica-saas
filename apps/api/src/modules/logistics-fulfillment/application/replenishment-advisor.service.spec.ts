@@ -52,8 +52,6 @@ describe('ReplenishmentAdvisorService', () => {
       updateLeadTimeDays: jest.fn(),
       updateLogisticsCostPerUnit: jest.fn(),
     };
-    const warehouses = new WarehouseService(warehouseRepo);
-
     const ledger: jest.Mocked<StockLedgerRepository> = {
       getBalance: jest.fn(),
       listBalancesByWarehouse: jest.fn().mockImplementation((_tenantId: string, warehouseId: string) => {
@@ -61,7 +59,19 @@ describe('ReplenishmentAdvisorService', () => {
         if (warehouseId === 'wh-full') return Promise.resolve([{ skuCode: 'SKU-1', balance: 10 }]);
         return Promise.resolve([]);
       }),
+      listBalancesByLot: jest.fn(),
     };
+    const auditEventsRepo = {
+      create: jest.fn(),
+      findById: jest.fn(),
+      findByOrderId: jest.fn(),
+      attachMedia: jest.fn(),
+      approveWithLedger: jest.fn(),
+      markDivergent: jest.fn(),
+      findPending: jest.fn(),
+      listReservedByWarehouse: jest.fn().mockResolvedValue([]),
+    };
+    const warehouses = new WarehouseService(warehouseRepo, ledger, auditEventsRepo);
 
     const orderFinancials: jest.Mocked<OrderFinancialsReader> = {
       listForPeriod: jest.fn().mockResolvedValue(orderLines),

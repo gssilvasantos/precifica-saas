@@ -59,3 +59,12 @@ export const PACKAGING_COST_READER = Symbol('PACKAGING_COST_READER');
 // Líquida. Primeira porta em que Promotion Intelligence importa outro
 // módulo de negócio, sempre pela porta — ver promotion-intelligence.module.ts.
 export const LOGISTICS_COST_READER = Symbol('LOGISTICS_COST_READER');
+
+// Exportado pelo erp-integration (dono de ChannelListing) — irmã de
+// CHANNEL_LISTING_READER, mas de ESCRITA: só `upsert` (nunca delete/find),
+// consumida pelo ListingPublicationService (marketplace-publishing, Fase 4
+// benchmark Tiny ERP) para vincular o SKU ao anúncio recém-criado assim que
+// a publicação é confirmada pelo marketplace. Interface Segregation: nenhum
+// módulo externo ganha acesso ao CHANNEL_LISTING_REPOSITORY completo (esse
+// nunca sai do erp-integration), só a fatia de escrita que precisa.
+export const CHANNEL_LISTING_WRITER = Symbol('CHANNEL_LISTING_WRITER');

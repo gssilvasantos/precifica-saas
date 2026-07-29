@@ -6,6 +6,8 @@ import {
   ProviderCapability,
   ProviderHealthStatus,
   RawOrderCandidate,
+  ShippingLabelCapableProvider,
+  ShippingLabelResult,
 } from '../../../../../shared/contracts/marketplace-provider.contract';
 import { ShopeeApiClient } from './shopee-api-client';
 import { normalizeShopeeOrder } from './shopee-order-normalizer';
@@ -26,11 +28,14 @@ import { ShopeeConnectionService } from '../../../application/shopee-connection.
 // consome ela — ver AVISO DE HONESTIDADE em shopee-api-client.ts e
 // shopee-order-normalizer.ts.
 @Injectable()
-export class ShopeeOrderProvider implements OrderCapableProvider, AuthenticatedProvider {
+export class ShopeeOrderProvider implements OrderCapableProvider, AuthenticatedProvider, ShippingLabelCapableProvider {
   readonly code = 'SHOPEE_ORDERS';
   readonly marketplaceCode = 'SHOPEE';
   readonly sourceType = 'OFFICIAL_API' as const;
-  readonly capabilities = [ProviderCapability.ORDERS];
+  // Fase 5 (Expedição em lote, 29/07/2026) — mesmo racional do Mercado
+  // Livre: SHIPPING_LABEL entra na classe de ORDERS existente, não numa
+  // classe nova, porque reaproveita a mesma conexão/token da loja.
+  readonly capabilities = [ProviderCapability.ORDERS, ProviderCapability.SHIPPING_LABEL];
   readonly authScope = 'TENANT' as const;
 
   private readonly logger = new Logger(ShopeeOrderProvider.name);
@@ -104,6 +109,40 @@ export class ShopeeOrderProvider implements OrderCapableProvider, AuthenticatedP
     this.logger.log(`Sync Shopee tenant=${ctx.tenantId}: ${orderSns.length} pedido(s) encontrado(s), ${rawOrders.length} detalhado(s) (${timeRangeField}).`);
 
     return candidates.filter((o): o is RawOrderCandidate => o !== null);
+  }
+
+  // Fase 5 (Expedição em lote) — dispara a criação do documento e consulta o
+  // resultado UMA vez (a Shopee é assíncrona; se ainda não estiver READY,
+  // devolve success:false com uma mensagem clara para o operador tentar de
+  // novo em instantes, nunca fica em polling bloqueante aqui). Nunca lança —
+  // mesmo padrão do restante do módulo.
+  async getShippingLabel(ctx: FetchContext, externalOrderId: string): Promise<ShippingLabelResult> {
+    if (!ctx.tenantId) {
+      return { success: false, message: 'Etiqueta Shopee Envios exige tenantId — não há candidato global.' };
+    }
+    const accessToken = await this.connection.getValidAccessToken(ctx.tenantId);
+    const shopId = await this.connection.getShopId(ctx.tenantId);
+    if (!shopId) {
+      return { success: false, message: 'Nenhuma loja Shopee conectada para este tenant.' };
+    }
+
+    const partnerId = this.requireEnv('SHOPEE_PARTNER_ID');
+    const partnerKey = this.requireEnv('SHOPEE_PARTNER_KEY');
+
+    try {
+      await this.client.createShippingDocument(partnerId, partnerKey, shopId, accessToken, externalOrderId);
+      const result = await this.client.getShippingDocumentResult(partnerId, partnerKey, shopId, accessToken, externalOrderId);
+      if (result.status !== 'READY') {
+        return { success: false, message: `Documento de envio Shopee ainda ${result.status.toLowerCase()} — tente novamente em instantes.` };
+      }
+      // labelUrl aqui é só o PATH do endpoint de download — ver aviso de
+      // honestidade em ShopeeApiClient.buildDownloadShippingDocumentPath:
+      // baixar de fato exige assinatura HMAC calculada na hora, não um link
+      // estático reaberto depois.
+      return { success: true, labelUrl: this.client.buildDownloadShippingDocumentPath() };
+    } catch (error) {
+      return { success: false, message: (error as Error).message };
+    }
   }
 
   // .trim() — mesmo racional defensivo de ShopeeConnectionService/ShopeeHandshakeService

@@ -47,6 +47,7 @@ function buildAuditEvent(overrides: Partial<StockMovementAuditEvent> = {}): Stoc
     conferredAt: null,
     divergenceNotes: null,
     invoiceNumber: null,
+    notes: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     orderIds: ['order-1'],
@@ -64,6 +65,7 @@ describe('OrderReadyForFulfillmentListener', () => {
       approveWithLedger: jest.fn(),
       markDivergent: jest.fn(),
       findPending: jest.fn().mockResolvedValue([]),
+      listReservedByWarehouse: jest.fn().mockResolvedValue([]),
     };
     const checklistItems = {
       createMany: jest.fn().mockResolvedValue([]),
@@ -76,7 +78,13 @@ describe('OrderReadyForFulfillmentListener', () => {
       findItemsForOrders: jest.fn().mockResolvedValue([]),
     };
     const alerts = { emitAlert: jest.fn() };
-    const auditEvents = new StockMovementAuditEventService(eventsRepo, checklistItems, orderItemsReader, alerts);
+    const ledgerRepo = {
+      getBalance: jest.fn(),
+      listBalancesByWarehouse: jest.fn().mockResolvedValue([]),
+      listBalancesByLot: jest.fn(),
+    };
+    const lotReader = { getLots: jest.fn(), findLot: jest.fn() };
+    const auditEvents = new StockMovementAuditEventService(eventsRepo, checklistItems, orderItemsReader, alerts, ledgerRepo, lotReader);
 
     const warehouseRepo = {
       findById: jest.fn(),
@@ -86,7 +94,7 @@ describe('OrderReadyForFulfillmentListener', () => {
       updateLeadTimeDays: jest.fn(),
       updateLogisticsCostPerUnit: jest.fn(),
     };
-    const warehouses = new WarehouseService(warehouseRepo);
+    const warehouses = new WarehouseService(warehouseRepo, ledgerRepo, eventsRepo);
 
     const listener = new OrderReadyForFulfillmentListener(auditEvents, warehouses, eventsRepo, alerts);
     return { listener, eventsRepo, warehouseRepo, alerts };

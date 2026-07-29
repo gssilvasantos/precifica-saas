@@ -5,6 +5,13 @@ import {
   buildChecklistFromOrderItems,
   isFullyScanned,
   canScanItem,
+  canApprovePurchaseReceipt,
+  buildPurchaseReceiptLedgerEntries,
+  canApproveProduction,
+  buildProductionLedgerEntries,
+  canApproveLotAdjustment,
+  resolveLotAdjustmentDelta,
+  buildLotAdjustmentLedgerEntry,
   StockMovementAuditEvent,
   StockMovementAuditEventItem,
 } from './stock-movement-audit-event.entity';
@@ -37,6 +44,7 @@ function buildEvent(overrides: Partial<StockMovementAuditEvent> = {}): StockMove
     conferredAt: null,
     divergenceNotes: null,
     invoiceNumber: null,
+    notes: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     orderIds: ['order-1'],
@@ -204,5 +212,179 @@ describe('buildLedgerEntries', () => {
     const entries = buildLedgerEntries(event, [{ skuCode: 'SKU-1', quantity: -7 }]);
 
     expect(entries[0].quantityDelta).toBe(-7);
+  });
+});
+
+describe('canApprovePurchaseReceipt — Ordem de Compra (Fase 1): prova é a NF, não mídia', () => {
+  it('aprova quando PENDENTE e invoiceNumber preenchido', () => {
+    const event = buildEvent({ eventType: 'PURCHASE_RECEIPT', mediaUrl: null, invoiceNumber: 'NF-123' });
+    expect(canApprovePurchaseReceipt(event).ok).toBe(true);
+  });
+
+  it('recusa sem invoiceNumber, mesmo sem exigir mídia', () => {
+    const event = buildEvent({ eventType: 'PURCHASE_RECEIPT', mediaUrl: null, invoiceNumber: null });
+    const result = canApprovePurchaseReceipt(event);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/nota fiscal/i);
+  });
+
+  it('recusa evento que já não está PENDENTE', () => {
+    const event = buildEvent({ eventType: 'PURCHASE_RECEIPT', conferenceStatus: 'APROVADO', invoiceNumber: 'NF-123' });
+    expect(canApprovePurchaseReceipt(event).ok).toBe(false);
+  });
+});
+
+describe('buildPurchaseReceiptLedgerEntries', () => {
+  it('gera só CRÉDITO (positivo) no depósito, nunca débito', () => {
+    const event = buildEvent({ eventType: 'PURCHASE_RECEIPT', sourceWarehouseId: 'wh-physical' });
+    const entries = buildPurchaseReceiptLedgerEntries(event, [{ skuCode: 'SKU-1', quantity: 10 }]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ warehouseId: 'wh-physical', skuCode: 'SKU-1', quantityDelta: 10, auditEventId: 'event-1' });
+  });
+
+  it('quantidade sempre absoluta, mesmo se vier negativa por engano', () => {
+    const event = buildEvent({ eventType: 'PURCHASE_RECEIPT' });
+    const entries = buildPurchaseReceiptLedgerEntries(event, [{ skuCode: 'SKU-1', quantity: -5 }]);
+    expect(entries[0].quantityDelta).toBe(5);
+  });
+
+  it('uma linha por SKU, sem segundo depósito envolvido', () => {
+    const event = buildEvent({ eventType: 'PURCHASE_RECEIPT' });
+    const entries = buildPurchaseReceiptLedgerEntries(event, [
+      { skuCode: 'SKU-1', quantity: 2 },
+      { skuCode: 'SKU-2', quantity: 3 },
+    ]);
+    expect(entries).toHaveLength(2);
+  });
+});
+
+// Ordem de Produção (Projeto Estruturante 1, benchmark Bling ERP, 29/07/2026)
+describe('canApproveProduction — prova é a própria ordem de produção confirmada, não mídia nem NF', () => {
+  it('aprova sem mídia e sem invoiceNumber, bastando PENDENTE', () => {
+    const event = buildEvent({ eventType: 'PRODUCTION_OUTPUT', mediaUrl: null, invoiceNumber: null });
+    expect(canApproveProduction(event).ok).toBe(true);
+  });
+
+  it('recusa evento que já não está PENDENTE', () => {
+    const event = buildEvent({ eventType: 'PRODUCTION_OUTPUT', conferenceStatus: 'APROVADO' });
+    expect(canApproveProduction(event).ok).toBe(false);
+  });
+});
+
+describe('buildProductionLedgerEntries', () => {
+  it('gera débito (negativo) de cada componente na origem + crédito (positivo) do produto acabado no destino', () => {
+    const event = buildEvent({
+      eventType: 'PRODUCTION_OUTPUT',
+      sourceWarehouseId: 'wh-physical',
+      destinationWarehouseId: 'wh-physical',
+    }) as StockMovementAuditEvent & { destinationWarehouseId: string };
+
+    const entries = buildProductionLedgerEntries(
+      event,
+      [
+        { skuCode: 'COMPONENTE-1', quantity: 4 },
+        { skuCode: 'COMPONENTE-2', quantity: 2 },
+      ],
+      { skuCode: 'KIT-1', quantity: 2 },
+    );
+
+    expect(entries).toHaveLength(3);
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        { tenantId: 'tenant-1', warehouseId: 'wh-physical', skuCode: 'COMPONENTE-1', quantityDelta: -4, auditEventId: 'event-1' },
+        { tenantId: 'tenant-1', warehouseId: 'wh-physical', skuCode: 'COMPONENTE-2', quantityDelta: -2, auditEventId: 'event-1' },
+        { tenantId: 'tenant-1', warehouseId: 'wh-physical', skuCode: 'KIT-1', quantityDelta: 2, auditEventId: 'event-1' },
+      ]),
+    );
+  });
+
+  it('quantidade sempre absoluta, mesmo se vier negativa por engano', () => {
+    const event = buildEvent({
+      eventType: 'PRODUCTION_OUTPUT',
+      sourceWarehouseId: 'wh-a',
+      destinationWarehouseId: 'wh-b',
+    }) as StockMovementAuditEvent & { destinationWarehouseId: string };
+
+    const entries = buildProductionLedgerEntries(event, [{ skuCode: 'COMP-1', quantity: -3 }], { skuCode: 'KIT-1', quantity: -1 });
+
+    expect(entries.find((e) => e.skuCode === 'COMP-1')?.quantityDelta).toBe(-3);
+    expect(entries.find((e) => e.skuCode === 'KIT-1')?.quantityDelta).toBe(1);
+  });
+
+  it('debita na origem, credita no destino — depósitos diferentes', () => {
+    const event = buildEvent({
+      eventType: 'PRODUCTION_OUTPUT',
+      sourceWarehouseId: 'wh-origem',
+      destinationWarehouseId: 'wh-destino',
+    }) as StockMovementAuditEvent & { destinationWarehouseId: string };
+
+    const entries = buildProductionLedgerEntries(event, [{ skuCode: 'COMP-1', quantity: 1 }], { skuCode: 'KIT-1', quantity: 1 });
+
+    expect(entries.find((e) => e.skuCode === 'COMP-1')?.warehouseId).toBe('wh-origem');
+    expect(entries.find((e) => e.skuCode === 'KIT-1')?.warehouseId).toBe('wh-destino');
+  });
+});
+
+describe('canApproveLotAdjustment (Produtos-Lotes, Projeto Estruturante 2)', () => {
+  it('recusa aprovar sem justificativa (notes)', () => {
+    const result = canApproveLotAdjustment(buildEvent({ eventType: 'LOT_ADJUSTMENT', notes: null }));
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/justificativa/i);
+  });
+
+  it('recusa notes só com espaços em branco', () => {
+    const result = canApproveLotAdjustment(buildEvent({ eventType: 'LOT_ADJUSTMENT', notes: '   ' }));
+    expect(result.ok).toBe(false);
+  });
+
+  it('permite aprovar com justificativa preenchida', () => {
+    const result = canApproveLotAdjustment(
+      buildEvent({ eventType: 'LOT_ADJUSTMENT', notes: 'Correção de contagem física do lote L1.' }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('recusa aprovar um evento que já está APROVADO', () => {
+    const result = canApproveLotAdjustment(
+      buildEvent({ eventType: 'LOT_ADJUSTMENT', notes: 'ok', conferenceStatus: 'APROVADO' }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/já está APROVADO/i);
+  });
+});
+
+describe('resolveLotAdjustmentDelta', () => {
+  it('ENTRADA sempre positiva, mesmo se quantity vier negativa por engano', () => {
+    expect(resolveLotAdjustmentDelta({ movementType: 'ENTRADA', quantity: 5 }, 0)).toBe(5);
+    expect(resolveLotAdjustmentDelta({ movementType: 'ENTRADA', quantity: -5 }, 0)).toBe(5);
+  });
+
+  it('SAIDA sempre negativa, mesmo se quantity vier negativa por engano', () => {
+    expect(resolveLotAdjustmentDelta({ movementType: 'SAIDA', quantity: 5 }, 0)).toBe(-5);
+    expect(resolveLotAdjustmentDelta({ movementType: 'SAIDA', quantity: -5 }, 0)).toBe(-5);
+  });
+
+  it('BALANCO calcula o delta contra o saldo atual, não é a quantidade em si', () => {
+    expect(resolveLotAdjustmentDelta({ movementType: 'BALANCO', quantity: 30 }, 25)).toBe(5);
+    expect(resolveLotAdjustmentDelta({ movementType: 'BALANCO', quantity: 10 }, 25)).toBe(-15);
+    expect(resolveLotAdjustmentDelta({ movementType: 'BALANCO', quantity: 25 }, 25)).toBe(0);
+  });
+});
+
+describe('buildLotAdjustmentLedgerEntry', () => {
+  it('gera exatamente uma linha, carregando lotCode', () => {
+    const event = buildEvent({ eventType: 'LOT_ADJUSTMENT', sourceWarehouseId: 'wh-physical' });
+
+    const entry = buildLotAdjustmentLedgerEntry(event, { skuCode: 'SKU-1', lotCode: 'L1', quantityDelta: -3 });
+
+    expect(entry).toEqual({
+      tenantId: 'tenant-1',
+      warehouseId: 'wh-physical',
+      skuCode: 'SKU-1',
+      quantityDelta: -3,
+      auditEventId: 'event-1',
+      lotCode: 'L1',
+    });
   });
 });

@@ -56,7 +56,7 @@ Testado em `domain/stock-movement-audit-event.spec.ts` (10 casos, funções pura
 | `POST /logistics-fulfillment/audit-events/:id/approve` | ADMIN/PRICING_EDITOR | Fase 2 — aprova, com `lines: [{skuCode, quantity}]` |
 | `POST /logistics-fulfillment/audit-events/:id/divergent` | ADMIN/PRICING_EDITOR | Fase 2 — marca divergente |
 | `GET /logistics-fulfillment/warehouses` | autenticado | Lista depósitos do tenant |
-| `GET /logistics-fulfillment/warehouses/:id/balances` | autenticado | Saldo por SKU (soma de `StockLedgerEntry.quantityDelta`) |
+| `GET /logistics-fulfillment/warehouses/:id/balances` | autenticado | Saldo por SKU: `balance` (saldoFisico, soma de `StockLedgerEntry.quantityDelta`), `reserved` (comprometido com pedidos aguardando conferência) e `available` (saldoVirtual = `balance - reserved`) — Quick Win 3, benchmark Bling (29/07/2026, `docs/bling-erp-benchmark-analysis.md`, seção 2). Ver `domain/stock-balance.ts` (`mergeStockBalances`) e `WarehouseService.listStockBalances` |
 
 ## 6. Gap honesto remanescente (ao final da Sprint 24)
 

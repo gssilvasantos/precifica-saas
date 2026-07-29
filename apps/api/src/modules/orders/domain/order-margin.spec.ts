@@ -13,6 +13,10 @@ function buildItem(overrides: Partial<OrderItem> = {}): OrderItem {
     totalPrice: 100,
     taxAmount: null,
     costPrice: null,
+    vendedorId: null,
+    comissaoAliquotaPct: null,
+    comissaoValor: null,
+    comissaoPagaEm: null,
     ...overrides,
   };
 }

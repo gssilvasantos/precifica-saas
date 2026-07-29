@@ -18,6 +18,10 @@ describe('AuditSeederService', () => {
       findItemsByOrderIds: jest.fn().mockResolvedValue([]),
       hasAnyOrderForChannel: jest.fn().mockResolvedValue(true),
       findPendingShipmentEnrichment: jest.fn().mockResolvedValue([]),
+      findItemForCommission: jest.fn(),
+      assignVendedorToItem: jest.fn(),
+      findCommissionLines: jest.fn().mockResolvedValue([]),
+      markCommissionsPaid: jest.fn().mockResolvedValue(0),
     };
     const service = new AuditSeederService(orderRepository);
     return { service, orderRepository };
@@ -128,10 +132,12 @@ describe('AuditSeederService', () => {
       const { service, orderRepository } = buildService();
       orderRepository.countByStatus.mockResolvedValue({
         EM_ABERTO: 1,
+        APROVADO: 0,
         PREPARANDO_ENVIO: 1,
         FATURADO: 1,
         ENVIADO: 1,
         ENTREGUE: 5,
+        NAO_ENTREGUE: 0,
         CANCELADO: 1,
       });
 

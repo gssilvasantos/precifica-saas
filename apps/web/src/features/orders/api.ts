@@ -4,7 +4,9 @@ import type { AppDataMode } from '../app-mode/api';
 // Espelha 1:1 apps/api/src/modules/orders/domain/order.entity.ts — mesmo
 // racional de duplicação intencional já usado em features/catalog/api.ts
 // (o frontend não importa tipo do backend, só replica o formato do JSON).
-export type OrderStatus = 'EM_ABERTO' | 'PREPARANDO_ENVIO' | 'FATURADO' | 'ENVIADO' | 'ENTREGUE' | 'CANCELADO';
+// APROVADO/NAO_ENTREGUE — benchmark Tiny ERP (28/07/2026, ver
+// docs/tiny-erp-benchmark-analysis.md, seção 2.2). Espelha domain/order.entity.ts (API).
+export type OrderStatus = 'EM_ABERTO' | 'APROVADO' | 'PREPARANDO_ENVIO' | 'FATURADO' | 'ENVIADO' | 'ENTREGUE' | 'NAO_ENTREGUE' | 'CANCELADO';
 
 export type FiscalResponsibility = 'SELLER' | 'MARKETPLACE';
 

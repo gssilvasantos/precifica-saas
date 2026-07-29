@@ -1,7 +1,10 @@
 // Espelha 1:1 o `enum OrderStatus` do Prisma — duplicado de propósito
 // (mesmo padrão de BuyBoxStatus/ReceivableStatus): o domínio não importa o
 // client gerado do Prisma, só valores simples.
-export type OrderStatus = 'EM_ABERTO' | 'PREPARANDO_ENVIO' | 'FATURADO' | 'ENVIADO' | 'ENTREGUE' | 'CANCELADO';
+// APROVADO/NAO_ENTREGUE — benchmark Tiny ERP (28/07/2026, ver
+// docs/tiny-erp-benchmark-analysis.md, seção 2.2, e domain/order-status-guard.ts
+// para como cada um entra na progressão de estágios).
+export type OrderStatus = 'EM_ABERTO' | 'APROVADO' | 'PREPARANDO_ENVIO' | 'FATURADO' | 'ENVIADO' | 'ENTREGUE' | 'NAO_ENTREGUE' | 'CANCELADO';
 
 // Estados TERMINAIS — usados por regras que não devem reagir a um pedido
 // que já saiu do fluxo ativo (ex.: reconciliação financeira, worklist).
@@ -40,6 +43,36 @@ export interface OrderItem {
   // Nulo em pedidos sincronizados antes desta etapa, ou quando o SKU nunca
   // resolveu — ver fallback em domain/order-margin.ts.
   costPrice: number | null;
+  // Vendedores + Comissão (Projeto Estruturante 3, benchmark Bling ERP,
+  // 29/07/2026, docs/sellers-architecture.md) — atribuição manual explícita
+  // (ver CommissionService.assignVendedor), referência SOLTA (não FK Prisma)
+  // ao Vendedor (schema sellers), mesmo racional de skuCode -> Product.
+  // comissaoAliquotaPct/comissaoValor são SNAPSHOT do momento da atribuição
+  // — mudar a alíquota do vendedor depois NUNCA recalcula itens já
+  // atribuídos (mesmo racional de costPrice acima).
+  vendedorId: string | null;
+  comissaoAliquotaPct: number | null;
+  comissaoValor: number | null;
+  // Null = comissão ainda não incluída em nenhuma geração de conta a pagar
+  // (ver CommissionService.generatePayout) — impede pagar a MESMA comissão
+  // duas vezes.
+  comissaoPagaEm: Date | null;
+}
+
+// Uma linha de comissão pronta para relatório/geração de conta a pagar —
+// DTO de LEITURA (não persistido como tal, montado por
+// PrismaOrderRepository.findCommissionLines a partir de OrderItem + Order).
+export interface CommissionLine {
+  orderItemId: string;
+  orderId: string;
+  externalOrderId: string;
+  skuCode: string | null;
+  productName: string;
+  base: number; // totalPrice do item — a base sobre a qual a alíquota incidiu
+  aliquotaPct: number;
+  valor: number;
+  orderedAt: Date;
+  comissaoPagaEm: Date | null;
 }
 
 export interface Order {

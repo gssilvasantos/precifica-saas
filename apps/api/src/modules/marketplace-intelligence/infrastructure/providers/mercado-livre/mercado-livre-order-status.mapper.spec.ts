@@ -21,12 +21,28 @@ describe('mapMercadoLivreStatus', () => {
     expect(mapMercadoLivreStatus({ status: 'paid', shippingStatus: 'shipped' })).toBe('ENVIADO');
   });
 
-  it('status paid sem shipping avançado -> PREPARANDO_ENVIO', () => {
-    expect(mapMercadoLivreStatus({ status: 'paid' })).toBe('PREPARANDO_ENVIO');
+  it('status paid sem confirmação de envio (fast path) -> APROVADO', () => {
+    expect(mapMercadoLivreStatus({ status: 'paid' })).toBe('APROVADO');
   });
 
-  it('status partially_paid -> PREPARANDO_ENVIO', () => {
-    expect(mapMercadoLivreStatus({ status: 'partially_paid' })).toBe('PREPARANDO_ENVIO');
+  it('status paid com shippingStatus pending (ainda sem preparação confirmada) -> APROVADO', () => {
+    expect(mapMercadoLivreStatus({ status: 'paid', shippingStatus: 'pending' })).toBe('APROVADO');
+  });
+
+  it('status partially_paid sem confirmação de envio -> APROVADO', () => {
+    expect(mapMercadoLivreStatus({ status: 'partially_paid' })).toBe('APROVADO');
+  });
+
+  it('shippingStatus handling (preparação confirmada) -> PREPARANDO_ENVIO', () => {
+    expect(mapMercadoLivreStatus({ status: 'paid', shippingStatus: 'handling' })).toBe('PREPARANDO_ENVIO');
+  });
+
+  it('shippingStatus ready_to_ship (preparação confirmada) -> PREPARANDO_ENVIO', () => {
+    expect(mapMercadoLivreStatus({ status: 'paid', shippingStatus: 'ready_to_ship' })).toBe('PREPARANDO_ENVIO');
+  });
+
+  it('shippingStatus not_delivered -> NAO_ENTREGUE', () => {
+    expect(mapMercadoLivreStatus({ status: 'paid', shippingStatus: 'not_delivered' })).toBe('NAO_ENTREGUE');
   });
 
   it('status confirmed (aguardando pagamento) -> EM_ABERTO', () => {

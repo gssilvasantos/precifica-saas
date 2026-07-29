@@ -39,6 +39,25 @@ export interface ProductCatalogSummary {
   // como os campos acima. null = sem restrição MAP para este SKU. Ver
   // domain/pricing-strategist.ts (PricingContext.mapPrice/validatePriceAgainstMap).
   mapPrice: number | null;
+  // Campos fiscais (Fase 0 do benchmark Tiny ERP, Product.ncm/fiscalOriginCode)
+  // — consumidos pelo módulo fiscal (Fase 3, emissão de NF-e) para montar o
+  // payload de item do Focus NFe sem duplicar o cadastro de produto. Aditivo,
+  // mesmo racional do resto deste DTO: quem já consumia os campos antigos
+  // não quebra.
+  ncm: string | null;
+  fiscalOriginCode: number | null;
+  // CEST (benchmark Bling, 29/07/2026, ver docs/bling-erp-benchmark-analysis.md,
+  // seção 2) — obrigatório na NF-e de todo item sujeito a Substituição
+  // Tributária (eletrônicos, cosméticos, autopeças, bebidas etc.). null é
+  // válido: nem todo produto tem ST.
+  cest: string | null;
+  // Publicar anúncio novo em marketplace (Fase 4, benchmark Tiny ERP) —
+  // consumidos pelo ListingPublicationService (marketplace-publishing) para
+  // montar o payload de criação do anúncio sem depender da tabela Product
+  // diretamente. Aditivo, mesmo racional do resto deste DTO.
+  categoryId: string | null;
+  photoUrls: string[];
+  weightKg: number;
 }
 
 export interface ProductCatalogReader {

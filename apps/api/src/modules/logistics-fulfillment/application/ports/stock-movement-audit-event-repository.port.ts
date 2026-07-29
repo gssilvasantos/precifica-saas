@@ -6,6 +6,10 @@ export interface LedgerEntryInput {
   skuCode: string;
   quantityDelta: number;
   auditEventId: string;
+  // Produtos-Lotes (Projeto Estruturante 2) — undefined em toda linha que
+  // não veio de buildLotAdjustmentLedgerEntry, persiste como null (SKU sem
+  // controle de lote, o caso de longe mais comum).
+  lotCode?: string;
 }
 
 export interface StockMovementAuditEventRepository {
@@ -29,6 +33,12 @@ export interface StockMovementAuditEventRepository {
   // primeiro na doca é conferido primeiro). Sem isso a tela de conferência
   // não teria como descobrir QUAL evento abrir sem já saber o ID de antemão.
   findPending(tenantId: string): Promise<StockMovementAuditEvent[]>;
+  // Quick Win 3 (benchmark Bling, docs/bling-erp-benchmark-analysis.md,
+  // seção 2) — quantidade comprometida por SKU num depósito: soma de
+  // StockMovementAuditEventItem.expectedQuantity de todo evento PENDENTE
+  // (aguardando conferência) que tem este depósito como origem. Consumido
+  // por WarehouseService.listStockBalances para calcular saldoVirtual.
+  listReservedByWarehouse(tenantId: string, warehouseId: string): Promise<Array<{ skuCode: string; reservedQuantity: number }>>;
 }
 
 export const STOCK_MOVEMENT_AUDIT_EVENT_REPOSITORY = Symbol('STOCK_MOVEMENT_AUDIT_EVENT_REPOSITORY');

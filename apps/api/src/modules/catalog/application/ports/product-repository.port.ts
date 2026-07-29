@@ -12,6 +12,11 @@ export interface ProductRepository {
   // vindo do ERP é criação ou atualização — vínculo é por proveniência, não
   // por SKU, porque o SKU pode mudar do lado do ERP sem trocar o produto.
   findByExternalId(tenantId: string, sourceSystem: ProductSourceSystem, externalId: string): Promise<Product | null>;
+  // Produto Pai + Variação (Fase 2) — lista as variações de um pai (usado
+  // pelo endpoint GET /products/:id/variants e pelo gate canSetParent, que
+  // precisa saber se um produto já tem filhos antes de deixá-lo virar
+  // variação de outro).
+  findChildren(tenantId: string, parentProductId: string): Promise<Product[]>;
 }
 
 export const PRODUCT_REPOSITORY = Symbol('PRODUCT_REPOSITORY');

@@ -11,6 +11,50 @@ export interface MlCategory {
   name: string;
 }
 
+// Fase 4 (Publicar anúncio novo em marketplace, benchmark Tiny ERP) — três
+// novos endpoints, todos abaixo do MESMO aviso de honestidade das outras
+// seções deste client (Ads/pauseCampaign): shape montado a partir da
+// documentação pública, nunca exercitado contra uma chamada real neste
+// sandbox.
+export interface MlDomainDiscoveryResult {
+  domain_id?: string;
+  domain_name?: string;
+  category_id: string;
+  category_name: string;
+}
+
+export interface MlCategoryAttribute {
+  id: string;
+  name: string;
+  tags?: {
+    required?: boolean;
+    // outras tags existem (catalog_required, hidden, variation_attribute...)
+    // — só `required` importa para o gate canPublish hoje.
+    [key: string]: unknown;
+  };
+}
+
+export interface MlCreateItemPayload {
+  title: string;
+  category_id: string;
+  price: number;
+  currency_id: string;
+  available_quantity: number;
+  buying_mode: 'buy_it_now';
+  condition: 'new';
+  listing_type_id: string;
+  pictures: { source: string }[];
+  attributes: { id: string; value_name: string }[];
+}
+
+export interface MlCreateItemResult {
+  id?: string;
+  status?: string;
+  message?: string;
+  error?: string;
+  cause?: unknown[];
+}
+
 export interface MlListingPrice {
   listing_type_id: string;
   listing_type_name?: string;
@@ -272,6 +316,48 @@ export class MercadoLivreApiClient {
     }
   }
 
+  // --- Expedição em lote (Fase 5, benchmark Tiny ERP, 29/07/2026) ---
+  //
+  // Resolve o shipment_id vinculado ao pedido (GET /orders/:id, mesmo objeto
+  // `shipping` de referência já usado em fetchOrders — ver aviso acima sobre
+  // este objeto NUNCA trazer o status/dado completo, só o id) e, com ele, o
+  // tracking_number real via GET /shipments/:id. Nunca lança — mesmo padrão
+  // de fetchShipmentStatus: "sem informação" é um retorno válido, não uma
+  // falha.
+  async fetchOrderShippingInfo(externalOrderId: string, accessToken: string): Promise<{ shipmentId: string | null; trackingNumber: string | null }> {
+    try {
+      const orderResponse = await this.request(`${BASE_URL}/orders/${externalOrderId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!orderResponse.ok) return { shipmentId: null, trackingNumber: null };
+      const orderData = (await orderResponse.json()) as { shipping?: { id?: number | string } };
+      const shipmentId = orderData.shipping?.id != null ? String(orderData.shipping.id) : null;
+      if (!shipmentId) return { shipmentId: null, trackingNumber: null };
+
+      const shipmentResponse = await this.request(`${BASE_URL}/shipments/${shipmentId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!shipmentResponse.ok) return { shipmentId, trackingNumber: null };
+      const shipmentData = (await shipmentResponse.json()) as { tracking_number?: string };
+      return { shipmentId, trackingNumber: shipmentData.tracking_number ?? null };
+    } catch (error) {
+      this.logger.warn(`Falha ao resolver envio do pedido ML ${externalOrderId}: ${(error as Error).message}`);
+      return { shipmentId: null, trackingNumber: null };
+    }
+  }
+
+  // Puro (sem chamada de rede) — monta a URL do documento de etiqueta
+  // (Mercado Envios). AVISO DE HONESTIDADE: esta URL exige o MESMO
+  // `Authorization: Bearer <token>` do vendedor para ser aberta — não é um
+  // link público direto, diferente do que labelUrl sugere à primeira vista.
+  // Servir isso de verdade para o usuário final exige um proxy autenticado
+  // (gap conhecido, ver docs/dispatch-batch-architecture.md) — por ora o
+  // Kyneti só guarda/expõe a URL, quem abre precisa estar com uma sessão
+  // válida do Mercado Livre por trás.
+  buildShippingLabelUrl(shipmentId: string): string {
+    return `${BASE_URL}/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`;
+  }
+
   // --- Product Ads (Módulo de Ads, Fase 1) ---
   //
   // AVISO DE HONESTIDADE (mais forte que o de fee-rules acima, de propósito):
@@ -375,5 +461,54 @@ export class MercadoLivreApiClient {
       const body = await response.text().catch(() => '');
       throw new Error(`Mercado Livre PUT /product_ads/campaigns/${externalCampaignId} retornou HTTP ${response.status}: ${body}`);
     }
+  }
+
+  // --- Publicar anúncio novo em marketplace (Fase 4, benchmark Tiny ERP) ---
+  //
+  // Busca de categoria por texto livre — endpoint PÚBLICO (sem OAuth),
+  // documentado em developers.mercadolivre.com.br/pt_br/domain-discovery.
+  // Usado só no momento de CONFIGURAR o ChannelCategoryMapping (via
+  // ChannelCategoryMappingService), nunca em toda publicação.
+  async searchCategories(query: string): Promise<MlDomainDiscoveryResult[]> {
+    const url = `${BASE_URL}/sites/${SITE_ID}/domain_discovery/search?limit=10&q=${encodeURIComponent(query)}`;
+    const response = await this.request(url);
+    if (!response.ok) {
+      throw new Error(`Mercado Livre /domain_discovery/search retornou HTTP ${response.status} para "${query}"`);
+    }
+    const data = (await response.json()) as MlDomainDiscoveryResult[];
+    return Array.isArray(data) ? data : [];
+  }
+
+  // Atributos exigidos pela categoria — endpoint PÚBLICO, consultado sempre
+  // ao vivo (nunca cacheado permanentemente: a lista muda por categoria e o
+  // canal pode alterá-la sem aviso — ver CategoryDiscoveryCapableProvider).
+  async getCategoryAttributes(categoryId: string): Promise<MlCategoryAttribute[]> {
+    const url = `${BASE_URL}/categories/${categoryId}/attributes`;
+    const response = await this.request(url);
+    if (!response.ok) {
+      throw new Error(`Mercado Livre /categories/${categoryId}/attributes retornou HTTP ${response.status}`);
+    }
+    const data = (await response.json()) as MlCategoryAttribute[];
+    return Array.isArray(data) ? data : [];
+  }
+
+  // Cria o anúncio de fato — PRIMEIRO endpoint de escrita de LISTAGEM deste
+  // client (diferente de pauseCampaign, que é escrita de Ads). MESMO aviso de
+  // honestidade reforçado: nunca exercitado contra a API real. Só é chamado
+  // depois que o gate canPublish (domain/listing-publication.entity.ts) já
+  // validou o payload E o usuário confirmou explicitamente a publicação
+  // (ListingPublicationService) — nunca automaticamente.
+  async createItem(accessToken: string, payload: MlCreateItemPayload): Promise<MlCreateItemResult> {
+    const response = await this.request(`${BASE_URL}/items`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = (await response.json().catch(() => ({}))) as MlCreateItemResult;
+    if (!response.ok) {
+      const detail = data.message ?? data.error ?? JSON.stringify(data.cause ?? {});
+      throw new Error(`Mercado Livre POST /items retornou HTTP ${response.status}: ${detail}`);
+    }
+    return data;
   }
 }

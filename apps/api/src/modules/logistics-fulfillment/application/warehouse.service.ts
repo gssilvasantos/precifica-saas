@@ -1,6 +1,12 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { WAREHOUSE_REPOSITORY, WarehouseRepository } from './ports/warehouse-repository.port';
+import { STOCK_LEDGER_REPOSITORY, StockLedgerRepository } from './ports/stock-ledger-repository.port';
+import {
+  STOCK_MOVEMENT_AUDIT_EVENT_REPOSITORY,
+  StockMovementAuditEventRepository,
+} from './ports/stock-movement-audit-event-repository.port';
 import { isValidLeadTimeDays, isValidLogisticsCostPerUnit, Warehouse } from '../domain/warehouse.entity';
+import { mergeStockBalances, StockBalanceLine } from '../domain/stock-balance';
 
 // Nome fixo do depósito físico — um por tenant, sempre o mesmo código.
 // Diferente dos CDs Full (um código por canal), o físico não varia.
@@ -8,7 +14,11 @@ const PHYSICAL_WAREHOUSE_CODE = 'FISICO';
 
 @Injectable()
 export class WarehouseService {
-  constructor(@Inject(WAREHOUSE_REPOSITORY) private readonly warehouses: WarehouseRepository) {}
+  constructor(
+    @Inject(WAREHOUSE_REPOSITORY) private readonly warehouses: WarehouseRepository,
+    @Inject(STOCK_LEDGER_REPOSITORY) private readonly ledger: StockLedgerRepository,
+    @Inject(STOCK_MOVEMENT_AUDIT_EVENT_REPOSITORY) private readonly auditEvents: StockMovementAuditEventRepository,
+  ) {}
 
   // Idempotente — chamado sempre que um evento precisa do depósito físico
   // do tenant, sem exigir um passo de "setup" manual antes.
@@ -29,6 +39,24 @@ export class WarehouseService {
 
   listByTenant(tenantId: string): Promise<Warehouse[]> {
     return this.warehouses.findAllByTenant(tenantId);
+  }
+
+  // Quick Win 3 (benchmark Bling, docs/bling-erp-benchmark-analysis.md,
+  // seção 2 — EstoquesSaldosDTO saldoFisico/saldoVirtual) — combina o saldo
+  // físico (StockLedgerRepository, já existia) com a reserva de pedidos
+  // aguardando conferência (StockMovementAuditEventRepository, novo) via
+  // mergeStockBalances (domain puro). Valida ownership do tenant primeiro,
+  // mesmo padrão defensivo de updateLeadTimeDays/updateLogisticsCostPerUnit.
+  async listStockBalances(tenantId: string, warehouseId: string): Promise<StockBalanceLine[]> {
+    const warehouse = await this.warehouses.findById(warehouseId);
+    if (!warehouse || warehouse.tenantId !== tenantId) {
+      throw new NotFoundException(`Depósito ${warehouseId} não encontrado.`);
+    }
+    const [physical, reserved] = await Promise.all([
+      this.ledger.listBalancesByWarehouse(tenantId, warehouseId),
+      this.auditEvents.listReservedByWarehouse(tenantId, warehouseId),
+    ]);
+    return mergeStockBalances(physical, reserved);
   }
 
   // Edição do lead time (Sprint 25) — pedido explícito do usuário para

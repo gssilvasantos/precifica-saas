@@ -21,6 +21,20 @@ export enum ProviderCapability {
   // Capacidade separada de ADS (Interface Segregation): um provider pode ler
   // campanhas sem necessariamente saber executar uma ação sobre elas.
   ADS_ACTIONS = 'ADS_ACTIONS',
+  // Publicar anúncio novo em marketplace (Fase 4, benchmark Tiny ERP — ver
+  // ListingCreateCapableProvider/CategoryDiscoveryCapableProvider abaixo).
+  // Duas capacidades separadas (Interface Segregation, mesmo racional de
+  // PRICE_UPDATE/ADS_ACTIONS): CATEGORY_DISCOVERY é só consultada ao
+  // CONFIGURAR o mapeamento de categoria; LISTING_CREATE é a escrita de
+  // fato (criar o anúncio). Separada também de LISTINGS (read-only, só
+  // lista anúncios já existentes para vínculo de SKU).
+  CATEGORY_DISCOVERY = 'CATEGORY_DISCOVERY',
+  LISTING_CREATE = 'LISTING_CREATE',
+  // Expedição em lote (Fase 5, benchmark Tiny ERP — ver
+  // ShippingLabelCapableProvider abaixo). Busca a etiqueta/rastreio NATIVO
+  // do canal para um pedido já existente — diferente de LISTING_CREATE
+  // (cria um anúncio) e de ORDERS (lê o pedido em si).
+  SHIPPING_LABEL = 'SHIPPING_LABEL',
 }
 
 export interface RawRuleCandidate {
@@ -135,7 +149,9 @@ export interface PriceUpdateCapableProvider extends MarketplaceProvider {
 // completa da janela pedida (`ctx.since`) de uma vez — o orquestrador
 // genérico (OrderSyncOrchestrator) só sabe fazer upsert por
 // (tenantId, channelCode, externalOrderId), nunca lida com cursor/página.
-export type UnifiedOrderStatus = 'EM_ABERTO' | 'PREPARANDO_ENVIO' | 'FATURADO' | 'ENVIADO' | 'ENTREGUE' | 'CANCELADO';
+// APROVADO/NAO_ENTREGUE — benchmark Tiny ERP (28/07/2026, ver
+// docs/tiny-erp-benchmark-analysis.md, seção 2.2). Espelha domain/order.entity.ts.
+export type UnifiedOrderStatus = 'EM_ABERTO' | 'APROVADO' | 'PREPARANDO_ENVIO' | 'FATURADO' | 'ENVIADO' | 'ENTREGUE' | 'NAO_ENTREGUE' | 'CANCELADO';
 
 // Espelha o enum Prisma FiscalResponsibility (Etapa 17) — ver
 // docs/orders-architecture.md, seção 12.
@@ -278,4 +294,98 @@ export interface AdsActionCapableProvider extends MarketplaceProvider {
 
 export function isAdsActionCapable(p: MarketplaceProvider): p is AdsActionCapableProvider {
   return p.capabilities.includes(ProviderCapability.ADS_ACTIONS);
+}
+
+// --- Publicar anúncio novo em marketplace (Fase 4, benchmark Tiny ERP,
+// 28/07/2026 — ver docs/tiny-erp-benchmark-analysis.md, seção 1.7, e
+// docs/marketplace-listing-publish-architecture.md). Duas capacidades
+// separadas (Interface Segregation, mesmo racional do resto deste arquivo):
+//
+// CategoryDiscoveryCapableProvider — busca a categoria do CANAL (nunca a
+// interna, catalog.ProductCategory) e os atributos que aquela categoria
+// exige. Só usado no momento de CONFIGURAR o mapeamento
+// (ChannelCategoryMapping), não em toda publicação.
+//
+// ListingCreateCapableProvider — cria o anúncio de fato. Sempre chamado
+// depois do gate canPublish (domain/listing-publication.entity.ts) já ter
+// passado — o provider não valida nada de negócio, só traduz o payload
+// normalizado para o formato específico da API do canal.
+
+export interface ExternalCategoryCandidate {
+  externalCategoryId: string;
+  name: string; // caminho completo da categoria (ex.: "Eletrônicos > Celulares > Acessórios") quando o canal expõe isso
+}
+
+export interface ExternalCategoryAttribute {
+  name: string;
+  required: boolean;
+}
+
+export interface CategoryDiscoveryCapableProvider extends MarketplaceProvider {
+  // Busca por texto livre — o preditor de categoria do Mercado Livre e o
+  // getCategoryList da Shopee são ambos, na prática, "me diga em qual
+  // categoria este produto se encaixa" a partir de um nome/descrição.
+  searchCategories(ctx: FetchContext, query: string): Promise<ExternalCategoryCandidate[]>;
+  // Atributos (obrigatórios ou não) exigidos pela categoria do CANAL —
+  // consultado sempre ao vivo (nunca cacheado permanentemente): a lista
+  // muda por categoria e o canal pode alterá-la sem aviso.
+  getCategoryAttributes(ctx: FetchContext, externalCategoryId: string): Promise<ExternalCategoryAttribute[]>;
+}
+
+export function isCategoryDiscoveryCapable(p: MarketplaceProvider): p is CategoryDiscoveryCapableProvider {
+  return p.capabilities.includes(ProviderCapability.CATEGORY_DISCOVERY);
+}
+
+export interface CreateListingInput {
+  title: string;
+  externalCategoryId: string;
+  price: number;
+  currency: string;
+  availableQuantity: number;
+  pictureUrls: string[];
+  weightKg: number;
+  // Atributos já MESCLADOS (herdados da categoria interna + overrides do
+  // usuário no momento de publicar) — o provider só traduz nome/valor para
+  // o formato do canal, nunca decide o que é obrigatório (isso já foi
+  // validado pelo gate canPublish antes de chegar aqui).
+  attributes: Record<string, string>;
+}
+
+export interface CreateListingResult {
+  success: boolean;
+  externalListingId?: string;
+  message?: string;
+}
+
+export interface ListingCreateCapableProvider extends MarketplaceProvider {
+  createListing(ctx: FetchContext, input: CreateListingInput): Promise<CreateListingResult>;
+}
+
+export function isListingCreateCapable(p: MarketplaceProvider): p is ListingCreateCapableProvider {
+  return p.capabilities.includes(ProviderCapability.LISTING_CREATE);
+}
+
+// --- Expedição em lote (Fase 5, benchmark Tiny ERP, 29/07/2026 — ver
+// docs/tiny-erp-benchmark-analysis.md, seção 1.2, e
+// docs/dispatch-batch-architecture.md). Um único método, deliberadamente
+// tolerante a falha (nunca lança — mesmo racional de CreateListingResult):
+// nem todo pedido tem um envio nativo já vinculado no momento em que a
+// etiqueta é solicitada (ex.: Mercado Livre ainda processando o shipment).
+export interface ShippingLabelResult {
+  success: boolean;
+  trackingCode?: string;
+  // URL do documento/endpoint da etiqueta. Aviso de honestidade: em pelo
+  // menos um provider (Mercado Livre) esta URL exige o MESMO access token do
+  // vendedor no cabeçalho Authorization para ser aberta — não é um link
+  // público direto. Ver comentário em mercado-livre-order.provider.ts.
+  labelUrl?: string;
+  message?: string;
+}
+
+export interface ShippingLabelCapableProvider extends MarketplaceProvider {
+  getShippingLabel(ctx: FetchContext, externalOrderId: string): Promise<ShippingLabelResult>;
+}
+
+export function isShippingLabelCapable(p: MarketplaceProvider): p is ShippingLabelCapableProvider {
+  return p.capabilities.includes(ProviderCapability.SHIPPING_LABEL);
 }

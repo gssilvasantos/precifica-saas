@@ -29,13 +29,35 @@ export function mapMercadoLivreStatus(raw: MercadoLivreRawOrderStatus): UnifiedO
     return 'ENTREGUE';
   }
 
+  // Benchmark Tiny ERP (28/07/2026, docs/tiny-erp-benchmark-analysis.md,
+  // seção 2.2) — sinal REAL e já documentado da API do Mercado Livre (ver
+  // MercadoLivreRawOrderStatus.shippingStatus acima: 'not_delivered' já
+  // constava na lista de valores possíveis antes mesmo de existir
+  // NAO_ENTREGUE no UnifiedOrderStatus). Antes, esse sinal ficava preso em
+  // ENVIADO — o problema logístico existia mas nunca chegava até o vendedor.
+  if (shippingStatus === 'not_delivered') {
+    return 'NAO_ENTREGUE';
+  }
+
   if (shippingStatus === 'shipped') {
     return 'ENVIADO';
   }
 
   const isPaid = status === 'paid' || status === 'partially_paid';
   if (isPaid) {
-    return 'PREPARANDO_ENVIO';
+    // 'handling'/'ready_to_ship' = a preparação já começou de fato, sinal
+    // confirmado por MercadoLivreShipmentEnrichmentJob via GET /shipments/{id}.
+    // Qualquer outro caso (shippingStatus 'pending' ou ausente) é exatamente
+    // o fast path de MercadoLivreOrderProvider.fetchOrders — que NUNCA
+    // consulta o shipment inline (ver cabeçalho do arquivo do provider) —
+    // ou seja, "pago" é tudo que se sabe com certeza agora. Antes da
+    // existência de APROVADO, esse caso caía direto no fallback
+    // PREPARANDO_ENVIO, um sinal mais otimista do que o que a API realmente
+    // confirmou.
+    if (shippingStatus === 'handling' || shippingStatus === 'ready_to_ship') {
+      return 'PREPARANDO_ENVIO';
+    }
+    return 'APROVADO';
   }
 
   return 'EM_ABERTO';

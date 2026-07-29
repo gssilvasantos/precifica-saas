@@ -55,6 +55,7 @@ describe('BulkMapPriceImportService', () => {
       update: jest.fn(),
       deactivate: jest.fn(),
       findByExternalId: jest.fn(),
+      findChildren: jest.fn(),
     };
     const productsService = {
       update: jest.fn().mockResolvedValue(undefined),

@@ -11,7 +11,12 @@ function daysAgo(days: number): string {
 
 describe('MercadoLivreOrderProvider (Reestruturação do sync ML, 25-26/07/2026 — fast path sem enriquecimento inline)', () => {
   function buildProvider() {
-    const client = { fetchOrders: jest.fn(), fetchShipmentStatus: jest.fn() } as unknown as jest.Mocked<MercadoLivreApiClient>;
+    const client = {
+      fetchOrders: jest.fn(),
+      fetchShipmentStatus: jest.fn(),
+      fetchOrderShippingInfo: jest.fn(),
+      buildShippingLabelUrl: jest.fn(),
+    } as unknown as jest.Mocked<MercadoLivreApiClient>;
     const connection = {
       listActiveTenantIds: jest.fn(),
       getValidAccessToken: jest.fn(),
@@ -21,10 +26,11 @@ describe('MercadoLivreOrderProvider (Reestruturação do sync ML, 25-26/07/2026 
     return { provider, client, connection };
   }
 
-  it('declara a capacidade ORDERS e o marketplaceCode correto', () => {
+  it('declara as capacidades ORDERS e SHIPPING_LABEL e o marketplaceCode correto', () => {
     const { provider } = buildProvider();
     expect(provider.marketplaceCode).toBe('MERCADO_LIVRE');
     expect(provider.capabilities).toContain('ORDERS');
+    expect(provider.capabilities).toContain('SHIPPING_LABEL');
   });
 
   it('healthCheck reporta UP (saúde real é por tenant, não global)', async () => {
@@ -83,9 +89,9 @@ describe('MercadoLivreOrderProvider (Reestruturação do sync ML, 25-26/07/2026 
     expect(client.fetchShipmentStatus).not.toHaveBeenCalled();
     expect(result).toHaveLength(1);
     // Sem confirmação de envio, cai no fallback de mapMercadoLivreStatus —
-    // pedido pago sempre normaliza para PREPARANDO_ENVIO até o job de
-    // enriquecimento confirmar o status real.
-    expect(result[0]).toMatchObject({ externalOrderId: '123', status: 'PREPARANDO_ENVIO' });
+    // pedido pago sempre normaliza para APROVADO até o job de enriquecimento
+    // confirmar o status real de envio (ver benchmark Tiny ERP, seção 2.2).
+    expect(result[0]).toMatchObject({ externalOrderId: '123', status: 'APROVADO' });
   });
 
   it('fetchOrders: pedido ainda não pago normaliza para EM_ABERTO (sem qualquer consulta extra)', async () => {
@@ -140,5 +146,41 @@ describe('MercadoLivreOrderProvider (Reestruturação do sync ML, 25-26/07/2026 
 
     await expect(provider.fetchOrders({ marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1' })).rejects.toThrow(NotFoundException);
     expect(client.fetchOrders).not.toHaveBeenCalled();
+  });
+
+  describe('getShippingLabel (Fase 5, Expedição em lote)', () => {
+    it('sem tenantId: devolve success false sem chamar nada', async () => {
+      const { provider, client } = buildProvider();
+      const result = await provider.getShippingLabel({ marketplaceCode: 'MERCADO_LIVRE' }, '123');
+      expect(result.success).toBe(false);
+      expect(client.fetchOrderShippingInfo).not.toHaveBeenCalled();
+    });
+
+    it('sem shipment_id resolvido: devolve success false com mensagem explicativa', async () => {
+      const { provider, client, connection } = buildProvider();
+      connection.getValidAccessToken.mockResolvedValue('token-valido');
+      client.fetchOrderShippingInfo.mockResolvedValue({ shipmentId: null, trackingNumber: null });
+
+      const result = await provider.getShippingLabel({ marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1' }, '123');
+
+      expect(result.success).toBe(false);
+      expect(client.buildShippingLabelUrl).not.toHaveBeenCalled();
+    });
+
+    it('com shipment_id resolvido: devolve trackingCode + labelUrl', async () => {
+      const { provider, client, connection } = buildProvider();
+      connection.getValidAccessToken.mockResolvedValue('token-valido');
+      client.fetchOrderShippingInfo.mockResolvedValue({ shipmentId: '555', trackingNumber: 'BR123456789' });
+      client.buildShippingLabelUrl.mockReturnValue('https://api.mercadolibre.com/shipment_labels?shipment_ids=555&response_type=pdf');
+
+      const result = await provider.getShippingLabel({ marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1' }, '123');
+
+      expect(client.fetchOrderShippingInfo).toHaveBeenCalledWith('123', 'token-valido');
+      expect(result).toEqual({
+        success: true,
+        trackingCode: 'BR123456789',
+        labelUrl: 'https://api.mercadolibre.com/shipment_labels?shipment_ids=555&response_type=pdf',
+      });
+    });
   });
 });

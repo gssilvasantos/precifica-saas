@@ -19,6 +19,8 @@ import { MercadoLivreOrderProvider } from '../marketplace-intelligence/infrastru
 import { ShopeeOrderProvider } from '../marketplace-intelligence/infrastructure/providers/shopee/shopee-order.provider';
 import { WebhooksController } from './interface/controllers/webhooks.controller';
 import { ORDER_FINANCIALS_READER } from '../../shared/contracts/tokens';
+import { ORDER_FISCAL_READER } from '../../shared/contracts/order-fiscal-reader.port';
+import { ORDER_COMMISSION_WRITER } from '../../shared/contracts/order-commission-writer.port';
 import { ObservabilityModule } from '../../shared/observability/observability.module';
 
 // Hub de pedidos multicanal (docs/orders-architecture.md). Mesmo padrão de
@@ -70,7 +72,23 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // segunda). Consumido pelo FinancialOrchestrator (Financial
     // Intelligence) para montar o DRE — ver financial-intelligence.module.ts.
     { provide: ORDER_FINANCIALS_READER, useExisting: OrdersService },
+    // Fase 3 (benchmark Tiny ERP, Emissão de NF-e) — expõe a PORTA (token),
+    // nunca a classe concreta — o módulo fiscal só vai conhecer
+    // ORDER_FISCAL_READER + a interface OrderFiscalReader.
+    { provide: ORDER_FISCAL_READER, useExisting: OrdersService },
+    // Vendedores + Comissão (Projeto Estruturante 3, benchmark Bling ERP,
+    // 29/07/2026) — expõe a PORTA (token), nunca a classe concreta — o
+    // módulo sellers (CommissionService) só vai conhecer
+    // ORDER_COMMISSION_WRITER + a interface OrderCommissionWriter. Módulo
+    // sellers importa OrdersModule (nunca o contrário) — sem risco de
+    // dependência circular.
+    { provide: ORDER_COMMISSION_WRITER, useExisting: OrdersService },
   ],
-  exports: [ORDER_FINANCIALS_READER],
+  // OrderProviderRegistry exportado (29/07/2026, Fase 5 — Expedição em
+  // lote) — DispatchBatchService (logistics-fulfillment) reaproveita o
+  // MESMO registry (via findByMarketplaceCode + isShippingLabelCapable) para
+  // buscar a etiqueta NATIVA do canal, em vez de duplicar um registry novo
+  // só para essa capacidade.
+  exports: [ORDER_FINANCIALS_READER, ORDER_FISCAL_READER, ORDER_COMMISSION_WRITER, OrderProviderRegistry],
 })
 export class OrdersModule {}

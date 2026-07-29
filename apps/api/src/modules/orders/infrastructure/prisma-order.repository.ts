@@ -3,6 +3,7 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { OrderRepository, OrderUpsertResult } from '../application/ports/order-repository.port';
 import {
   AppDataMode,
+  CommissionLine,
   Order,
   OrderItem,
   OrderListFilters,
@@ -13,7 +14,16 @@ import {
 } from '../domain/order.entity';
 import { resolveEffectiveStatus } from '../domain/order-status-guard';
 
-const ALL_STATUSES: OrderStatus[] = ['EM_ABERTO', 'PREPARANDO_ENVIO', 'FATURADO', 'ENVIADO', 'ENTREGUE', 'CANCELADO'];
+const ALL_STATUSES: OrderStatus[] = [
+  'EM_ABERTO',
+  'APROVADO',
+  'PREPARANDO_ENVIO',
+  'FATURADO',
+  'ENVIADO',
+  'ENTREGUE',
+  'NAO_ENTREGUE',
+  'CANCELADO',
+];
 
 @Injectable()
 export class PrismaOrderRepository implements OrderRepository {
@@ -289,6 +299,111 @@ export class PrismaOrderRepository implements OrderRepository {
     return dataMode === 'DEMO';
   }
 
+  // Vendedores + Comissão — lookup mínimo antes de calcular a comissão (ver
+  // CommissionService.assignVendedor). Mesmo racional de defesa em
+  // profundidade do método seguinte: `where` com order.tenantId.
+  async findItemForCommission(tenantId: string, orderId: string, itemId: string): Promise<{ id: string; totalPrice: number } | null> {
+    const item = await this.prisma.orderItem.findFirst({
+      where: { id: itemId, orderId, order: { tenantId } },
+      select: { id: true, totalPrice: true },
+    });
+    return item ? { id: item.id, totalPrice: Number(item.totalPrice) } : null;
+  }
+
+  // Vendedores + Comissão (Projeto Estruturante 3, benchmark Bling ERP,
+  // 29/07/2026) — o `where` com order.tenantId garante que um itemId de
+  // outro tenant nunca é alcançado, mesmo que orderId/itemId venham
+  // corretos mas de um tenant diferente (defesa em profundidade, mesmo
+  // racional de RLS por linha).
+  async assignVendedorToItem(
+    tenantId: string,
+    orderId: string,
+    itemId: string,
+    data: { vendedorId: string; comissaoAliquotaPct: number; comissaoValor: number },
+  ): Promise<{ id: string; totalPrice: number } | null> {
+    const existing = await this.prisma.orderItem.findFirst({
+      where: { id: itemId, orderId, order: { tenantId } },
+      select: { id: true },
+    });
+    if (!existing) return null;
+
+    const updated = await this.prisma.orderItem.update({
+      where: { id: itemId },
+      data: {
+        vendedorId: data.vendedorId,
+        comissaoAliquotaPct: data.comissaoAliquotaPct,
+        comissaoValor: data.comissaoValor,
+      } as never,
+      select: { id: true, totalPrice: true },
+    });
+    return { id: updated.id, totalPrice: Number(updated.totalPrice) };
+  }
+
+  // dateFrom/dateTo filtram por Order.orderedAt (não por quando a comissão
+  // foi atribuída) — mesmo racional temporal do resto do relatório
+  // financeiro (findAllForPeriod). onlyPending=true (usado por
+  // CommissionService.generatePayout) filtra comissaoPagaEm IS NULL —
+  // nunca soma uma comissão já incluída numa conta a pagar anterior.
+  async findCommissionLines(
+    tenantId: string,
+    vendedorId: string,
+    options?: { dateFrom?: Date; dateTo?: Date; onlyPending?: boolean },
+  ): Promise<CommissionLine[]> {
+    const items = await this.prisma.orderItem.findMany({
+      where: {
+        vendedorId,
+        order: {
+          tenantId,
+          ...(options?.dateFrom || options?.dateTo
+            ? {
+                orderedAt: {
+                  ...(options?.dateFrom ? { gte: options.dateFrom } : {}),
+                  ...(options?.dateTo ? { lte: options.dateTo } : {}),
+                },
+              }
+            : {}),
+        },
+        ...(options?.onlyPending ? { comissaoPagaEm: null } : {}),
+      } as never,
+      include: { order: { select: { id: true, externalOrderId: true, orderedAt: true } } },
+      orderBy: { order: { orderedAt: 'asc' } },
+    });
+
+    return (items as never as Array<{
+      id: string;
+      skuCode: string | null;
+      productName: string;
+      totalPrice: { toString(): string };
+      comissaoAliquotaPct: { toString(): string } | null;
+      comissaoValor: { toString(): string } | null;
+      comissaoPagaEm: Date | null;
+      order: { id: string; externalOrderId: string; orderedAt: Date };
+    }>).map((item) => ({
+      orderItemId: item.id,
+      orderId: item.order.id,
+      externalOrderId: item.order.externalOrderId,
+      skuCode: item.skuCode,
+      productName: item.productName,
+      base: Number(item.totalPrice),
+      aliquotaPct: item.comissaoAliquotaPct !== null ? Number(item.comissaoAliquotaPct) : 0,
+      valor: item.comissaoValor !== null ? Number(item.comissaoValor) : 0,
+      orderedAt: item.order.orderedAt,
+      comissaoPagaEm: item.comissaoPagaEm,
+    }));
+  }
+
+  // Chamado só DEPOIS que a AccountsPayable correspondente já foi criada
+  // com sucesso (ver CommissionService.generatePayout) — nunca marca pago
+  // "otimisticamente" antes da conta existir de fato.
+  async markCommissionsPaid(tenantId: string, orderItemIds: string[], paidAt: Date): Promise<number> {
+    if (orderItemIds.length === 0) return 0;
+    const result = await this.prisma.orderItem.updateMany({
+      where: { id: { in: orderItemIds }, order: { tenantId } },
+      data: { comissaoPagaEm: paidAt },
+    });
+    return result.count;
+  }
+
   private toDomain(record: {
     id: string;
     tenantId: string;
@@ -329,6 +444,10 @@ export class PrismaOrderRepository implements OrderRepository {
       totalPrice: { toString(): string };
       taxAmount: { toString(): string } | null;
       costPrice: { toString(): string } | null;
+      vendedorId: string | null;
+      comissaoAliquotaPct: { toString(): string } | null;
+      comissaoValor: { toString(): string } | null;
+      comissaoPagaEm: Date | null;
     }>;
   }): Order {
     return {
@@ -372,6 +491,10 @@ export class PrismaOrderRepository implements OrderRepository {
           totalPrice: Number(item.totalPrice),
           taxAmount: item.taxAmount !== null ? Number(item.taxAmount) : null,
           costPrice: item.costPrice !== null ? Number(item.costPrice) : null,
+          vendedorId: item.vendedorId,
+          comissaoAliquotaPct: item.comissaoAliquotaPct !== null ? Number(item.comissaoAliquotaPct) : null,
+          comissaoValor: item.comissaoValor !== null ? Number(item.comissaoValor) : null,
+          comissaoPagaEm: item.comissaoPagaEm,
         }),
       ),
     };

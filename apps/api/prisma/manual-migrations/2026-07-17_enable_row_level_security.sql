@@ -387,6 +387,22 @@ WITH CHECK (
   OR "tenantId" = current_setting('app.current_tenant_id', true)
 );
 
+-- Benchmark Tiny ERP (28/07/2026) — accounts_payable, adicionada depois do
+-- desenho original de RLS (17/07). Mesmo padrão simples de tenantId próprio
+-- das demais tabelas deste schema; schema financial_intelligence já coberto
+-- pelo grant do app_runtime (2026-07-22), nenhum grant novo necessário.
+ALTER TABLE "financial_intelligence"."accounts_payable" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "financial_intelligence"."accounts_payable" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "financial_intelligence"."accounts_payable"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
 -- ============================================================================
 -- Schema: orders
 -- ============================================================================
@@ -516,6 +532,21 @@ WITH CHECK (
   OR "tenantId" = current_setting('app.current_tenant_id', true)
 );
 
+-- Benchmark Tiny ERP (28/07/2026) — product_warehouse_locations, adicionada
+-- depois do desenho original de RLS (17/07). Mesmo padrão simples de
+-- tenantId próprio das demais tabelas deste schema.
+ALTER TABLE "logistics_fulfillment"."product_warehouse_locations" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "logistics_fulfillment"."product_warehouse_locations" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "logistics_fulfillment"."product_warehouse_locations"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
 -- ============================================================================
 -- Schema: promotion_intelligence
 -- ============================================================================
@@ -584,11 +615,366 @@ WITH CHECK (
   OR "tenantId" = current_setting('app.current_tenant_id', true)
 );
 
+-- ============================================================================
+-- Schema: tagging (Sprint 28, benchmark Tiny ERP 28/07/2026) — adicionado
+-- depois do desenho original de RLS (17/07). Mesmo padrão simples de
+-- tenantId próprio nas duas tabelas (Tag e TagAssignment ambas têm coluna
+-- "tenantId" direta, sem precisar de subquery via FK).
+-- ============================================================================
+
+ALTER TABLE "tagging"."tags" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tagging"."tags" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "tagging"."tags"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "tagging"."tag_assignments" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tagging"."tag_assignments" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "tagging"."tag_assignments"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- ============================================================================
+-- Schema: procurement (Fase 1, benchmark Tiny ERP 28/07/2026) — Ordem de
+-- Compra. Schema novo, precisa também do grant do app_runtime (ver
+-- 2026-07-28_grant_app_runtime_procurement.sql), mesmo racional de tagging.
+-- ============================================================================
+
+ALTER TABLE "procurement"."purchase_orders" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "procurement"."purchase_orders" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "procurement"."purchase_orders"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "procurement"."purchase_order_items" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "procurement"."purchase_order_items" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "procurement"."purchase_order_items"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- ============================================================================
+-- Lista de Preços (Fase 2, benchmark Tiny ERP 28/07/2026) — schema catalog
+-- já existente (já coberto pelo grant do app_runtime via ALTER DEFAULT
+-- PRIVILEGES), só precisa das policies das duas tabelas novas.
+-- ============================================================================
+
+ALTER TABLE "catalog"."price_lists" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."price_lists" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "catalog"."price_lists"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "catalog"."price_list_exceptions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."price_list_exceptions" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "catalog"."price_list_exceptions"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- ============================================================================
+-- Emissão de NF-e (Fase 3, benchmark Tiny ERP, 28/07/2026) — schema fiscal
+-- NOVO, precisa do grant em 2026-07-28_grant_app_runtime_fiscal.sql também.
+-- ============================================================================
+
+ALTER TABLE "fiscal"."fiscal_settings" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "fiscal"."fiscal_settings" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "fiscal"."fiscal_settings"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "fiscal"."fiscal_invoices" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "fiscal"."fiscal_invoices" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "fiscal"."fiscal_invoices"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- ============================================================================
+-- Publicar anúncio novo em marketplace (Fase 4, benchmark Tiny ERP,
+-- 28/07/2026) — duas tabelas NOVAS no schema catalog (já coberto pelo grant
+-- existente, ALTER DEFAULT PRIVILEGES já cobre tabela nova) e o schema
+-- marketplace_publishing INTEIRO, NOVO, precisa do grant em
+-- 2026-07-28_grant_app_runtime_marketplace_publishing.sql também.
+-- ============================================================================
+
+ALTER TABLE "catalog"."product_categories" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."product_categories" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "catalog"."product_categories"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "catalog"."category_attributes" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."category_attributes" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "catalog"."category_attributes"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "marketplace_publishing"."channel_category_mappings" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "marketplace_publishing"."channel_category_mappings" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "marketplace_publishing"."channel_category_mappings"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "marketplace_publishing"."listing_publications" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "marketplace_publishing"."listing_publications" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "marketplace_publishing"."listing_publications"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- ============================================================================
+-- Expedição em lote (Fase 5, benchmark Tiny ERP, 29/07/2026) — duas tabelas
+-- NOVAS em logistics_fulfillment (já coberto pelo grant existente desde a
+-- Sprint 24, ALTER DEFAULT PRIVILEGES já cobre tabela nova) e o schema
+-- freight_shipping INTEIRO, NOVO, precisa do grant em
+-- 2026-07-29_grant_app_runtime_freight_shipping.sql também.
+-- ============================================================================
+
+ALTER TABLE "logistics_fulfillment"."dispatch_batches" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "logistics_fulfillment"."dispatch_batches" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "logistics_fulfillment"."dispatch_batches"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "logistics_fulfillment"."dispatch_batch_orders" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "logistics_fulfillment"."dispatch_batch_orders" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "logistics_fulfillment"."dispatch_batch_orders"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "freight_shipping"."freight_provider_connections" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "freight_shipping"."freight_provider_connections" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "freight_shipping"."freight_provider_connections"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- ============================================================================
+-- Grupo G da NF-e (benchmark Bling, 29/07/2026) — tabela NOVA em fiscal (já
+-- coberto pelo grant existente desde a Fase 3, ALTER DEFAULT PRIVILEGES já
+-- cobre tabela nova no mesmo schema).
+-- ============================================================================
+
+ALTER TABLE "fiscal"."fiscal_marketplace_intermediaries" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "fiscal"."fiscal_marketplace_intermediaries" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "fiscal"."fiscal_marketplace_intermediaries"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- ============================================================================
+-- Ordens de Produção (Projeto Estruturante 1, benchmark Bling ERP,
+-- 29/07/2026) — catalog.product_structure_components é tabela nova num
+-- schema já existente (só a policy é nova); production é schema NOVO,
+-- precisa do grant em 2026-07-29_grant_app_runtime_production.sql também.
+-- ============================================================================
+
+ALTER TABLE "catalog"."product_structure_components" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."product_structure_components" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "catalog"."product_structure_components"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "production"."production_orders" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "production"."production_orders" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "production"."production_orders"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "production"."production_order_components" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "production"."production_order_components" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "production"."production_order_components"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- Produtos-Lotes (Projeto Estruturante 2, benchmark Bling, 29/07/2026) —
+-- catalog.product_lots.
+ALTER TABLE "catalog"."product_lots" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "catalog"."product_lots" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "catalog"."product_lots"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- Vendedores + Comissão (Projeto Estruturante 3, benchmark Bling,
+-- 29/07/2026) — sellers.vendedores (schema novo). orders.order_items
+-- (colunas novas: vendedorId, comissaoAliquotaPct, comissaoValor,
+-- comissaoPagaEm) já tem RLS por linha desde o bloco original de "orders" —
+-- nenhuma policy nova necessária ali.
+ALTER TABLE "sellers"."vendedores" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "sellers"."vendedores" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "sellers"."vendedores"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- Naturezas de Operação (Projeto Estruturante 4, benchmark Bling,
+-- 29/07/2026) — fiscal.naturezas_operacao (tabela nova em schema já
+-- existente). fiscal.fiscal_settings.defaultNaturezaOperacaoId é coluna nova
+-- numa tabela já com RLS por linha — nenhuma policy nova necessária ali.
+ALTER TABLE "fiscal"."naturezas_operacao" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "fiscal"."naturezas_operacao" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "fiscal"."naturezas_operacao"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+-- Catálogo de Transportador/Serviço (Projeto Estruturante 5, benchmark
+-- Bling, 29/07/2026) — freight_shipping.carriers, freight_shipping.carrier_services.
+ALTER TABLE "freight_shipping"."carriers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "freight_shipping"."carriers" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "freight_shipping"."carriers"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "freight_shipping"."carrier_services" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "freight_shipping"."carrier_services" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "freight_shipping"."carrier_services"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
 COMMIT;
 
 -- ============================================================================
--- Fim. 30 tabelas com RLS ativa (28 por coluna direta + marketplace_rules
--- customizada + 2 via subquery de FK). 6 tabelas deliberadamente sem RLS
+-- Fim. 34 tabelas com RLS ativa (32 por coluna direta + marketplace_rules
+-- customizada + 2 via subquery de FK) — contagem aproximada, acumulada fase a
+-- fase (ver blocos acima). 6 tabelas deliberadamente sem RLS
 -- (tenants, marketplaces, marketplace_change_events, provider_sync_schedules,
 -- provider_sync_logs, provider_health) por serem dado global/infraestrutura,
 -- não dado de cliente — ver seção 4 de docs/row-level-security-architecture.md.

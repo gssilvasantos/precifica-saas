@@ -5,6 +5,8 @@ import { computeOrderMarginSummary, OrderMarginSummary } from '../domain/order-m
 import { PRODUCT_CATALOG_READER } from '../../../shared/contracts/tokens';
 import { ProductCatalogReader } from '../../../shared/contracts/product-catalog-reader.port';
 import { OrderFinancialLine, OrderFinancialsReader, OrderItemForFulfillment } from '../../../shared/contracts/order-financials-reader.port';
+import { OrderFiscalData, OrderFiscalReader } from '../../../shared/contracts/order-fiscal-reader.port';
+import { CommissionLineDto, OrderCommissionWriter } from '../../../shared/contracts/order-commission-writer.port';
 
 // Camada de aplicação simples — sem regra de negócio própria além de
 // delegar ao repositório e traduzir "não encontrado" em NotFoundException.
@@ -15,7 +17,7 @@ import { OrderFinancialLine, OrderFinancialsReader, OrderItemForFulfillment } fr
 // fallback de custo (domain/order-margin.ts) buscando o custo ATUAL só dos
 // SKUs que realmente precisam dele.
 @Injectable()
-export class OrdersService implements OrderFinancialsReader {
+export class OrdersService implements OrderFinancialsReader, OrderFiscalReader, OrderCommissionWriter {
   constructor(
     @Inject(ORDER_REPOSITORY) private readonly orders: OrderRepository,
     @Inject(PRODUCT_CATALOG_READER) private readonly catalog: ProductCatalogReader,
@@ -100,6 +102,65 @@ export class OrdersService implements OrderFinancialsReader {
   // listForPeriod, porque bipagem não precisa de preço/custo nenhum.
   async findItemsForOrders(tenantId: string, orderIds: string[]): Promise<OrderItemForFulfillment[]> {
     return this.orders.findItemsByOrderIds(tenantId, orderIds);
+  }
+
+  // Fase 3 (benchmark Tiny ERP) — implementação de OrderFiscalReader,
+  // consumida pelo FiscalInvoiceService (módulo fiscal) para montar o
+  // payload de emissão de NF-e sem duplicar o acesso a Order. Reaproveita o
+  // MESMO findById usado pela camada HTTP — sem lógica extra, só a
+  // tradução pro DTO autocontido (ver order-fiscal-reader.port.ts).
+  async getForFiscalEmission(tenantId: string, orderId: string): Promise<OrderFiscalData | null> {
+    const order = await this.orders.findById(tenantId, orderId);
+    if (!order) return null;
+    return {
+      orderId: order.id,
+      channelCode: order.channelCode,
+      externalOrderId: order.externalOrderId,
+      status: order.status,
+      buyerTaxId: order.buyerTaxId,
+      totalAmount: order.totalAmount,
+      shippingAmount: order.shippingAmount,
+      discountAmount: order.discountAmount,
+      items: order.items.map((item) => ({
+        skuCode: item.skuCode,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice,
+      })),
+    };
+  }
+
+  // Vendedores + Comissão (Projeto Estruturante 3, benchmark Bling ERP,
+  // 29/07/2026) — implementação de OrderCommissionWriter, consumida pelo
+  // Sellers (CommissionService). Delega direto ao repositório — toda a
+  // regra de negócio (validar vendedor ativo, calcular a comissão via
+  // computeCommission, decidir quando gerar a conta a pagar) mora no
+  // CommissionService, nunca aqui: OrdersService só resolve/persiste os
+  // dados do PEDIDO, nunca conhece Vendedor nem AccountsPayable.
+  findItemForCommission(tenantId: string, orderId: string, itemId: string): Promise<{ id: string; totalPrice: number } | null> {
+    return this.orders.findItemForCommission(tenantId, orderId, itemId);
+  }
+
+  assignVendedorToItem(
+    tenantId: string,
+    orderId: string,
+    itemId: string,
+    data: { vendedorId: string; comissaoAliquotaPct: number; comissaoValor: number },
+  ): Promise<{ id: string; totalPrice: number } | null> {
+    return this.orders.assignVendedorToItem(tenantId, orderId, itemId, data);
+  }
+
+  findCommissionLines(
+    tenantId: string,
+    vendedorId: string,
+    options?: { dateFrom?: Date; dateTo?: Date; onlyPending?: boolean },
+  ): Promise<CommissionLineDto[]> {
+    return this.orders.findCommissionLines(tenantId, vendedorId, options);
+  }
+
+  markCommissionsPaid(tenantId: string, orderItemIds: string[], paidAt: Date): Promise<number> {
+    return this.orders.markCommissionsPaid(tenantId, orderItemIds, paidAt);
   }
 
   // Extraído de getMarginSummary/listForPeriod — dado um conjunto de

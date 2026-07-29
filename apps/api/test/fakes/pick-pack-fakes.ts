@@ -59,6 +59,7 @@ export class FakeStockMovementAuditEventRepository implements StockMovementAudit
       conferredAt: null,
       divergenceNotes: null,
       invoiceNumber: data.invoiceNumber ?? null,
+      notes: data.notes ?? null,
       createdAt: now,
       updatedAt: now,
       orderIds: data.orderIds ?? [],
@@ -122,6 +123,15 @@ export class FakeStockMovementAuditEventRepository implements StockMovementAudit
     return Array.from(this.events.values())
       .filter((e) => e.tenantId === tenantId && e.conferenceStatus === 'PENDENTE')
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
+  // Quick Win 3 (benchmark Bling) — este fake não tem acesso ao map de
+  // checklist items (vive em FakeStockMovementAuditEventItemRepository,
+  // uma classe separada) e a suíte e2e de Pick & Pack não exercita
+  // saldoVirtual, então [] é suficiente aqui — implementação real está em
+  // PrismaStockMovementAuditEventRepository.
+  async listReservedByWarehouse(): Promise<Array<{ skuCode: string; reservedQuantity: number }>> {
+    return [];
   }
 
   private requireEvent(id: string): StockMovementAuditEvent {

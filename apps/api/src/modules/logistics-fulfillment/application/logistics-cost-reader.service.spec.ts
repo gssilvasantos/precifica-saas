@@ -19,6 +19,12 @@ function buildProduct(overrides: Partial<ProductCatalogSummary> = {}): ProductCa
     packagingId: 'pack-1',
     isKit: false,
     mapPrice: null,
+    ncm: null,
+    fiscalOriginCode: null,
+    cest: null,
+    categoryId: null,
+    photoUrls: [],
+    weightKg: 1,
     ...overrides,
   };
 }
@@ -73,7 +79,18 @@ describe('LogisticsCostReaderService', () => {
       updateLeadTimeDays: jest.fn(),
       updateLogisticsCostPerUnit: jest.fn(),
     };
-    const warehouses = new WarehouseService(warehouseRepo);
+    const ledgerRepo = { getBalance: jest.fn(), listBalancesByWarehouse: jest.fn(), listBalancesByLot: jest.fn() };
+    const auditEventsRepo = {
+      create: jest.fn(),
+      findById: jest.fn(),
+      findByOrderId: jest.fn(),
+      attachMedia: jest.fn(),
+      approveWithLedger: jest.fn(),
+      markDivergent: jest.fn(),
+      findPending: jest.fn(),
+      listReservedByWarehouse: jest.fn(),
+    };
+    const warehouses = new WarehouseService(warehouseRepo, ledgerRepo, auditEventsRepo);
     const service = new LogisticsCostReaderService(catalog, packagingCosts, warehouses);
     return { service, catalog, packagingCosts, warehouseRepo };
   }

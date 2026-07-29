@@ -10,27 +10,44 @@ import {
 import { ALERT_SERVICE, AlertService } from '../../../shared/observability/ports/alert-service.port';
 import { ORDER_FINANCIALS_READER } from '../../../shared/contracts/tokens';
 import { OrderFinancialsReader } from '../../../shared/contracts/order-financials-reader.port';
+import { StockReceiptLine, StockReceiptWriter } from '../../../shared/contracts/stock-receipt-writer.port';
+import { ProductionStockLine, ProductionStockWriter } from '../../../shared/contracts/production-stock-writer.port';
+import { PRODUCT_LOT_READER, ProductLotReader } from '../../../shared/contracts/product-lot-reader.port';
+import { STOCK_LEDGER_REPOSITORY, StockLedgerRepository } from './ports/stock-ledger-repository.port';
 import {
   StockMovementAuditEvent,
   StockMovementAuditEventCreateData,
   StockMovementAuditEventItem,
   StockMovementLine,
+  LotAdjustmentMovementType,
   canApprove,
   canMarkDivergent,
   canScanItem,
+  canApprovePurchaseReceipt,
+  canApproveProduction,
+  canApproveLotAdjustment,
   buildChecklistFromOrderItems,
   buildLedgerEntries,
+  buildPurchaseReceiptLedgerEntries,
+  buildProductionLedgerEntries,
+  resolveLotAdjustmentDelta,
+  buildLotAdjustmentLedgerEntry,
 } from '../domain/stock-movement-audit-event.entity';
 
 // O "gate" pedido pelo usuário, em forma de serviço: cria o evento como
 // PENDENTE (fase 1, sem nenhum movimento de estoque), aceita mídia, e só
-// grava StockLedgerEntry dentro de approve() — o ÚNICO método deste
-// serviço (e de toda a plataforma) que constrói linhas de ledger. Ver
-// docs/logistics-fulfillment-architecture.md para o racional completo do
-// Hub de Provas e docs/pick-pack-architecture.md (Sprint 27) para o
-// checklist de bipagem/vídeo em chunks adicionados aqui.
+// grava StockLedgerEntry dentro de approve()/receivePurchase() — os ÚNICOS
+// métodos deste serviço (e de toda a plataforma) que constroem linhas de
+// ledger. Ver docs/logistics-fulfillment-architecture.md para o racional
+// completo do Hub de Provas e docs/pick-pack-architecture.md (Sprint 27)
+// para o checklist de bipagem/vídeo em chunks adicionados aqui. Implementa
+// StockReceiptWriter (shared/contracts) — porta consumida pelo Procurement
+// (Ordem de Compra, Fase 1) para dar entrada de mercadoria comprada.
+// Implementa também ProductionStockWriter (shared/contracts) — porta
+// consumida pelo production (Ordem de Produção, Projeto Estruturante 1) ao
+// concluir uma ordem.
 @Injectable()
-export class StockMovementAuditEventService {
+export class StockMovementAuditEventService implements StockReceiptWriter, ProductionStockWriter {
   private readonly logger = new Logger(StockMovementAuditEventService.name);
 
   constructor(
@@ -38,6 +55,12 @@ export class StockMovementAuditEventService {
     @Inject(STOCK_MOVEMENT_AUDIT_EVENT_ITEM_REPOSITORY) private readonly checklistItems: StockMovementAuditEventItemRepository,
     @Inject(ORDER_FINANCIALS_READER) private readonly orderItemsReader: OrderFinancialsReader,
     @Inject(ALERT_SERVICE) private readonly alerts: AlertService,
+    // Produtos-Lotes (Projeto Estruturante 2) — usadas só por adjustLot:
+    // STOCK_LEDGER_REPOSITORY para resolver o saldo atual num BALANCO,
+    // PRODUCT_LOT_READER (Catalog) para validar que o lotCode informado de
+    // fato existe para este SKU/tenant antes de gravar.
+    @Inject(STOCK_LEDGER_REPOSITORY) private readonly ledger: StockLedgerRepository,
+    @Inject(PRODUCT_LOT_READER) private readonly lotReader: ProductLotReader,
   ) {}
 
   // Fase 1 — nenhum estoque se move aqui. Chamado tanto pelo listener de
@@ -181,6 +204,128 @@ export class StockMovementAuditEventService {
 
   getById(tenantId: string, eventId: string): Promise<StockMovementAuditEvent | null> {
     return this.events.findById(tenantId, eventId);
+  }
+
+  // Ordem de Compra (Fase 1) — dá entrada de mercadoria comprada. Diferente
+  // de approve() (Fase 1 cria PENDENTE, Fase 2 aprova depois, separadas no
+  // tempo pela conferência física do despacho), aqui cria+aprova no MESMO
+  // método: a "conferência" de uma entrada é o ato de receber a mercadoria
+  // do fornecedor com a NF em mãos, não um processo assíncrono de bipagem +
+  // vídeo. Ver canApprovePurchaseReceipt/buildPurchaseReceiptLedgerEntries.
+  async receivePurchase(
+    tenantId: string,
+    warehouseId: string,
+    invoiceNumber: string,
+    conferredByUserId: string,
+    lines: StockReceiptLine[],
+  ): Promise<{ auditEventId: string }> {
+    if (lines.length === 0) {
+      throw new BadRequestException('Informe ao menos um SKU/quantidade recebido para dar entrada.');
+    }
+
+    const event = await this.events.create({
+      tenantId,
+      eventType: 'PURCHASE_RECEIPT',
+      sourceWarehouseId: warehouseId,
+      invoiceNumber,
+    });
+
+    const check = canApprovePurchaseReceipt(event);
+    if (!check.ok) {
+      throw new BadRequestException(check.reason);
+    }
+
+    const ledgerEntries = buildPurchaseReceiptLedgerEntries(event, lines as StockMovementLine[]);
+    const approved = await this.events.approveWithLedger(event.id, conferredByUserId, ledgerEntries);
+    return { auditEventId: approved.id };
+  }
+
+  // Ordem de Produção (Projeto Estruturante 1, benchmark Bling ERP,
+  // 29/07/2026) — conclui uma ordem: debita os componentes na origem E
+  // credita o produto acabado no destino, cria+aprova no MESMO método
+  // (mesmo racional de receivePurchase: a "conferência" aqui é o próprio ato
+  // de concluir a ordem, já com os componentes reservados via snapshot da
+  // BOM, não um processo assíncrono de bipagem/mídia). Ver
+  // canApproveProduction/buildProductionLedgerEntries.
+  async produceOutput(
+    tenantId: string,
+    sourceWarehouseId: string,
+    destinationWarehouseId: string,
+    conferredByUserId: string,
+    componentLines: ProductionStockLine[],
+    outputLine: ProductionStockLine,
+  ): Promise<{ auditEventId: string }> {
+    if (componentLines.length === 0) {
+      throw new BadRequestException('Informe ao menos um componente consumido para concluir a produção.');
+    }
+
+    const event = await this.events.create({
+      tenantId,
+      eventType: 'PRODUCTION_OUTPUT',
+      sourceWarehouseId,
+      destinationWarehouseId,
+    });
+
+    const check = canApproveProduction(event);
+    if (!check.ok) {
+      throw new BadRequestException(check.reason);
+    }
+
+    const ledgerEntries = buildProductionLedgerEntries(
+      { ...event, destinationWarehouseId },
+      componentLines as StockMovementLine[],
+      outputLine as StockMovementLine,
+    );
+    const approved = await this.events.approveWithLedger(event.id, conferredByUserId, ledgerEntries);
+    return { auditEventId: approved.id };
+  }
+
+  // Produtos-Lotes (Projeto Estruturante 2, benchmark Bling ERP,
+  // 29/07/2026) — lançamento manual avulso por lote (Entrada/Saída/
+  // Balanço, espelha LoteLancamentoDTO do Bling). Cria+aprova no MESMO
+  // método (mesmo racional de receivePurchase/produceOutput: a "prova" é a
+  // justificativa textual já informada, não um processo assíncrono de
+  // bipagem/mídia). Valida que o lotCode informado de fato existe para este
+  // SKU/tenant (via PRODUCT_LOT_READER) ANTES de gravar — nunca cria lote
+  // "no ato" a partir de um lançamento, cadastro de lote é sempre um passo
+  // prévio explícito (ProductLotService.create).
+  async adjustLot(
+    tenantId: string,
+    warehouseId: string,
+    skuCode: string,
+    lotCode: string,
+    movementType: LotAdjustmentMovementType,
+    quantity: number,
+    conferredByUserId: string,
+    notes: string,
+  ): Promise<{ auditEventId: string }> {
+    const lot = await this.lotReader.findLot(tenantId, skuCode, lotCode);
+    if (!lot) {
+      throw new BadRequestException(`Lote "${lotCode}" não encontrado para o SKU ${skuCode} — cadastre o lote antes de lançar.`);
+    }
+
+    const event = await this.events.create({
+      tenantId,
+      eventType: 'LOT_ADJUSTMENT',
+      sourceWarehouseId: warehouseId,
+      notes,
+    });
+
+    const check = canApproveLotAdjustment(event);
+    if (!check.ok) {
+      throw new BadRequestException(check.reason);
+    }
+
+    // O saldo relevante para BALANCO é o do LOTE, não do SKU inteiro
+    // (getBalance somaria outros lotes do mesmo SKU no mesmo depósito) —
+    // por isso listBalancesByLot + find, nunca getBalance aqui.
+    const lotBalances = await this.ledger.listBalancesByLot(tenantId, warehouseId, skuCode);
+    const currentBalance = lotBalances.find((b) => b.lotCode === lotCode)?.balance ?? 0;
+    const quantityDelta = resolveLotAdjustmentDelta({ movementType, quantity }, currentBalance);
+    const ledgerEntry = buildLotAdjustmentLedgerEntry(event, { skuCode, lotCode, quantityDelta });
+
+    const approved = await this.events.approveWithLedger(event.id, conferredByUserId, [ledgerEntry]);
+    return { auditEventId: approved.id };
   }
 
   private async requireEvent(tenantId: string, eventId: string): Promise<StockMovementAuditEvent> {

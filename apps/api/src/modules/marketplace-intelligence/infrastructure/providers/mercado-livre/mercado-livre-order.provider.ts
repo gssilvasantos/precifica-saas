@@ -6,6 +6,8 @@ import {
   ProviderCapability,
   ProviderHealthStatus,
   RawOrderCandidate,
+  ShippingLabelCapableProvider,
+  ShippingLabelResult,
 } from '../../../../../shared/contracts/marketplace-provider.contract';
 import { MercadoLivreApiClient } from './mercado-livre-api.client';
 import { normalizeMercadoLivreOrder } from './mercado-livre-order-normalizer';
@@ -63,11 +65,16 @@ import { MercadoLivreConnectionService } from '../../../application/mercado-livr
 // NUNCA regredir um pedido já confirmado ENVIADO/ENTREGUE de volta pro
 // fallback PREPARANDO_ENVIO.
 @Injectable()
-export class MercadoLivreOrderProvider implements OrderCapableProvider, AuthenticatedProvider {
+export class MercadoLivreOrderProvider implements OrderCapableProvider, AuthenticatedProvider, ShippingLabelCapableProvider {
   readonly code = 'MERCADO_LIVRE_ORDERS';
   readonly marketplaceCode = 'MERCADO_LIVRE';
   readonly sourceType = 'OFFICIAL_API' as const;
-  readonly capabilities = [ProviderCapability.ORDERS];
+  // Fase 5 (Expedição em lote, 29/07/2026) — SHIPPING_LABEL adicionada aqui
+  // (não uma classe nova) porque buscar a etiqueta de um pedido já existente
+  // reaproveita exatamente a mesma conexão/token de ORDERS, mesmo racional de
+  // "capacidade nova na classe existente do canal" já usado pelo resto desta
+  // base quando a capacidade é sobre o MESMO recurso (pedido).
+  readonly capabilities = [ProviderCapability.ORDERS, ProviderCapability.SHIPPING_LABEL];
   readonly authScope = 'TENANT' as const;
 
   private readonly logger = new Logger(MercadoLivreOrderProvider.name);
@@ -126,5 +133,27 @@ export class MercadoLivreOrderProvider implements OrderCapableProvider, Authenti
     );
 
     return candidates.filter((o): o is RawOrderCandidate => o !== null);
+  }
+
+  // Fase 5 (Expedição em lote) — busca o shipment_id + tracking_number reais
+  // do pedido e monta a URL da etiqueta (Mercado Envios). Nunca lança: todo
+  // caminho de falha vira { success: false, message } (mesmo padrão de
+  // createListing do MercadoLivreListingProvider), porque um pedido do lote
+  // sem envio nativo ainda resolvido não deve travar a geração de etiqueta
+  // dos DEMAIS pedidos do mesmo lote.
+  async getShippingLabel(ctx: FetchContext, externalOrderId: string): Promise<ShippingLabelResult> {
+    if (!ctx.tenantId) {
+      return { success: false, message: 'Etiqueta Mercado Envios exige tenantId — não há candidato global.' };
+    }
+    const accessToken = await this.connection.getValidAccessToken(ctx.tenantId);
+    const info = await this.client.fetchOrderShippingInfo(externalOrderId, accessToken);
+    if (!info.shipmentId) {
+      return { success: false, message: 'Pedido ainda sem envio (Mercado Envios) vinculado — tente novamente mais tarde.' };
+    }
+    return {
+      success: true,
+      trackingCode: info.trackingNumber ?? undefined,
+      labelUrl: this.client.buildShippingLabelUrl(info.shipmentId),
+    };
   }
 }

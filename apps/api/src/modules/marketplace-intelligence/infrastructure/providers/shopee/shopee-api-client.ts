@@ -355,4 +355,213 @@ export class ShopeeApiClient {
 
     return orders;
   }
+
+  // --- Publicar anúncio novo em marketplace (Fase 4, benchmark Tiny ERP) ---
+  //
+  // MESMO aviso de honestidade de get_order_list/get_order_detail acima:
+  // nenhum dos quatro métodos abaixo foi exercitado contra a Shopee real —
+  // shape montado a partir da documentação pública do Shopee Open Platform
+  // v2 (product/get_category, product/get_category_attributes, media_space,
+  // product/add_item).
+
+  // Diferente do Mercado Livre (domain_discovery/search aceita busca por
+  // texto), a Shopee só expõe a ÁRVORE INTEIRA de categorias — filtrar por
+  // texto é responsabilidade de quem chama (MercadoLivreListingProvider ...
+  // ShopeeListingProvider abaixo). Endpoint PÚBLICO (assinatura partner-level,
+  // sem access_token/shop_id).
+  async getCategoryList(partnerId: string, partnerKey: string): Promise<{ category_id: number; category_name: string; parent_category_id: number }[]> {
+    const path = '/api/v2/product/get_category';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sign = this.sign(path, timestamp, partnerId, partnerKey);
+    const url = `${this.baseUrl}${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}&language=pt-br`;
+
+    const response = await this.request(url, { headers: { 'Content-Type': 'application/json' } });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Shopee ${path} retornou HTTP ${response.status}: ${text}`);
+    }
+    const data = (await response.json()) as {
+      response?: { category_list?: { category_id?: number; category_name?: string; parent_category_id?: number }[] };
+      error?: string;
+      message?: string;
+    };
+    if (data.error) {
+      throw new Error(`Shopee ${path} retornou erro de negócio: ${data.error} — ${data.message ?? ''}`);
+    }
+    const list = data.response?.category_list ?? [];
+    return list
+      .filter((c): c is { category_id: number; category_name: string; parent_category_id: number } => typeof c.category_id === 'number' && typeof c.category_name === 'string')
+      .map((c) => ({ category_id: c.category_id, category_name: c.category_name, parent_category_id: c.parent_category_id ?? 0 }));
+  }
+
+  // Atributos exigidos pela categoria — mesmo endpoint público (metadado
+  // GLOBAL da categoria, não específico de loja), consultado ao vivo (nunca
+  // cacheado permanentemente — mesmo racional de getCategoryAttributes do ML).
+  async getCategoryAttributes(partnerId: string, partnerKey: string, categoryId: string): Promise<{ attribute_id: number; original_attribute_name: string; is_mandatory: boolean }[]> {
+    const path = '/api/v2/product/get_attributes';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sign = this.sign(path, timestamp, partnerId, partnerKey);
+    const url = `${this.baseUrl}${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}&category_id=${categoryId}&language=pt-br`;
+
+    const response = await this.request(url, { headers: { 'Content-Type': 'application/json' } });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Shopee ${path} retornou HTTP ${response.status}: ${text}`);
+    }
+    const data = (await response.json()) as {
+      response?: { attribute_list?: { attribute_id?: number; original_attribute_name?: string; is_mandatory?: boolean }[] };
+      error?: string;
+      message?: string;
+    };
+    if (data.error) {
+      throw new Error(`Shopee ${path} retornou erro de negócio: ${data.error} — ${data.message ?? ''}`);
+    }
+    const list = data.response?.attribute_list ?? [];
+    return list
+      .filter((a): a is { attribute_id: number; original_attribute_name: string; is_mandatory: boolean } => typeof a.attribute_id === 'number' && typeof a.original_attribute_name === 'string')
+      .map((a) => ({ attribute_id: a.attribute_id, original_attribute_name: a.original_attribute_name, is_mandatory: a.is_mandatory === true }));
+  }
+
+  // A Shopee exige que a imagem já esteja hospedada NELA (media_space) antes
+  // de referenciá-la num anúncio — diferente do Mercado Livre, que aceita uma
+  // URL externa direto em `pictures[].source`. Este método baixa o binário da
+  // URL informada (já armazenada no nosso storage, ver FileStorage) e reenvia
+  // como multipart/form-data, devolvendo o `image_id` que `addItem` referencia.
+  async uploadImage(partnerId: string, partnerKey: string, shopId: string, accessToken: string, imageUrl: string): Promise<string> {
+    const imageResponse = await this.fetchWithTimeout(imageUrl);
+    if (!imageResponse.ok) {
+      throw new Error(`Falha ao baixar imagem ${imageUrl} para upload na Shopee: HTTP ${imageResponse.status}`);
+    }
+    const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+
+    const path = '/api/v2/media_space/upload_image';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sign = this.sign(path, timestamp, partnerId, partnerKey, accessToken, shopId);
+    const url = `${this.baseUrl}${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}&access_token=${accessToken}&shop_id=${shopId}`;
+
+    const form = new FormData();
+    form.append('image', new Blob([imageBuffer]), 'image.jpg');
+
+    const response = await this.request(url, { method: 'POST', body: form });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Shopee ${path} retornou HTTP ${response.status}: ${text}`);
+    }
+    const data = (await response.json()) as { response?: { image_info?: { image_id?: string } }; error?: string; message?: string };
+    if (data.error) {
+      throw new Error(`Shopee ${path} retornou erro de negócio: ${data.error} — ${data.message ?? ''}`);
+    }
+    const imageId = data.response?.image_info?.image_id;
+    if (!imageId) {
+      throw new Error(`Shopee ${path} não devolveu image_id para ${imageUrl}.`);
+    }
+    return imageId;
+  }
+
+  // --- Expedição em lote (Fase 5, benchmark Tiny ERP, 29/07/2026) ---
+  //
+  // A Shopee trata etiqueta como um DOCUMENTO gerado de forma assíncrona
+  // (diferente do Mercado Livre, que serve o PDF direto por GET): primeiro
+  // pede a criação (create_shipping_document), depois consulta o status
+  // (get_shipping_document_result) até virar READY, só então baixa
+  // (download_shipping_document). AVISO DE HONESTIDADE: nunca exercitado
+  // contra a API real — construído a partir da documentação pública v2 da
+  // Shopee Open Platform (Logistics API).
+  async createShippingDocument(partnerId: string, partnerKey: string, shopId: string, accessToken: string, orderSn: string): Promise<void> {
+    const path = '/api/v2/logistics/create_shipping_document';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sign = this.sign(path, timestamp, partnerId, partnerKey, accessToken, shopId);
+    const url = `${this.baseUrl}${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}&access_token=${accessToken}&shop_id=${shopId}`;
+
+    const response = await this.request(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_list: [{ order_sn: orderSn }] }),
+    });
+    const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+    if (!response.ok || data.error) {
+      throw new Error(`Shopee ${path} retornou erro: ${data.error ?? response.status} — ${data.message ?? ''}`);
+    }
+  }
+
+  // 'PROCESSING' | 'READY' | 'FAILED' — o chamador (ShopeeOrderProvider)
+  // decide o que fazer com cada estado; este método só traduz a resposta
+  // bruta, nunca lança para um status ainda não pronto (é um estado válido,
+  // não uma falha).
+  async getShippingDocumentResult(partnerId: string, partnerKey: string, shopId: string, accessToken: string, orderSn: string): Promise<{ status: string }> {
+    const path = '/api/v2/logistics/get_shipping_document_result';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sign = this.sign(path, timestamp, partnerId, partnerKey, accessToken, shopId);
+    const url = `${this.baseUrl}${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}&access_token=${accessToken}&shop_id=${shopId}&order_sn_list=${orderSn}`;
+
+    const response = await this.request(url, { method: 'GET' });
+    const data = (await response.json().catch(() => ({}))) as {
+      response?: { result_list?: { order_sn?: string; status?: string }[] };
+      error?: string;
+    };
+    if (!response.ok || data.error) {
+      return { status: 'FAILED' };
+    }
+    const result = data.response?.result_list?.find((r) => r.order_sn === orderSn);
+    return { status: result?.status ?? 'PROCESSING' };
+  }
+
+  // Puro (sem chamada de rede) — monta os parâmetros necessários para baixar
+  // o documento. AVISO DE HONESTIDADE: diferente de uma URL pública, este
+  // link exige um `sign` calculado com timestamp PRÓXIMO do momento do
+  // download (a assinatura HMAC da Shopee expira) — não pode ser gerado uma
+  // vez e reaberto depois como o labelUrl do Mercado Livre. Documentado como
+  // gap conhecido: servir isso de verdade ao usuário final exige um endpoint
+  // próprio do Kyneti que assine e faça o proxy do download na hora do
+  // clique, não um link estático salvo em DispatchBatchOrder.labelUrl.
+  buildDownloadShippingDocumentPath(): string {
+    return '/api/v2/logistics/download_shipping_document';
+  }
+
+  // Cria o anúncio de fato — PRIMEIRO endpoint de escrita de LISTAGEM deste
+  // client. MESMO aviso de honestidade reforçado das outras ações de escrita
+  // do módulo (pauseCampaign do ML): nunca exercitado contra a API real. Só é
+  // chamado depois que o gate canPublish já validou o payload E o usuário
+  // confirmou explicitamente a publicação — nunca automaticamente.
+  async addItem(
+    partnerId: string,
+    partnerKey: string,
+    shopId: string,
+    accessToken: string,
+    payload: {
+      item_name: string;
+      description: string;
+      category_id: number;
+      price: number;
+      stock: number;
+      weight: number;
+      image_id_list: string[];
+      attribute_list: { attribute_id: number; attribute_value_list: { value: string }[] }[];
+    },
+  ): Promise<{ item_id?: string; error?: string; message?: string }> {
+    const path = '/api/v2/product/add_item';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const sign = this.sign(path, timestamp, partnerId, partnerKey, accessToken, shopId);
+    const url = `${this.baseUrl}${path}?partner_id=${partnerId}&timestamp=${timestamp}&sign=${sign}&access_token=${accessToken}&shop_id=${shopId}`;
+
+    const response = await this.request(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        item_name: payload.item_name,
+        description: payload.description,
+        category_id: payload.category_id,
+        price_info: [{ current_price: payload.price }],
+        stock_info: { seller_stock: [{ stock: payload.stock }] },
+        item_weight: payload.weight,
+        image: { image_id_list: payload.image_id_list },
+        attribute_list: payload.attribute_list,
+      }),
+    });
+    const data = (await response.json().catch(() => ({}))) as { response?: { item_id?: number }; error?: string; message?: string };
+    if (!response.ok || data.error) {
+      throw new Error(`Shopee ${path} retornou erro: ${data.error ?? response.status} — ${data.message ?? ''}`);
+    }
+    return { item_id: data.response?.item_id != null ? String(data.response.item_id) : undefined };
+  }
 }

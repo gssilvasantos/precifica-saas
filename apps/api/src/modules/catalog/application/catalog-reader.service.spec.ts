@@ -61,6 +61,7 @@ describe('CatalogReaderService (custo efetivo com Packaging)', () => {
       update: jest.fn(),
       deactivate: jest.fn(),
       findByExternalId: jest.fn(),
+      findChildren: jest.fn(),
     };
     const packagings: jest.Mocked<PackagingRepository> = {
       create: jest.fn(),

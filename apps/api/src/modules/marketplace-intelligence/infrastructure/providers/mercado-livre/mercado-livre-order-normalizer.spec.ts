@@ -22,7 +22,7 @@ describe('normalizeMercadoLivreOrder', () => {
 
     expect(result).toMatchObject({
       externalOrderId: '123456',
-      status: 'PREPARANDO_ENVIO',
+      status: 'APROVADO',
       totalAmount: 150,
       currency: 'BRL',
     });

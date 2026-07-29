@@ -38,6 +38,7 @@ function buildAuditEvent(overrides: Partial<StockMovementAuditEvent> = {}): Stoc
     conferredAt: null,
     divergenceNotes: null,
     invoiceNumber: null,
+    notes: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     orderIds: ['order-1'],
@@ -71,6 +72,7 @@ describe('VideoCaptureService', () => {
       approveWithLedger: jest.fn(),
       markDivergent: jest.fn(),
       findPending: jest.fn().mockResolvedValue([]),
+      listReservedByWarehouse: jest.fn().mockResolvedValue([]),
     };
     const service = new VideoCaptureService(sessions, storage, auditEvents);
     return { service, sessions, storage, auditEvents };

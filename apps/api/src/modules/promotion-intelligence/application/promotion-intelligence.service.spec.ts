@@ -23,6 +23,12 @@ function buildProduct(overrides: Partial<ProductCatalogSummary> = {}): ProductCa
     packagingId: null,
     isKit: false,
     mapPrice: null,
+    ncm: null,
+    fiscalOriginCode: null,
+    cest: null,
+    categoryId: null,
+    photoUrls: [],
+    weightKg: 1,
     ...overrides,
   };
 }

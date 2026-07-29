@@ -76,6 +76,70 @@
 //                             registrar Shopee/TikTok/Amazon/Magalu depois
 //                             sem nenhuma migration nova, só um provider novo
 //                             implementando AdsCapableProvider.
+// fiscal                   -> Emissão de NF-e (Fase 3, benchmark Tiny ERP,
+//                             28/07/2026, ver docs/tiny-erp-benchmark-analysis.md,
+//                             seção 1.1, e docs/fiscal-nfe-architecture.md).
+//                             Integra com o Focus NFe (parceiro escolhido na
+//                             Fase 0) — bounded context PRÓPRIO porque emitir
+//                             nota fiscal é uma responsabilidade legal
+//                             distinta de qualquer outro módulo, com seu
+//                             próprio ciclo de vida assíncrono
+//                             (PENDENTE -> PROCESSANDO -> AUTORIZADA/ERRO).
+//                             orderId é referência SOLTA (não FK) para
+//                             orders.Order — mesmo padrão de
+//                             PurchaseOrder.supplierId (schemas diferentes).
+// marketplace_publishing   -> Publicar anúncio novo em marketplace (Fase 4,
+//                             benchmark Tiny ERP, 28/07/2026, ver
+//                             docs/tiny-erp-benchmark-analysis.md, seção 1.7,
+//                             e docs/marketplace-listing-publish-architecture.md).
+//                             Modelo de categoria/atributo deliberadamente
+//                             espelha o que o próprio usuário já usa e
+//                             considera intuitivo no Tiny/Olist: árvore de
+//                             categoria interna (catalog.ProductCategory) +
+//                             atributos definidos POR CATEGORIA (não por
+//                             produto), com herança opcional para categorias
+//                             filhas (CategoryAttribute.extendToChildren) —
+//                             e, SEPARADAMENTE, o mapeamento de cada
+//                             categoria interna para a categoria de CADA
+//                             canal (ChannelCategoryMapping, aqui, porque é
+//                             dado específico de canal, não de catálogo).
+//                             ListingPublication é append-only por
+//                             tentativa de publicação (mesmo padrão de
+//                             FiscalInvoice) — nunca automático: publicar um
+//                             anúncio novo é uma ação real e cara de
+//                             desfazer, sempre disparada por um clique
+//                             explícito do usuário.
+// freight_shipping         -> Etiqueta de envio avulsa (Fase 5, benchmark Tiny
+//                             ERP, 29/07/2026 — ver
+//                             docs/tiny-erp-benchmark-analysis.md, seção 1.2, e
+//                             docs/dispatch-batch-architecture.md). Guarda só a
+//                             CONEXÃO/credencial por tenant de transportadoras
+//                             genéricas (Melhor Envio, Correios, Frenet) — o
+//                             agrupamento de pedidos em si (DispatchBatch) vive
+//                             em logistics_fulfillment, por ser uma extensão
+//                             direta do Hub de Provas já existente (o mesmo
+//                             racional de PURCHASE_RECEIPT na Fase 1: estender
+//                             o bounded context existente em vez de duplicá-lo).
+//                             providerCode é STRING solta (não enum), mesmo
+//                             padrão de channelCode/marketplaceCode — permite
+//                             registrar uma transportadora nova sem migration,
+//                             só um provider novo implementando
+//                             FreightLabelProvider.
+// production                -> Ordens de Produção (Projeto Estruturante 1, benchmark
+//                             Bling ERP, 29/07/2026, ver
+//                             docs/bling-erp-benchmark-analysis.md, seção 1.1, e
+//                             docs/production-architecture.md). BOM real
+//                             (ProductStructureComponent, catalog — atributo do
+//                             produto kit, mesmo racional de Packaging) +
+//                             ProductionOrder/ProductionOrderComponent aqui, em
+//                             schema PRÓPRIO: "produzir" é um processo distinto
+//                             de "cadastrar produto" ou "mover estoque", com seu
+//                             próprio workflow (RASCUNHO -> EM_ANDAMENTO ->
+//                             CONCLUIDA/CANCELADA). Ao concluir, estende o Hub
+//                             de Provas (logistics_fulfillment) com um novo tipo
+//                             de evento (PRODUCTION_OUTPUT) — mesmo racional de
+//                             PURCHASE_RECEIPT na Fase 1: nunca um caminho de
+//                             escrita paralelo para StockLedgerEntry.
 // Próximo schema (a criar quando o módulo existir): analytics.
 // pricing_intelligence já existe como PRIMEIRA FATIA (simulador de margem
 // Nuvemshop) — ver seção do módulo mais abaixo.
@@ -98,7 +162,7 @@ datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
-  schemas   = ["identity", "catalog", "logistics_intelligence", "marketplace_intelligence", "integration_ops", "erp_integration", "channel_integration", "competition_intelligence", "financial_intelligence", "orders", "logistics_fulfillment", "promotion_intelligence", "marketplace_ads"]
+  schemas   = ["identity", "catalog", "logistics_intelligence", "marketplace_intelligence", "integration_ops", "erp_integration", "channel_integration", "competition_intelligence", "financial_intelligence", "orders", "logistics_fulfillment", "promotion_intelligence", "marketplace_ads", "tagging", "procurement", "fiscal", "marketplace_publishing", "freight_shipping", "production", "sellers"]
 }
 
 enum UserRole {
@@ -211,6 +275,16 @@ model Product {
   skuCode          String
   name             String
   internalCategory String?
+
+  // Árvore de categoria estruturada (Fase 4, benchmark Tiny ERP, ver model
+  // ProductCategory abaixo) — ADITIVO: internalCategory (texto livre) acima
+  // continua existindo e não é preenchido automaticamente a partir deste
+  // campo. categoryId é opcional porque é só pré-requisito de quem quer
+  // publicar um anúncio novo em marketplace (Fase 4); um produto sem
+  // categoryId continua 100% funcional em qualquer outro fluxo do Kyneti.
+  categoryId String?
+  category   ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
   supplierId       String?
   supplier         Supplier?   @relation(fields: [supplierId], references: [id])
   taxProfileId     String?
@@ -236,6 +310,49 @@ model Product {
   // docs/promotion-intelligence-architecture.md). Default false: um
   // produto normal continua interpretando packagingId como hoje.
   isKit Boolean @default(false)
+
+  // Controle de Lote/Validade (Projeto Estruturante 2, benchmark Bling ERP,
+  // 29/07/2026 — ver docs/bling-erp-benchmark-analysis.md, seção 1.2, e
+  // docs/product-lots-architecture.md). Default false: um produto normal
+  // continua sem exigir lote. Quando true, ProductLot (abaixo) passa a
+  // aceitar cadastro de lote para este skuCode, e StockLedgerEntry.lotCode
+  // passa a ser preenchido nos lançamentos manuais por lote
+  // (LOT_ADJUSTMENT) — mesmo racional aditivo de isKit: um flag no produto
+  // que liga um comportamento em outro model, nunca um campo travado por
+  // sourceSystem (é decisão operacional da Precifica, não fato físico
+  // espelhado do ERP).
+  controlaLote Boolean @default(false)
+
+  // Produto Pai + Variação (Fase 2, benchmark Tiny ERP, 28/07/2026 — ver
+  // docs/tiny-erp-benchmark-analysis.md, seção 2.3, e
+  // docs/product-variants-architecture.md). Um único relacionamento
+  // nullable resolve o conceito inteiro (decisão deliberada do benchmark:
+  // NÃO replicar o par redundante tipoVariacao+produtoPai do Tiny) — se
+  // parentProductId é null, o produto é "normal" OU um "pai" (ser pai é
+  // estado DERIVADO de outros produtos apontarem pra ele via variants,
+  // nunca um flag próprio gravado, mesmo racional de resolveEffectiveStatus
+  // em outras entidades desta base). Hierarquia de UM nível só — uma
+  // variação nunca pode ela mesma ter variantes (ver
+  // domain/product-variant.ts, canSetParent) — por isso onDelete: SetNull,
+  // não Cascade: apagar o pai nunca deveria arrastar a exclusão das
+  // variações, que continuam sendo produtos vendáveis por si só.
+  parentProductId String?
+  parent          Product?  @relation("ProductVariants", fields: [parentProductId], references: [id], onDelete: SetNull)
+  variants        Product[] @relation("ProductVariants")
+
+  // Lista de Preços (Fase 2, benchmark Tiny ERP) — exceções de preço deste
+  // produto em listas específicas (ex.: "Atacado", "Revenda"). Ver
+  // model PriceListException abaixo e docs/price-lists-architecture.md.
+  priceListExceptions PriceListException[]
+
+  // Grade de atributos que diferencia esta variação das demais do mesmo pai
+  // (ex.: {"cor": "Azul", "tamanho": "P"}) — JSON livre em vez de uma tabela
+  // de atributos configurável: o benchmark despriorizou a implementação
+  // exata do Tiny (GradeVariacaoResponseModel estruturado), e um objeto
+  // chave/valor cobre o caso real (mostrar "Azul / P" na UI) sem exigir
+  // cadastro prévio de "tipos de atributo". Só tem sentido quando
+  // parentProductId != null — ver validateVariantAttributes.
+  variantAttributes Json?
 
   costPrice Decimal @db.Decimal(12, 2) // custo do produto (sem embalagem) — ver Packaging acima para o custo efetivo
 
@@ -279,6 +396,24 @@ model Product {
   cubicWeightKg    Float
   shippingWeightKg Float
 
+  // --- Campos fiscais (benchmark Tiny ERP, 28/07/2026 — ver
+  // docs/tiny-erp-benchmark-analysis.md, seções 1.1/2.1) — pré-requisito
+  // para emissão de NF-e (Fase 3 do roadmap) e para publicar anúncio novo
+  // em marketplace (Fase 4), que exigem NCM/GTIN. Deliberadamente EDITÁVEIS
+  // em qualquer sourceSystem por enquanto (não entraram em ERP_OWNED_FIELDS,
+  // ver product-ownership-rules.ts) — diferente de weightKg/lengthCm etc.,
+  // nenhum sync do Olist popula estes campos ainda; travar agora deixaria o
+  // campo permanentemente null e não editável para produtos ERP_OLIST. Isso
+  // é revisitado quando o sync de fato passar a trazer esses dados.
+  ncm              String? // Nomenclatura Comum do Mercosul — classificação fiscal do produto
+  gtin             String? // código de barras (EAN/GTIN)
+  fiscalOriginCode Int? // origem da mercadoria para ICMS (0-8, tabela do Tiny/SEFAZ) — ver ObterProdutoModelResponse.origem no benchmark
+  // CEST (benchmark Bling, 29/07/2026, docs/bling-erp-benchmark-analysis.md,
+  // seção 2) — obrigatório na NF-e de item sujeito a Substituição Tributária
+  // (eletrônicos, cosméticos, autopeças, bebidas etc.). null é válido: nem
+  // todo produto tem ST. Mesmo racional de editabilidade do bloco acima.
+  cest             String?
+
   // --- Estoque e proveniência (Etapa 5 — ver docs/erp-integration-architecture.md, seção 2) ---
   stockQuantity Int @default(0) // não existia antes do ERP Integration revelar a lacuna
 
@@ -302,7 +437,174 @@ model Product {
   @@unique([tenantId, skuCode])
   @@unique([tenantId, sourceSystem, externalId])
   @@index([tenantId])
+  // Consulta mais comum da grade de variações: "todos os filhos deste pai" —
+  // ver ProductRepository.findChildren.
+  @@index([tenantId, parentProductId])
+  @@index([tenantId, categoryId])
   @@map("products")
+  @@schema("catalog")
+}
+
+// ============================================================================
+// Árvore de categoria de produto + atributos por categoria (Fase 4, benchmark
+// Tiny ERP, 28/07/2026 — ver docs/tiny-erp-benchmark-analysis.md, seção 1.7,
+// e docs/marketplace-listing-publish-architecture.md). Espelha
+// deliberadamente o modelo "Categorias dos Produtos" do Tiny/Olist
+// (confirmado com o usuário como o padrão a seguir): grupos de categoria +
+// subcategorias, com atributos (ficha técnica: cor, material, voltagem...)
+// vinculados à CATEGORIA, não ao produto individual — um produto herda os
+// atributos da sua categoria (e, opcionalmente, da categoria pai, quando
+// CategoryAttribute.extendToChildren = true na categoria pai).
+// ============================================================================
+
+model ProductCategory {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+
+  // Hierarquia de profundidade livre (diferente do único nível de
+  // Product.parentProductId) — o Tiny modela "grupo de categorias" +
+  // "subcategorias" dentro do grupo, o que já é 2 níveis; não há razão de
+  // negócio para travar em um número fixo de níveis aqui, então
+  // parentCategoryId aceita qualquer profundidade. Validação de ciclo
+  // (uma categoria nunca pode ser sua própria ancestral) é responsabilidade
+  // da aplicação (ProductCategoryService), não do schema.
+  parentCategoryId String?
+  parent           ProductCategory?  @relation("CategoryTree", fields: [parentCategoryId], references: [id], onDelete: SetNull)
+  children         ProductCategory[] @relation("CategoryTree")
+
+  attributes CategoryAttribute[]
+  products   Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, parentCategoryId])
+  @@map("product_categories")
+  @@schema("catalog")
+}
+
+// "Informar atributos por categoria" do Tiny/Olist — ficha técnica anexada a
+// UMA categoria (ex.: "tipo de manga", "voltagem"), reutilizada por todo
+// produto daquela categoria. attributeValue aqui é o DEFAULT da categoria —
+// quem publica um anúncio (Fase 4) pode sempre sobrepor no momento da
+// publicação (ex.: cor varia por produto mesmo dentro da mesma categoria);
+// este model nunca é a fonte de verdade final, só o ponto de partida.
+model CategoryAttribute {
+  id         String          @id @default(uuid())
+  tenantId   String
+  categoryId String
+  category   ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  attributeName  String
+  attributeValue String
+
+  // Quando true, esta categoria propaga este atributo para TODAS as
+  // categorias filhas (recursivamente) — mesmo racional do "Estender
+  // atributos para categorias filhas" do Tiny. Resolvido pela função pura
+  // resolveEffectiveAttributes (domain/), nunca calculado no banco.
+  extendToChildren Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([categoryId, attributeName])
+  @@index([tenantId, categoryId])
+  @@map("category_attributes")
+  @@schema("catalog")
+}
+
+// ============================================================================
+// BOM real — Produtos-Estrutura (Projeto Estruturante 1, benchmark Bling ERP,
+// 29/07/2026, ver docs/bling-erp-benchmark-analysis.md, seção 1.1, e
+// docs/production-architecture.md). Atributo do produto kit (Product.isKit =
+// true), mesmo racional de Packaging: cadastro em catalog, consumido por
+// outro módulo (aqui, production.ProductionOrder monta um snapshot a partir
+// disto). Decisão de escopo deliberada: este model descreve SÓ a
+// COMPOSIÇÃO (o que entra em 1 unidade do kit) — NÃO decide COMO a venda do
+// kit baixa estoque (isso continua via RETAIL_SHIPMENT normal, sem alteração
+// nesta rodada; ver docs/production-architecture.md para o racional
+// completo de por que esse escopo foi deliberadamente deixado de fora).
+// ============================================================================
+
+model ProductStructureComponent {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Referências SOLTAS por SKU (não FK para Product.id) — mesmo padrão de
+  // StockLedgerEntry.skuCode/PurchaseOrderItem.skuCode em toda esta base:
+  // permite compor a partir de um código ainda não resolvido num Product.id
+  // específico no momento da leitura, e evita acoplar este model à PK
+  // interna do catálogo.
+  parentSkuCode    String // SKU do produto kit (Product.isKit = true)
+  componentSkuCode String // SKU do componente consumido
+
+  // Decimal (não Int) — permite componente fracionário por unidade do kit
+  // (ex.: 0.5kg de um insumo a granel por unidade produzida).
+  quantity Decimal @db.Decimal(12, 3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Um componente não pode aparecer duas vezes na mesma estrutura — mesma
+  // linha, quantidade somada, nunca duas linhas para o mesmo par.
+  @@unique([tenantId, parentSkuCode, componentSkuCode])
+  @@index([tenantId, parentSkuCode])
+  @@map("product_structure_components")
+  @@schema("catalog")
+}
+
+// ============================================================================
+// Produtos-Lotes (rastreamento de lote/validade, FEFO) — Projeto Estruturante
+// 2, benchmark Bling ERP, 29/07/2026 (docs/bling-erp-benchmark-analysis.md,
+// seção 1.2 — LotesDTO). Metadado do lote em si (data de fabricação/validade,
+// regra de bloqueio de venda) — o SALDO por lote não vive aqui, é derivado de
+// StockLedgerEntry.lotCode (abaixo), mesmo racional de saldo de SKU (nunca
+// duplica um contador que o ledger já responde). Ver
+// docs/product-lots-architecture.md para o racional completo.
+// ============================================================================
+
+enum ProductLotStatus {
+  ATIVO
+  INATIVO
+
+  @@schema("catalog")
+}
+
+model ProductLot {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Referência SOLTA por SKU (não FK para Product.id) — mesmo padrão de
+  // ProductStructureComponent acima e de StockLedgerEntry.skuCode.
+  skuCode  String // Product.controlaLote precisa ser true (validado na aplicação, não no schema)
+  lotCode  String // "codigoLote" do Bling — identificador do lote, único por SKU
+
+  dataFabricacao DateTime?
+  dataValidade   DateTime
+
+  // Dias antes do vencimento em que o lote para de poder ser vendido — ex.:
+  // 30 = bloqueia a venda 30 dias antes de dataValidade. 0 = só bloqueia
+  // depois de vencido de fato. Ver domain/product-lot.ts, isLotSellable.
+  diasPermitidoVenda Int @default(0)
+
+  // "codigoAgregacao" do Bling — código de pallet/agregação física, puramente
+  // informativo (não participa de nenhuma regra de negócio hoje).
+  codigoAgregacao String?
+
+  status ProductLotStatus @default(ATIVO)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Um SKU não pode ter dois lotes com o mesmo código.
+  @@unique([tenantId, skuCode, lotCode])
+  @@index([tenantId, skuCode])
+  // Consulta da tela de gestão de lote: "quais lotes vencem em breve" —
+  // varre por tenant + data, sem depender do SKU.
+  @@index([tenantId, dataValidade])
+  @@map("product_lots")
   @@schema("catalog")
 }
 
@@ -1056,6 +1358,103 @@ model ReceivableRecord {
 }
 
 // ============================================================================
+// AccountsPayable — Contas a Pagar (Fase 1 do roadmap, benchmark Tiny ERP
+// 28/07/2026, docs/tiny-erp-benchmark-analysis.md, seção 1.4). Espelho do
+// lado "a pagar" de ReceivableRecord: FixedExpense é config recorrente
+// estática (aluguel, folha), ReceivableRecord é repasse de marketplace —
+// nenhum dos dois modela "devo X para o fornecedor Y, vence dia Z, dei baixa
+// dia W". Fica no mesmo schema financial_intelligence (não um schema novo)
+// porque é um registro financeiro como ReceivableRecord, não específico de
+// compra — Ordem de Compra (Fase 1, próxima etapa) vai CRIAR linhas aqui via
+// evento/porta, mesmo padrão de Orders -> ReceivableFromOrderListener, mas
+// uma conta a pagar avulsa (aluguel de terceiro, imposto, frete) não precisa
+// nunca ter passado por uma Ordem de Compra.
+// ============================================================================
+
+enum AccountsPayableOccurrence {
+  UNICA
+  SEMANAL
+  MENSAL
+  TRIMESTRAL
+  // Gera N registros de uma vez (ver domain/accounts-payable.entity.ts,
+  // buildInstallments) — cada parcela é uma linha própria, ligada pelo
+  // installmentGroupId. É a ÚNICA ocorrência que efetivamente cria múltiplos
+  // registros hoje: SEMANAL/MENSAL/TRIMESTRAL só rotulam a intenção de
+  // recorrência da conta atual (MVP) — gerar a próxima ocorrência automática
+  // fica para uma iteração futura (mesmo limite documentado em
+  // FixedExpense.dueDay, que também não projeta linhas futuras sozinho).
+  PARCELADA
+
+  @@schema("financial_intelligence")
+}
+
+enum AccountsPayableStatus {
+  PENDING
+  PAID
+  // Sem CANCELLED aqui virar PAID depois — mesma regra de ReceivableRecord.
+  CANCELLED
+
+  @@schema("financial_intelligence")
+}
+
+model AccountsPayable {
+  id       String                 @id @default(uuid())
+  tenantId String
+  amount   Decimal                @db.Decimal(12, 2)
+  status   AccountsPayableStatus  @default(PENDING)
+
+  description String // ex.: "Aluguel do galpão - Julho/2026", "NF 1234 - Fornecedor X"
+  // Plano de contas — texto livre no MVP, mesmo racional de
+  // Supplier.paymentTerms: estruturar como taxonomia própria é decisão
+  // futura, não bloqueia o valor de ter fornecedor+vencimento+baixa hoje.
+  category    String?
+
+  // Referência SOLTA (não FK) para catalog.Supplier — mesmo padrão de
+  // ReceivableRecord.skuCode/TagAssignment.entityId: um registro financeiro
+  // não pode ficar acoplado ao ciclo de vida do cadastro de fornecedor
+  // (schema diferente: catalog vs financial_intelligence). Nullable — nem
+  // toda conta a pagar tem um fornecedor cadastrado (ex.: imposto a
+  // recolher).
+  supplierId String?
+
+  dueDate DateTime
+  paidAt  DateTime? // preenchido só por AccountsPayableService.markPaid — nunca por update()
+
+  // Quick Win 4 (benchmark Bling, 29/07/2026, docs/bling-erp-benchmark-analysis.md,
+  // seção 2 — ContasBaixarContaDTO: juros/desconto/acrescimo/valorRecebido/tarifa)
+  // — todos null até a baixa. paidAmount é o valor de fato baixado (pode
+  // diferir de `amount`); os três seguintes são o detalhamento do ajuste.
+  // Ver domain/accounts-payable.entity.ts (resolvePaidAmount).
+  paidAmount      Decimal? @db.Decimal(12, 2)
+  interestAmount  Decimal? @db.Decimal(12, 2) // juros
+  discountAmount  Decimal? @db.Decimal(12, 2) // desconto
+  feeAmount       Decimal? @db.Decimal(12, 2) // tarifa
+
+  occurrence AccountsPayableOccurrence @default(UNICA)
+
+  // Preenchidos só quando occurrence = PARCELADA (ver buildInstallments) —
+  // installmentGroupId liga as N parcelas da mesma compra/dívida original;
+  // installmentNumber/totalInstallments são "3 de 12", etc. Todos null para
+  // as demais ocorrências (cada uma é uma linha independente).
+  installmentGroupId String?
+  installmentNumber  Int?
+  totalInstallments  Int?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Consulta "minhas contas a pagar" (lista por status, ordenada por
+  // vencimento) — caminho de leitura mais comum do módulo, mesmo padrão do
+  // índice equivalente em ReceivableRecord.
+  @@index([tenantId, status, dueDate])
+  @@index([tenantId, installmentGroupId])
+  @@map("accounts_payable")
+  @@schema("financial_intelligence")
+}
+
+// ============================================================================
 // Orders — hub de pedidos multicanal. Ver docs/orders-architecture.md.
 //
 // Status UNIFICADO, não o status bruto do canal — 6 estágios canônicos,
@@ -1070,10 +1469,23 @@ model ReceivableRecord {
 
 enum OrderStatus {
   EM_ABERTO // pedido colocado — pagamento pendente, recém-aprovado, ou aguardando processamento inicial
+  // Benchmark Tiny ERP (28/07/2026, docs/tiny-erp-benchmark-analysis.md,
+  // seção 2.2) — pagamento confirmado, mas a preparação/separação ainda não
+  // começou de verdade. Sem este estágio, esse sinal ficava "arredondado"
+  // para PREPARANDO_ENVIO (ver mapMercadoLivreStatus) — otimista demais para
+  // o fast path do sync do Mercado Livre, que nunca confirma o envio inline.
+  APROVADO
   PREPARANDO_ENVIO // separação/embalagem em andamento — gatilho operacional (ver ORDER_EVENTS.READY_FOR_FULFILLMENT)
   FATURADO // nota fiscal emitida (hoje só um estágio manual/futuro — ver honestidade técnica na doc)
   ENVIADO // postado/despachado, com código de rastreio
   ENTREGUE // confirmado como entregue pelo canal ou pela transportadora
+  // Benchmark Tiny ERP (28/07/2026, seção 2.2) — entrega tentada pela
+  // transportadora e FALHOU (sinal real de shipping.status = not_delivered
+  // no Mercado Livre). Antes deste estágio, esse sinal ficava preso em
+  // ENVIADO, mascarando um problema logístico que merece alerta operacional
+  // — ver ORDER_EVENTS.DELIVERY_FAILED. NÃO é terminal (ao contrário de
+  // CANCELADO): uma reentrega bem-sucedida ainda pode levar a ENTREGUE.
+  NAO_ENTREGUE
   CANCELADO // cancelado ou estornado em qualquer ponto do fluxo — estágio terminal negativo
 
   @@schema("orders")
@@ -1193,6 +1605,11 @@ model Order {
   // daquele lote (FULL_DISPATCH), junto de outros pedidos do mesmo despacho.
   stockMovementLinks StockMovementAuditEventOrder[]
 
+  // Fase 5 (Expedição em lote) — um pedido pode ter passado por N tentativas
+  // de lote (ex.: removido de um lote cancelado e incluído num novo depois),
+  // por isso é uma relação 1:N, não 1:1.
+  dispatchBatchLinks DispatchBatchOrder[]
+
   // Idempotência: a MESMA chave de negócio (canal + id externo) nunca gera
   // duas linhas — todo upsert do OrderSyncOrchestrator usa este índice.
   @@unique([tenantId, channelCode, externalOrderId])
@@ -1237,6 +1654,22 @@ model OrderItem {
   // nulo quando o canal não expõe essa quebra (caso da Nuvemshop hoje).
   taxAmount Decimal? @db.Decimal(12, 2)
 
+  // Vendedores + Comissão (Projeto Estruturante 3, benchmark Bling ERP,
+  // 29/07/2026, docs/sellers-architecture.md) — referência SOLTA (não
+  // FK/relation Prisma) ao Vendedor (schema sellers), mesmo racional de
+  // skuCode -> Product: atribuição manual explícita
+  // (CommissionService.assignVendedor), nunca inferida automaticamente do
+  // canal/pedido. comissaoAliquotaPct/comissaoValor são SNAPSHOT calculado
+  // no momento da atribuição — mudar Vendedor.aliquotaComissaoPct depois
+  // NUNCA recalcula itens já atribuídos (mesmo racional de costPrice acima).
+  vendedorId          String?
+  comissaoAliquotaPct Decimal? @db.Decimal(5, 2)
+  comissaoValor       Decimal? @db.Decimal(12, 2)
+  // Null = comissão ainda não incluída em nenhuma geração de conta a pagar
+  // (CommissionService.generatePayout) — setado em bloco no momento da
+  // geração, nunca antes, para impedir pagar a MESMA comissão duas vezes.
+  comissaoPagaEm      DateTime?
+
   // Custo de aquisição no momento do pedido (Etapa 19, Orquestração de
   // Custos) — SNAPSHOT do custo efetivo (Product.costPrice + Packaging.costPrice,
   // ver ProductCatalogReader) capturado pelo OrderSyncOrchestrator quando o
@@ -1256,6 +1689,11 @@ model OrderItem {
   costPrice Decimal? @db.Decimal(12, 2)
 
   @@index([orderId])
+  // Vendedores + Comissão — consulta central de CommissionService
+  // (listCommissions/generatePayout): "itens deste vendedor ainda não
+  // pagos" — mesmo racional de índices compostos existentes (ex.:
+  // logistics_fulfillment shipping enrichment).
+  @@index([vendedorId, comissaoPagaEm])
   @@map("order_items")
   @@schema("orders")
 }
@@ -1317,6 +1755,9 @@ model Warehouse {
   // Prisma saber qual FK corresponde a qual back-relation.
   destinationForEvents StockMovementAuditEvent[] @relation("DestinationWarehouse")
   sourceForEvents      StockMovementAuditEvent[] @relation("SourceWarehouse")
+  // Benchmark Tiny ERP (28/07/2026) — localização física do SKU dentro
+  // deste depósito, ver ProductWarehouseLocation abaixo.
+  productLocations ProductWarehouseLocation[]
 
   @@unique([tenantId, code])
   @@index([tenantId, type])
@@ -1327,6 +1768,30 @@ model Warehouse {
 enum StockMovementEventType {
   FULL_DISPATCH // lote de despacho para um CD do Full — pode embarcar N pedidos, ou nenhum (reabastecimento preventivo)
   RETAIL_SHIPMENT // envio de um único pedido de varejo direto ao comprador final
+  // Ordem de Compra (Fase 1, 28/07/2026) — ÚNICO tipo de ENTRADA (crédito),
+  // os outros dois são saída (débito). "Prova" aqui é o número da NF do
+  // fornecedor (invoiceNumber), não mídia/vídeo — risco de fraude é
+  // diferente de mercadoria SAINDO do depósito. Ver
+  // domain/stock-movement-audit-event.entity.ts, canApprovePurchaseReceipt/
+  // buildPurchaseReceiptLedgerEntries.
+  PURCHASE_RECEIPT
+  // Ordem de Produção (Projeto Estruturante 1, benchmark Bling, 29/07/2026)
+  // — conclusão de uma ProductionOrder (schema production): debita os
+  // componentes consumidos (uma ou mais linhas negativas) E credita o
+  // produto acabado (uma linha positiva), tudo no MESMO auditEventId. Prova
+  // de autorização é a própria ProductionOrder já confirmada pelo usuário
+  // (ação explícita "concluir ordem"), não mídia nem NF — ver
+  // canApproveProduction/buildProductionLedgerEntries.
+  PRODUCTION_OUTPUT
+  // Lançamento manual por lote (Projeto Estruturante 2, benchmark Bling,
+  // 29/07/2026) — Entrada/Saída/Balanço avulso vinculado a um ProductLot
+  // específico (catalog.product_lots), ex.: correção de contagem física,
+  // baixa de vencido, entrada de um lote recém-recebido fora do fluxo de
+  // Ordem de Compra. Prova de autorização é a justificativa textual
+  // informada (campo `notes`, abaixo) — não existe mídia nem NF aplicável a
+  // um ajuste 100% interno. Ver
+  // canApproveLotAdjustment/buildLotAdjustmentLedgerEntry.
+  LOT_ADJUSTMENT
 
   @@schema("logistics_fulfillment")
 }
@@ -1372,6 +1837,13 @@ model StockMovementAuditEvent {
   // Vínculo com a Nota Fiscal correspondente — mesmo campo/formato de
   // Order.invoiceNumber (nº da NF-e ou chave de acesso).
   invoiceNumber String?
+
+  // Justificativa textual (Projeto Estruturante 2, benchmark Bling,
+  // 29/07/2026) — só usado por LOT_ADJUSTMENT hoje: é a "prova" desse tipo
+  // de evento, ver canApproveLotAdjustment. Genérico o bastante para ser
+  // reaproveitado por outro tipo de evento futuro que precise do mesmo
+  // racional (correção interna sem mídia/NF).
+  notes String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1506,13 +1978,255 @@ model StockLedgerEntry {
   auditEventId String
   auditEvent   StockMovementAuditEvent @relation(fields: [auditEventId], references: [id])
 
+  // Produtos-Lotes (Projeto Estruturante 2, benchmark Bling, 29/07/2026) —
+  // dimensão ADITIVA do mesmo ledger, nunca uma tabela de saldo separada
+  // (mesmo racional estrutural do resto deste model). null = SKU sem
+  // controle de lote (Product.controlaLote = false), o caso de longe mais
+  // comum hoje — todo o histórico existente antes desta migração tem
+  // lotCode null e continua funcionando exatamente igual. Preenchido só
+  // pelos lançamentos LOT_ADJUSTMENT (ver
+  // buildLotAdjustmentLedgerEntry) — os outros tipos de evento
+  // (RETAIL_SHIPMENT, FULL_DISPATCH, PURCHASE_RECEIPT, PRODUCTION_OUTPUT)
+  // ainda não escrevem lotCode; ver docs/product-lots-architecture.md,
+  // seção 5, para o gap documentado (consumo automático de lote nesses
+  // fluxos é extensão futura).
+  lotCode String?
+
   createdAt DateTime @default(now())
 
   // Consulta mais comum: saldo atual de um SKU num depósito (soma de
   // quantityDelta filtrando por estes três campos).
   @@index([tenantId, warehouseId, skuCode])
   @@index([auditEventId])
+  // Saldo por lote — soma de quantityDelta filtrando também por lotCode.
+  @@index([tenantId, warehouseId, skuCode, lotCode])
   @@map("stock_ledger_entries")
+  @@schema("logistics_fulfillment")
+}
+
+// ============================================================================
+// Expedição em lote (Fase 5, benchmark Tiny ERP, 29/07/2026) — ver
+// docs/tiny-erp-benchmark-analysis.md, seção 1.2, e
+// docs/dispatch-batch-architecture.md.
+//
+// Extensão direta do Hub de Provas: RETAIL_SHIPMENT já garante a auditoria
+// POR PEDIDO (checklist bipado + vídeo, Sprint 27) — DispatchBatch vive numa
+// camada ACIMA disso, agrupando N pedidos JÁ CONFERIDOS (StockMovementAuditEvent
+// conferenceStatus = APROVADO) numa única operação de etiqueta/despacho, sem
+// substituir nem duplicar a conferência por pedido. Mesmo racional do
+// screenshot de referência do Olist (usuário, 29/07/2026): um campo único
+// "forma de envio" (aqui `formaEnvio`, string livre — mesmo padrão de
+// channelCode) mistura etiqueta nativa de marketplace (MERCADO_ENVIOS,
+// SHOPEE_ENVIOS), etiqueta via transportadora avulsa (CORREIOS, MELHOR_ENVIO,
+// FRENET) e formas puramente organizacionais sem etiqueta real
+// (TRANSPORTADORA, RETIRAR_PESSOALMENTE, MOTOBOY, RETIRADO_NO_LOCAL) — a
+// aplicação decide QUAL provider (se algum) chamar a partir desse valor, ver
+// domain/dispatch-batch.entity.ts (resolveLabelStrategy).
+enum DispatchBatchStatus {
+  ABERTO // criado, pedidos ainda podendo ser adicionados/removidos
+  ETIQUETADO // todo pedido do lote já tem etiqueta gerada (ou a forma de envio não exige etiqueta real)
+  DESPACHADO // confirmado como entregue à transportadora/canal — estágio terminal
+  CANCELADO
+
+  @@schema("logistics_fulfillment")
+}
+
+enum DispatchBatchOrderStatus {
+  PENDENTE // no lote, etiqueta ainda não solicitada/gerada
+  ETIQUETADO
+  ERRO
+
+  @@schema("logistics_fulfillment")
+}
+
+model DispatchBatch {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // String livre — ver comentário acima. Nunca usado para decidir uma regra
+  // de negócio via if/else espalhado: resolveLabelStrategy (domínio puro) é
+  // o único lugar que traduz este valor para "qual capacidade de provider
+  // chamar, se alguma".
+  formaEnvio String
+
+  status DispatchBatchStatus @default(ABERTO)
+
+  requestedByUserId String?
+  notes             String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  concludedAt DateTime?
+
+  orders DispatchBatchOrder[]
+
+  @@index([tenantId, status])
+  @@map("dispatch_batches")
+  @@schema("logistics_fulfillment")
+}
+
+// Uma linha por PEDIDO dentro de um lote — granularidade própria porque a
+// geração de etiqueta pode ter sucesso para uns pedidos do lote e falhar para
+// outros (ex.: um pedido sem endereço estruturado suficiente para a
+// transportadora avulsa) sem travar o lote inteiro.
+model DispatchBatchOrder {
+  id       String @id @default(uuid())
+  tenantId String
+
+  dispatchBatchId String
+  dispatchBatch   DispatchBatch @relation(fields: [dispatchBatchId], references: [id], onDelete: Cascade)
+
+  // Referência real (FK), mesmo padrão já usado dentro deste MESMO schema por
+  // StockMovementAuditEventOrder -> Order — DispatchBatchOrder é uma extensão
+  // do mesmo bounded context, não um módulo novo desacoplado.
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  status DispatchBatchOrderStatus @default(PENDENTE)
+
+  externalLabelId String? // id da etiqueta/documento no provider (quando o provider expõe um)
+  trackingCode    String?
+  labelUrl        String?
+  errorMessage    String?
+  labeledAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Um pedido só pode estar em UM lote por vez (gate de elegibilidade,
+  // ver domain/dispatch-batch.entity.ts) — mas pode ter passado por lotes
+  // ANTERIORES cancelados, por isso não é @@unique([orderId]) sozinho.
+  @@unique([dispatchBatchId, orderId])
+  @@index([tenantId, orderId])
+  @@map("dispatch_batch_orders")
+  @@schema("logistics_fulfillment")
+}
+
+// ============================================================================
+// Etiqueta de envio avulsa (Fase 5) — conexão/credencial por tenant de
+// transportadoras que NÃO são um marketplace (Correios, Melhor Envio,
+// Frenet). Mesmo padrão de FiscalSettings (token criptografado em repouso via
+// CredentialEncryptionService), mas aqui existe UMA linha POR PROVIDER (um
+// tenant pode ter Correios E Melhor Envio configurados ao mesmo tempo),
+// diferente de FiscalSettings que é singleton (só existe um parceiro fiscal).
+// ============================================================================
+model FreightProviderConnection {
+  id       String @id @default(uuid())
+  tenantId String
+
+  providerCode String // "MELHOR_ENVIO" | "CORREIOS" | "FRENET" — ver comentário do schema no topo do arquivo
+
+  // Formato específico de cada provider (token OAuth2, ou token+contrato) —
+  // sempre um JSON serializado ANTES de criptografar, nunca campos soltos por
+  // provider (evitaria migration a cada transportadora nova).
+  credentialEnc String
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, providerCode])
+  @@map("freight_provider_connections")
+  @@schema("freight_shipping")
+}
+
+// ============================================================================
+// Catálogo de Transportador/Serviço (Projeto Estruturante 5, benchmark Bling
+// ERP, 29/07/2026 — ver docs/carrier-catalog-architecture.md). Substitui o
+// `DispatchBatch.formaEnvio` texto-livre por um cadastro real — o operador
+// escolhe um Carrier+CarrierService cadastrado em vez de digitar um texto que
+// precisa bater EXATAMENTE com uma das chaves hardcoded de
+// `resolveLabelStrategy` (dispatch-batch.entity.ts). ADITIVO: não muda
+// `DispatchBatch.formaEnvio` (continua String) nem nenhum gate de
+// dispatch-batch.entity.ts — o cadastro só resolve QUAL string gravar ali
+// (via `automationCode`) e permite reconhecer, por alias, um `formaEnvio` já
+// existente/legado para exibir nome do transportador + estimativa de entrega.
+// ============================================================================
+model Carrier {
+  id       String @id @default(uuid())
+  tenantId String
+
+  name     String
+  isActive Boolean @default(true)
+
+  services CarrierService[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive])
+  @@map("carriers")
+  @@schema("freight_shipping")
+}
+
+model CarrierService {
+  id       String @id @default(uuid())
+  tenantId String
+
+  carrierId String
+  carrier   Carrier @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+
+  name String // ex.: "SEDEX", "PAC", "Rodoviário Padrão"
+
+  // Nomes alternativos usados para RECONHECER (não gravar) um formaEnvio
+  // legado/digitado — normalizados (trim+uppercase) na camada de aplicação,
+  // nunca aqui. Ex.: serviço "SEDEX" pode ter aliases ["CORREIOS SEDEX",
+  // "CORREIOS_SEDEX"].
+  aliases String[] @default([])
+
+  // Informativo — mostrado ao operador, nunca usado por nenhum gate.
+  estimativaEntregaDias Int?
+
+  // Preenchido SÓ quando este serviço corresponde a uma automação que o
+  // Kyneti já suporta (uma das chaves de LABEL_STRATEGY_BY_FORMA_ENVIO em
+  // dispatch-batch.entity.ts, ex.: "CORREIOS", "MELHOR_ENVIO", "FRENET",
+  // "MERCADO_ENVIOS", "SHOPEE_ENVIOS"). Nulo = serviço 100% organizacional
+  // (motoboy próprio, transportadora regional sem API) — DispatchBatch grava
+  // o NOME do serviço como formaEnvio, que resolveLabelStrategy nunca
+  // reconhece e cai em NONE (comportamento correto: sem automação).
+  automationCode String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([carrierId, name])
+  @@index([tenantId, isActive])
+  @@map("carrier_services")
+  @@schema("freight_shipping")
+}
+
+// Benchmark Tiny ERP (28/07/2026, docs/tiny-erp-benchmark-analysis.md, seção
+// 1.6) — localização física do SKU dentro de um depósito (corredor/prateleira/bin).
+// Deliberadamente SEPARADO de StockLedgerEntry: ledger é um LOG de
+// movimentações (append-only, nunca atualizado), localização é um dado
+// ATUAL (muda de lugar sem virar "movimento de estoque" — reorganizar uma
+// prateleira não é entrada nem saída). skuCode, não productId: mesmo
+// racional de StockLedgerEntry, referência solta ao catálogo (o SKU pode
+// nem existir mais no Catalog sem quebrar o histórico de localização).
+model ProductWarehouseLocation {
+  id       String @id @default(uuid())
+  tenantId String
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  skuCode     String
+
+  // Texto livre (corredor/prateleira/bin) — mesmo racional de
+  // Product.internalCategory: taxonomia própria de cada operação, não uma
+  // lista fechada imposta pelo Kyneti.
+  location String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Uma localização por SKU por depósito — setar de novo SOBRESCREVE
+  // (upsert), nunca acumula histórico (isso é papel do StockLedgerEntry).
+  @@unique([tenantId, warehouseId, skuCode])
+  @@map("product_warehouse_locations")
   @@schema("logistics_fulfillment")
 }
 
@@ -1791,4 +2505,656 @@ model AdsActionSuggestion {
   @@index([campaignId, actionType, status])
   @@map("ads_action_suggestions")
   @@schema("marketplace_ads")
+}
+
+// ============================================================================
+// Tagging (Sprint 28, benchmark Tiny ERP 28/07/2026, docs/tiny-erp-benchmark-analysis.md,
+// seção 4/Fase 0) — sistema de marcadores genérico, reaproveitável em
+// Produtos, Pedidos e Contas (hoje: FixedExpense — Contas a Pagar chega na
+// Fase 1 e ganha o mesmo tratamento quando existir). Schema PRÓPRIO
+// ("tagging"), não emprestado de nenhum módulo de domínio: é
+// deliberadamente neutro, porque nenhuma das entidades marcáveis é "dona"
+// do conceito de tag.
+// ============================================================================
+
+// Conjunto FECHADO e interno (ao contrário de channelCode, que é aberto/
+// externo e por isso String) — cada novo tipo marcável é uma decisão de
+// produto nossa, nunca um dado vindo de fora. Cresce por migration mesmo,
+// mas isso é raro (adicionar um novo tipo de entidade marcável não é um
+// evento frequente, diferente de "canal novo").
+enum TaggableEntityType {
+  PRODUCT
+  ORDER
+  FIXED_EXPENSE
+  // Benchmark Tiny ERP (28/07/2026, Fase 1) — módulo novo de Contas a Pagar
+  // (financial_intelligence.AccountsPayable), diferente de FIXED_EXPENSE.
+  ACCOUNTS_PAYABLE
+
+  @@schema("tagging")
+}
+
+model Tag {
+  id       String  @id @default(uuid())
+  tenantId String
+  name     String
+  // Hex opcional (ex.: "#00F0FF") — só para diferenciação visual na UI,
+  // NUNCA usado em nenhuma lógica de negócio (mesmo racional de
+  // OrderStatusMeta.badgeClass no frontend: cor é apresentação, não dado).
+  color String?
+
+  createdAt DateTime @default(now())
+
+  assignments TagAssignment[]
+
+  // Nome único por tenant — evita duas tags "Frágil" e "frágil" cadastradas
+  // por acidente pelo mesmo usuário (comparação exata, não case-insensitive:
+  // Postgres/Prisma não oferecem unique case-insensitive nativo sem extensão
+  // extra, e o custo de adicionar uma agora não se paga pelo valor).
+  @@unique([tenantId, name])
+  @@map("tags")
+  @@schema("tagging")
+}
+
+// A ligação genérica entre uma Tag e QUALQUER entidade marcável — o mesmo
+// papel que StockLedgerEntry.skuCode cumpre para o catálogo: referência
+// SOLTA (entityId como String, sem FK de banco), porque a entidade
+// referenciada vive em outro schema/módulo (Product em catalog, Order em
+// orders, FixedExpense em financial_intelligence) e este módulo não pode
+// (nem deve) depender deles. Quem resolve entityId -> entidade de verdade é
+// sempre o módulo dono, nunca este.
+model TagAssignment {
+  id       String @id @default(uuid())
+  // Denormalizado (não vem só via Tag.tenantId) — mesmo racional de
+  // StockMovementAuditEventItem: RLS precisa filtrar esta tabela
+  // diretamente por tenantId, sem depender de um JOIN até Tag.
+  tenantId String
+
+  tagId String
+  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  entityType TaggableEntityType
+  entityId   String
+
+  createdAt DateTime @default(now())
+
+  // Uma tag não pode ser aplicada duas vezes à mesma entidade — idempotência
+  // do "atribuir" (ver TaggingService.assign).
+  @@unique([tenantId, tagId, entityType, entityId])
+  // Consulta mais comum: "quais tags esta entidade tem" (reverse lookup, ex.:
+  // badge de tags na tela de produto/pedido).
+  @@index([tenantId, entityType, entityId])
+  @@map("tag_assignments")
+  @@schema("tagging")
+}
+
+// ============================================================================
+// Procurement — Ordem de Compra (Fase 1, benchmark Tiny ERP, 28/07/2026).
+// Fecha o ciclo do ReplenishmentAdvisor (logistics-fulfillment): sugere
+// reposição -> humano decide comprar -> PurchaseOrder registra a compra ->
+// ao "receber" (POST .../receive), credita estoque (via
+// StockMovementAuditEventService.receivePurchase, tipo PURCHASE_RECEIPT) E
+// gera AccountsPayable automaticamente — os dois pontos de integração cross-
+// schema, sempre por PORTA exportada (STOCK_RECEIPT_WRITER,
+// ACCOUNTS_PAYABLE_WRITER em shared/contracts/tokens.ts), nunca importando a
+// classe concreta de outro módulo. Schema Postgres PRÓPRIO (não reaproveita
+// logistics_fulfillment nem financial_intelligence): é um bounded context
+// genuinamente diferente dos dois (o processo de COMPRAR, não o de mover
+// estoque nem o de contas financeiras) — ver docs/procurement-architecture.md.
+// ============================================================================
+
+enum PurchaseOrderStatus {
+  ABERTO // criado, nada ainda decidido — pode avançar ou ser cancelado
+  ANDAMENTO // em negociação/trânsito com o fornecedor — pode avançar (receber) ou ser cancelado
+  ATENDIDO // recebida — TERMINAL, já creditou estoque e gerou conta a pagar, nunca cancela depois disso
+  CANCELADO // TERMINAL — nunca chegou a ser recebida
+
+  @@schema("procurement")
+}
+
+model PurchaseOrder {
+  id       String              @id @default(uuid())
+  tenantId String
+  status   PurchaseOrderStatus @default(ABERTO)
+
+  // Referências SOLTAS (não FK) — supplierId vive em catalog, warehouseId em
+  // logistics_fulfillment, ambos schemas diferentes deste (Prisma
+  // multiSchema não modela @relation cross-schema). Validadas por tenant na
+  // camada de aplicação via SUPPLIER_REPOSITORY/WAREHOUSE_REPOSITORY
+  // injetados — mesmo padrão de AccountsPayable.supplierId/TagAssignment.entityId.
+  supplierId  String
+  warehouseId String // depósito de DESTINO — onde o estoque comprado vai entrar ao receber
+
+  // Data de vencimento do pagamento — captura a condição comercial acordada
+  // com o fornecedor NO MOMENTO da compra (não deriva de Supplier.paymentTerms,
+  // que é texto livre no MVP e não parseável em data). Usada para preencher
+  // AccountsPayable.dueDate quando a ordem é recebida.
+  paymentDueDate DateTime
+
+  notes String?
+
+  // Preenchidos só por PurchaseOrderService.receive() — nunca setados em
+  // create()/advance(), mesmo racional de AccountsPayable.paidAt.
+  invoiceNumber String?
+  receivedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items PurchaseOrderItem[]
+
+  // Consulta mais comum: "minhas ordens de compra" por status.
+  @@index([tenantId, status])
+  @@map("purchase_orders")
+  @@schema("procurement")
+}
+
+model PurchaseOrderItem {
+  id       String @id @default(uuid())
+  // Denormalizado (não só via PurchaseOrder.tenantId) — RLS precisa filtrar
+  // esta tabela diretamente, mesmo padrão de StockMovementAuditEventItem/
+  // TagAssignment.
+  tenantId String
+
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  // Referência SOLTA a catalog.Product — mesmo padrão de StockLedgerEntry.skuCode.
+  skuCode  String
+  quantity Int // sempre positivo — a intenção de compra nunca é negativa
+  unitCost Decimal @db.Decimal(12, 2)
+  // Campo do modelo do Tiny ("ipi") — imposto por item, opcional (nem todo
+  // fornecedor/operação tem IPI destacado). Somado ao custo no cálculo do
+  // valor total (ver domain/purchase-order.entity.ts, computeTotalAmount).
+  ipi Decimal? @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, purchaseOrderId])
+  @@map("purchase_order_items")
+  @@schema("procurement")
+}
+
+// ============================================================================
+// Lista de Preços — motor de atacado/canal (Fase 2, benchmark Tiny ERP,
+// 28/07/2026). Absorve o CONCEITO do Tiny (ListaPrecoResponseModel +
+// ExcecaoListaPrecoModel), não a implementação exata: aqui é só um
+// percentual de ajuste (acréscimo/desconto) + exceções pontuais por
+// produto, sem nenhuma integração automática com o motor de repricing já
+// existente (PricingStrategist) — o `basePrice` é sempre informado por quem
+// consulta (ver PriceListService.resolvePrice), nunca lido de um campo
+// "preço atual" que o Kyneti não tem (preço é sempre calculado sob demanda
+// por canal, nunca um valor único gravado no Product). Ver
+// docs/price-lists-architecture.md. Mesmo schema do Product (catalog) —
+// é configuração comercial em cima do catálogo, mesmo bounded context de
+// Packaging/TaxProfile/Supplier.
+// ============================================================================
+
+model PriceList {
+  id       String  @id @default(uuid())
+  tenantId String
+  name     String // ex.: "Atacado", "Revenda", "Black Friday"
+  // Percentual aplicado sobre o basePrice informado por quem consulta —
+  // positivo = acréscimo, negativo = desconto (equivalente ao
+  // `acrescimoDesconto` do Tiny, um único campo com sinal em vez de dois
+  // conceitos separados). Ver domain/price-list.entity.ts, isValidAdjustmentPct.
+  adjustmentPct Float
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  exceptions PriceListException[]
+
+  @@index([tenantId])
+  @@map("price_lists")
+  @@schema("catalog")
+}
+
+model PriceListException {
+  id       String @id @default(uuid())
+  // Denormalizado (não só via PriceList.tenantId) — RLS precisa filtrar
+  // esta tabela diretamente, mesmo padrão de PurchaseOrderItem/TagAssignment.
+  tenantId String
+
+  priceListId String
+  priceList   PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+
+  // FK real (não referência solta) — PriceList vive no MESMO schema que
+  // Product (catalog), diferente de PurchaseOrder/AccountsPayable que
+  // referenciam entidades de outros schemas.
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  overridePrice Decimal @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // No máximo uma exceção por produto dentro de uma mesma lista.
+  @@unique([priceListId, productId])
+  @@index([tenantId, priceListId])
+  @@map("price_list_exceptions")
+  @@schema("catalog")
+}
+
+// ============================================================================
+// Emissão de NF-e (Fase 3, benchmark Tiny ERP, 28/07/2026) — integração com
+// o Focus NFe (parceiro fiscal escolhido na Fase 0, ver
+// docs/tiny-erp-benchmark-analysis.md, seção 1.1). Ver
+// docs/fiscal-nfe-architecture.md para o desenho completo (por que MVP usa
+// defaults de Simples Nacional, por que o destinatário é sempre um
+// snapshot imutável, por que a emissão automática é opt-in).
+// ============================================================================
+
+enum FiscalInvoiceStatus {
+  PENDENTE // criada no Kyneti, ainda não enviada ao Focus NFe (ou falhou antes de enviar)
+  PROCESSANDO // aceita pelo Focus NFe, aguardando autorização da SEFAZ (assíncrono)
+  AUTORIZADA
+  ERRO
+  CANCELADA
+
+  @@schema("fiscal")
+}
+
+enum FiscalEnvironment {
+  HOMOLOGACAO // notas de teste, sem valor fiscal — usar até a operação em produção estar validada
+  PRODUCAO
+
+  @@schema("fiscal")
+}
+
+// Configuração do EMITENTE — um registro por tenant (mesmo padrão de
+// singleton por tenant de CatalogSettings). Contém os dados que a Focus NFe
+// exige para o emitente da nota (CNPJ, endereço, regime tributário) e a
+// credencial da API (token, sempre criptografado em repouso via
+// CredentialEncryptionService — mesmo padrão de ShopeeConnection/
+// MercadoLivreConnection/OlistConnection).
+model FiscalSettings {
+  tenantId String @id
+
+  cnpj              String
+  razaoSocial       String
+  nomeFantasia      String?
+  inscricaoEstadual String
+  // Valores possíveis (API Focus NFe): 1=Simples Nacional, 2=Simples
+  // Nacional c/ excesso de sublimite, 3=Regime Normal. Default 1 — decisão
+  // 28/07/2026 (ver docs/fiscal-nfe-architecture.md): MVP assume Simples
+  // Nacional, o regime mais comum para vendedor multicanal de porte
+  // pequeno/médio. Revisão do contador necessária se o tenant for Regime
+  // Normal.
+  regimeTributario Int @default(1)
+
+  logradouro String
+  numero     String
+  bairro     String
+  municipio  String
+  uf         String
+  cep        String
+  telefone   String?
+
+  // Criptografado em repouso — nunca lido/gravado em texto puro fora de
+  // FiscalSettingsService (ver CredentialEncryptionService).
+  focusNfeTokenEnc String
+  environment      FiscalEnvironment @default(HOMOLOGACAO)
+
+  // Emissão automática ao pedido entrar em APROVADO — opt-in, default
+  // false. MVP começa manual por segurança (decisão do usuário, 28/07/2026):
+  // um documento fiscal tem consequência legal, então o padrão é sempre
+  // exigir uma ação humana até o tenant ativar explicitamente a automação.
+  autoEmitOnApproval Boolean @default(false)
+
+  // Série de NF-e usada pelo Kyneti — DEVE ser diferente de qualquer série já
+  // usada pelo mesmo CNPJ em outro emissor (ex.: Olist), para não colidir
+  // numeração perante a SEFAZ. Nullable: se ausente, deixa a Focus NFe usar a
+  // série configurada no painel deles.
+  nfeSerie Int?
+
+  // Naturezas de Operação (Projeto Estruturante 4, benchmark Bling ERP,
+  // 29/07/2026, ver docs/naturezas-operacao-architecture.md) — natureza
+  // usada quando `EmitInvoiceInput.naturezaOperacaoId` não é informado no
+  // momento da emissão. Nullable: ausente = comportamento histórico do MVP
+  // (CFOP hardcoded de revenda Simples Nacional, `resolveCfop` em
+  // tax-code-resolver.ts) — nenhum tenant é obrigado a configurar isto.
+  defaultNaturezaOperacaoId String?
+  defaultNaturezaOperacao   NaturezaOperacao? @relation(fields: [defaultNaturezaOperacaoId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("fiscal_settings")
+  @@schema("fiscal")
+}
+
+// Naturezas de Operação (Projeto Estruturante 4, benchmark Bling ERP,
+// 29/07/2026 — ver docs/bling-erp-benchmark-analysis.md, seção 2,
+// `NaturezasOperacoesDadosDTO`, e docs/naturezas-operacao-architecture.md
+// para o desenho completo). Generaliza o CFOP hardcoded de
+// `tax-code-resolver.ts` (resolveCfop, só revenda Simples Nacional) para um
+// cadastro configurável por tenant.
+//
+// AVISO DE HONESTIDADE (mesmo racional de FiscalMarketplaceIntermediary): o
+// Kyneti NUNCA fabrica um código CFOP para um cenário que não verificou (ex.:
+// substituição tributária, industrialização própria) — o tenant (ou seu
+// contador) preenche os códigos de uma natureza customizada conscientemente.
+// O único CFOP "de fábrica" continua sendo o fallback hardcoded em
+// tax-code-resolver.ts (5102/6102/5202/6202, Simples Nacional revenda simples),
+// usado quando NENHUMA natureza é configurada/selecionada — zero mudança de
+// comportamento para quem não usa este cadastro.
+model NaturezaOperacao {
+  id       String @id @default(uuid())
+  tenantId String
+
+  nome String // ex.: "Venda de mercadoria - Simples Nacional (padrão)"
+
+  // CFOP de VENDA — usado para finalidade NORMAL/COMPLEMENTAR/AJUSTE (mesmo
+  // racional já documentado em tax-code-resolver.ts: só DEVOLUCAO muda o
+  // CFOP; Complementar/Ajuste mantêm o CFOP da operação original).
+  cfopVendaInterno       String // operação DENTRO do estado do emitente
+  cfopVendaInterestadual String // operação para OUTRO estado
+
+  // CFOP de DEVOLUÇÃO (finalidade DEVOLUCAO) — opcional. Ausente = usa o
+  // fallback padrão (5202/6202) via resolveCfopFromNatureza, mesmo valor
+  // histórico do MVP.
+  cfopDevolucaoInterno       String?
+  cfopDevolucaoInterestadual String?
+
+  isActive Boolean @default(true)
+
+  fiscalSettings FiscalSettings[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, nome])
+  @@index([tenantId, isActive])
+  @@map("naturezas_operacao")
+  @@schema("fiscal")
+}
+
+// Uma linha por TENTATIVA de emissão de nota para um pedido — reemissão após
+// ERRO cria uma nova linha (nunca sobrescreve uma tentativa anterior),
+// preservando o histórico completo. focusRef é o que vai no `?ref=` da API
+// Focus NFe: só pode ser reaproveitado enquanto a tentativa anterior não foi
+// autorizada (ver domain/fiscal-invoice.entity.ts, canEmit).
+model FiscalInvoice {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Referência SOLTA (não FK) para orders.Order — schemas diferentes, mesmo
+  // padrão de PurchaseOrder.supplierId.
+  orderId String
+
+  focusRef String @unique
+
+  status      FiscalInvoiceStatus @default(PENDENTE)
+  environment FiscalEnvironment
+
+  // Snapshot do destinatário NO MOMENTO DA EMISSÃO — nunca reconsultado
+  // depois. Um documento fiscal autorizado é imutável; se o pedido mudar de
+  // endereço depois, isso NUNCA deveria alterar uma nota já emitida.
+  // destEndereco: { logradouro, numero, bairro, municipio, uf, cep, pais }.
+  destNome      String
+  destDocumento String // CPF ou CNPJ, sem formatação
+  destEndereco  Json
+  destTelefone  String?
+
+  // Preenchidos só quando status = AUTORIZADA (resposta da consulta/gatilho
+  // Focus NFe).
+  nfeNumber String?
+  nfeSeries String?
+  accessKey String? // chave de acesso da NFe (44 dígitos)
+  xmlUrl    String?
+  danfeUrl  String?
+
+  errorCode    String?
+  errorMessage String?
+
+  cancelReason String?
+  requestedAt  DateTime  @default(now())
+  authorizedAt DateTime?
+  cancelledAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, orderId])
+  @@index([tenantId, status])
+  @@map("fiscal_invoices")
+  @@schema("fiscal")
+}
+
+// Grupo G da NF-e ("Identificação do Intermediador da Transação", NT
+// 2020.006/Ajuste SINIEF 21-22/2020) — obrigatório em toda venda feita
+// através de marketplace (Mercado Livre, Shopee, Amazon, Magalu, TikTok
+// Shop). Benchmark Bling (29/07/2026, ver
+// docs/bling-erp-benchmark-analysis.md, seção 1.4): o Kyneti emitia NF-e para
+// pedido de marketplace SEM esse grupo — gap crítico de compliance, não só
+// "recurso faltando".
+//
+// Uma linha por CANAL (não um campo solto em FiscalSettings) porque o CNPJ
+// do intermediador é diferente por canal (o CNPJ é da PLATAFORMA — Mercado
+// Livre, Shopee etc. — nunca do vendedor) e porque nem todo canal é de fato
+// um "intermediador" no sentido da NT (ex.: Nuvemshop é a loja própria do
+// vendedor, não um marketplace de terceiros — por isso não tem uma linha
+// aqui a menos que o tenant configure explicitamente).
+//
+// AVISO DE HONESTIDADE: o Kyneti NÃO pré-preenche o CNPJ de nenhum
+// marketplace. CNPJs de intermediador circulam em bases públicas (ex.:
+// Mercado Livre é comumente associado ao CNPJ da EBAZAR.COM.BR LTDA,
+// 03.007.331/0001-41), mas nenhuma fonte oficial do próprio marketplace
+// confirma isso como "o CNPJ certo para o campo intermediador" — o tenant (ou
+// seu contador) preenche esse valor conscientemente. idCadIntTran é o
+// login/identificador do PRÓPRIO vendedor dentro daquele marketplace (não é
+// um valor global do canal, é por tenant).
+model FiscalMarketplaceIntermediary {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // Mesmo vocabulário de Order.channelCode/OrderFiscalData.channelCode —
+  // string livre, não enum, canal novo é dado.
+  channelCode String
+
+  cnpj          String // CNPJ do intermediador (a PLATAFORMA), só dígitos
+  idCadIntTran  String // identificador do vendedor cadastrado na plataforma (ex.: nickname/login no marketplace)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, channelCode])
+  @@map("fiscal_marketplace_intermediaries")
+  @@schema("fiscal")
+}
+
+// ============================================================================
+// Publicar anúncio novo em marketplace (Fase 4, benchmark Tiny ERP,
+// 28/07/2026 — ver docs/tiny-erp-benchmark-analysis.md, seção 1.7, e
+// docs/marketplace-listing-publish-architecture.md). Bounded context PRÓPRIO
+// porque o dado aqui é específico de CANAL (categoria do ML != categoria da
+// Shopee para o mesmo produto), diferente de catalog.ProductCategory (que é
+// a árvore interna, uma só, compartilhada entre canais).
+// ============================================================================
+
+enum ListingPublicationStatus {
+  PENDENTE // criado, ainda não confirmado pelo canal (não deveria durar — createListing é síncrono)
+  PUBLICADO
+  ERRO
+
+  @@schema("marketplace_publishing")
+}
+
+// Mapeia UMA categoria interna (catalog.ProductCategory) para a categoria de
+// UM canal específico — espelha "mapear categorias do e-commerce" do
+// Tiny/Olist. categoryId é referência SOLTA (não FK — catalog é outro
+// schema Postgres, mesmo padrão de PurchaseOrder.supplierId/FiscalInvoice.orderId).
+model ChannelCategoryMapping {
+  id       String @id @default(uuid())
+  tenantId String
+
+  categoryId String // solto, aponta para catalog.ProductCategory.id
+
+  marketplaceCode String // "MERCADO_LIVRE" | "SHOPEE" — string, não enum, mesmo racional de ChannelListing.channelCode
+
+  externalCategoryId   String // ex.: category_id do Mercado Livre (MLBxxxx) ou category_id da Shopee
+  externalCategoryName String // só para exibição na UI — nunca usado para decidir nada
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, categoryId, marketplaceCode])
+  @@index([tenantId, marketplaceCode])
+  @@map("channel_category_mappings")
+  @@schema("marketplace_publishing")
+}
+
+// Uma linha por TENTATIVA de publicação (mesmo padrão append-only de
+// FiscalInvoice) — nunca sobrescrita. productId/skuCode são referência
+// SOLTA + denormalizada (o produto pode mudar ou ser removido depois; a
+// trilha de "o que foi enviado para o canal" precisa sobreviver a isso,
+// mesmo racional de ProductAuditLog.skuCode).
+model ListingPublication {
+  id       String @id @default(uuid())
+  tenantId String
+
+  productId String
+  skuCode   String
+
+  marketplaceCode String
+
+  status ListingPublicationStatus @default(PENDENTE)
+
+  externalListingId String? // id do anúncio criado no canal — preenchido só quando status = PUBLICADO
+
+  // Snapshot exato do payload enviado ao canal (categoria + atributos +
+  // preço + etc no momento da publicação) — auditoria/depuração, nunca
+  // relido pelo domínio para decidir nada.
+  requestPayload Json
+
+  errorMessage String?
+
+  requestedAt DateTime  @default(now())
+  publishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, productId])
+  @@index([tenantId, marketplaceCode, status])
+  @@map("listing_publications")
+  @@schema("marketplace_publishing")
+}
+
+// ============================================================================
+// Ordens de Produção (Projeto Estruturante 1, benchmark Bling ERP,
+// 29/07/2026) — ver docs/bling-erp-benchmark-analysis.md, seção 1.1, e
+// docs/production-architecture.md. Schema Postgres PRÓPRIO: "produzir" é um
+// processo distinto de cadastro de produto (catalog.ProductStructureComponent,
+// a BOM) ou de movimentação de estoque (logistics_fulfillment) — workflow
+// próprio, mesmo racional de procurement (Fase 1). warehouseIds são
+// referências SOLTAS a logistics_fulfillment.Warehouse (schema diferente,
+// mesmo padrão de PurchaseOrder.warehouseId).
+// ============================================================================
+
+enum ProductionOrderStatus {
+  RASCUNHO // criado, componentes resolvidos via snapshot da BOM — nenhum estoque se moveu ainda
+  EM_ANDAMENTO // produção em curso (uso operacional/informativo, sem efeito de estoque)
+  CONCLUIDA // TERMINAL — já debitou componentes e creditou o produto acabado (Hub de Provas, PRODUCTION_OUTPUT)
+  CANCELADA // TERMINAL — nunca chegou a concluir, nenhum estoque foi movido
+
+  @@schema("production")
+}
+
+model ProductionOrder {
+  id       String                @id @default(uuid())
+  tenantId String
+  status   ProductionOrderStatus @default(RASCUNHO)
+
+  parentSkuCode String // produto acabado a ser produzido (o kit, Product.isKit = true)
+  quantity      Int // quantidade do produto acabado a produzir — sempre inteira e positiva
+
+  sourceWarehouseId      String // depósito de onde os componentes SAEM (débito)
+  destinationWarehouseId String // depósito onde o produto acabado ENTRA (crédito) — pode ser igual ao source
+
+  notes String?
+
+  // Preenchido só por ProductionOrderService.conclude() — nunca setado em
+  // create()/start(), mesmo racional de PurchaseOrder.receivedAt.
+  concludedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  components ProductionOrderComponent[]
+
+  @@index([tenantId, status])
+  @@map("production_orders")
+  @@schema("production")
+}
+
+// Snapshot da BOM (catalog.ProductStructureComponent) no momento da criação
+// da ordem — mesmo racional de StockMovementAuditEventItem.expectedQuantity/
+// OrderItem.costPriceUsed: se a estrutura do produto mudar depois, uma ordem
+// já criada não é afetada. totalQuantity já vem pré-calculado
+// (quantityPerUnit * ProductionOrder.quantity) para não recalcular na hora
+// de montar as linhas de débito na conclusão.
+model ProductionOrderComponent {
+  id       String @id @default(uuid())
+  // Denormalizado (não só via ProductionOrder.tenantId) — RLS precisa
+  // filtrar esta tabela diretamente, mesmo padrão de PurchaseOrderItem.
+  tenantId String
+
+  productionOrderId String
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  componentSkuCode String
+  quantityPerUnit  Decimal @db.Decimal(12, 3)
+  totalQuantity    Decimal @db.Decimal(12, 3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productionOrderId, componentSkuCode])
+  @@index([tenantId, productionOrderId])
+  @@map("production_order_components")
+  @@schema("production")
+}
+
+// ============================================================================
+// Vendedores + Comissão (Projeto Estruturante 3, benchmark Bling ERP,
+// 29/07/2026). Ver docs/sellers-architecture.md.
+//
+// Bounded context PRÓPRIO (schema Postgres "sellers"), mesmo racional de
+// production/procurement: "vendedor + comissão" é um conceito distinto de
+// cadastro de produto ou de pedido, mesmo cruzando os dois. Consumido pelo
+// Orders (OrderItem.vendedorId, CommissionService) via porta compartilhada
+// SELLER_READER (shared/contracts) — nunca a classe concreta.
+// ============================================================================
+model Vendedor {
+  id       String @id @default(uuid())
+  tenantId String
+
+  name  String
+  email String?
+
+  // Alíquota padrão de comissão deste vendedor (%) — snapshot capturado em
+  // OrderItem.comissaoAliquotaPct no momento da atribuição (ver
+  // CommissionService.assignVendedor) — mudar a alíquota aqui depois NUNCA
+  // recalcula itens já atribuídos, mesmo racional de ProductionOrderComponent
+  // (snapshot da BOM) e OrderItem.costPrice (snapshot do custo).
+  aliquotaComissaoPct Decimal @db.Decimal(5, 2)
+
+  // Desconto máximo (%) que este vendedor pode conceder numa venda —
+  // informativo nesta rodada (gap documentado em
+  // docs/sellers-architecture.md): nenhum fluxo de venda/checkout valida
+  // isso ainda.
+  descontoMaximoPct Decimal? @db.Decimal(5, 2)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@map("vendedores")
+  @@schema("sellers")
 }

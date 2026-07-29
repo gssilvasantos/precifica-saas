@@ -35,6 +35,12 @@ describe('PricingDecisionService (modo operação)', () => {
     packagingId: null,
     isKit: false,
     mapPrice: null,
+    ncm: null,
+    fiscalOriginCode: null,
+    cest: null,
+    categoryId: null,
+    photoUrls: [],
+    weightKg: 1,
   };
 
   const opportunity: CompetitiveOpportunitySummary = {

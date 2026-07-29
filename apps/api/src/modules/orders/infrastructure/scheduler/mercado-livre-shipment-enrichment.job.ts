@@ -130,15 +130,16 @@ export class MercadoLivreShipmentEnrichmentJob {
     if (!raw) return;
 
     // Só marca shippingStatusCheckedAt quando o status resultante SAIU de
-    // PREPARANDO_ENVIO (ENVIADO/ENTREGUE/CANCELADO) — confirmação real e
-    // definitiva, não precisa mais ser checado. Se o Mercado Livre já
-    // respondeu mas o envio ainda está em preparação (ex.: "handling"/
-    // "ready_to_ship"), deixamos shippingStatusCheckedAt null de propósito:
-    // o pedido continua na fila e será checado de novo depois, até o envio
-    // de fato progredir — do contrário ficaria preso em PREPARANDO_ENVIO
-    // pra sempre depois de UMA checagem, reproduzindo o bug original que
-    // esta reestruturação existe pra resolver.
-    const stillPreparing = raw.status === 'PREPARANDO_ENVIO' || raw.status === 'EM_ABERTO';
+    // PREPARANDO_ENVIO/APROVADO (ENVIADO/ENTREGUE/NAO_ENTREGUE/CANCELADO) —
+    // confirmação real e definitiva, não precisa mais ser checado. Se o
+    // Mercado Livre já respondeu mas o envio ainda está em preparação (ex.:
+    // "handling"/"ready_to_ship") ou nem começou (ex.: "pending" ->
+    // APROVADO, benchmark Tiny ERP seção 2.2), deixamos shippingStatusCheckedAt
+    // null de propósito: o pedido continua na fila e será checado de novo
+    // depois, até o envio de fato progredir — do contrário ficaria preso em
+    // PREPARANDO_ENVIO pra sempre depois de UMA checagem, reproduzindo o bug
+    // original que esta reestruturação existe pra resolver.
+    const stillPreparing = raw.status === 'PREPARANDO_ENVIO' || raw.status === 'EM_ABERTO' || raw.status === 'APROVADO';
     await this.orchestrator.upsertAndEmit(
       tenantId,
       MERCADO_LIVRE_CHANNEL_CODE,

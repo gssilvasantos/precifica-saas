@@ -38,7 +38,7 @@ function buildOrder(overrides: Partial<Order> = {}): Order {
     isDemo: false,
     shippingStatusCheckedAt: null,
     rawPayload: null,
-    items: [{ id: 'item-1', orderId: 'order-1', skuCode: 'SKU-1', externalSku: 'EXT-SKU-1', productName: 'Produto', quantity: 1, unitPrice: 100, totalPrice: 100, taxAmount: null, costPrice: null }],
+    items: [{ id: 'item-1', orderId: 'order-1', skuCode: 'SKU-1', externalSku: 'EXT-SKU-1', productName: 'Produto', quantity: 1, unitPrice: 100, totalPrice: 100, taxAmount: null, costPrice: null, vendedorId: null, comissaoAliquotaPct: null, comissaoValor: null, comissaoPagaEm: null }],
     ...overrides,
   };
 }
@@ -88,6 +88,10 @@ describe('OrderSyncOrchestrator', () => {
       // do backfill sobrescreve isto para `false`.
       hasAnyOrderForChannel: jest.fn().mockResolvedValue(true),
       findPendingShipmentEnrichment: jest.fn().mockResolvedValue([]),
+      findItemForCommission: jest.fn(),
+      assignVendedorToItem: jest.fn(),
+      findCommissionLines: jest.fn().mockResolvedValue([]),
+      markCommissionsPaid: jest.fn().mockResolvedValue(0),
     };
 
     const syncLogs: jest.Mocked<ProviderSyncLogRepository> = {
@@ -227,6 +231,23 @@ describe('OrderSyncOrchestrator', () => {
     await orchestrator.syncProvider('NUVEMSHOP_ORDERS');
 
     expect(emitSpy).toHaveBeenCalledWith('orders.order-cancelled', expect.objectContaining({ externalOrderId: 'EXT-1' }));
+  });
+
+  it('emite ORDER_EVENTS.DELIVERY_FAILED + alerta WARNING quando o pedido transiciona para NAO_ENTREGUE', async () => {
+    const provider = buildProvider({ fetchOrders: jest.fn().mockResolvedValue([buildRawOrder({ status: 'NAO_ENTREGUE' })]) });
+    const { orchestrator, emitSpy, orderRepository, alerts } = buildOrchestrator({ provider, previousStatus: 'ENVIADO' });
+    orderRepository.upsert.mockResolvedValue({
+      order: buildOrder({ status: 'NAO_ENTREGUE' }),
+      isNew: false,
+      previousStatus: 'ENVIADO',
+    });
+
+    await orchestrator.syncProvider('NUVEMSHOP_ORDERS');
+
+    expect(emitSpy).toHaveBeenCalledWith('orders.delivery-failed', expect.objectContaining({ externalOrderId: 'EXT-1' }));
+    expect(alerts.emitAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'OrderSyncOrchestrator', severity: 'WARNING', message: expect.stringContaining('NAO_ENTREGUE') }),
+    );
   });
 
   it('uma falha ao processar um pedido individual não impede os demais de serem processados', async () => {

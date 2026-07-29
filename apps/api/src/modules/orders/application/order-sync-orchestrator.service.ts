@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { OrderProviderRegistry } from './order-provider-registry.service';
 import { ORDER_REPOSITORY, OrderRepository } from './ports/order-repository.port';
 import { OrderUpsertData } from '../domain/order.entity';
-import { ORDER_EVENTS, OrderCancelledEvent, OrderPaidEvent, OrderReadyForFulfillmentEvent } from '../domain/order-events';
+import { ORDER_EVENTS, OrderCancelledEvent, OrderDeliveryFailedEvent, OrderPaidEvent, OrderReadyForFulfillmentEvent } from '../domain/order-events';
 import { determineOrderTransitionEvents } from '../domain/order-transition-events';
 import {
   PROVIDER_SYNC_LOG_REPOSITORY,
@@ -295,6 +295,27 @@ export class OrderSyncOrchestrator {
           skuCodes: result.order.items.map((i) => i.skuCode).filter((s): s is string => !!s),
         };
         this.events.emit(ORDER_EVENTS.READY_FOR_FULFILLMENT, payload);
+      }
+      if (event === 'DELIVERY_FAILED') {
+        const payload: OrderDeliveryFailedEvent = {
+          tenantId,
+          orderId: result.order.id,
+          channelCode,
+          externalOrderId: result.order.externalOrderId,
+        };
+        this.events.emit(ORDER_EVENTS.DELIVERY_FAILED, payload);
+        // Benchmark Tiny ERP (28/07/2026, seção 2.2) — entrega falhada é um
+        // problema logístico real que precisa chamar atenção operacional,
+        // não só uma mudança de status silenciosa na worklist. Mesmo
+        // AlertService/severidade já usados para falha de sync de pedido
+        // individual (ver syncTenant acima) — WARNING porque não interrompe
+        // nada, só precisa de uma decisão humana (reenviar? reembolsar?).
+        this.alerts.emitAlert({
+          source: 'OrderSyncOrchestrator',
+          severity: 'WARNING',
+          message: `Entrega do pedido ${result.order.externalOrderId} falhou (NAO_ENTREGUE)`,
+          context: { tenantId, channelCode, orderId: result.order.id, externalOrderId: result.order.externalOrderId },
+        });
       }
     }
   }

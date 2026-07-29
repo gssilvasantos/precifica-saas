@@ -1,5 +1,6 @@
 import {
   AppDataMode,
+  CommissionLine,
   Order,
   OrderListFilters,
   OrderListPage,
@@ -70,6 +71,40 @@ export interface OrderRepository {
   // pra sempre atrás de pedidos novos que chegam a cada sync — eventualmente
   // todo pedido pendente é alcançado.
   findPendingShipmentEnrichment(tenantId: string, channelCode: string, limit: number): Promise<Order[]>;
+
+  // Vendedores + Comissão (Projeto Estruturante 3, benchmark Bling ERP,
+  // 29/07/2026) — lookup mínimo (id + totalPrice) usado por
+  // CommissionService.assignVendedor ANTES de calcular a comissão (a base
+  // sobre a qual a alíquota incide é o totalPrice do item).
+  findItemForCommission(tenantId: string, orderId: string, itemId: string): Promise<{ id: string; totalPrice: number } | null>;
+
+  // Grava o snapshot de atribuição de vendedor num item
+  // ESPECÍFICO (orderId+itemId), validando implicitamente que o item
+  // pertence ao tenant (via join com orders na cláusula WHERE, mesmo
+  // racional de RLS por linha). Usado por CommissionService.assignVendedor.
+  assignVendedorToItem(
+    tenantId: string,
+    orderId: string,
+    itemId: string,
+    data: { vendedorId: string; comissaoAliquotaPct: number; comissaoValor: number },
+  ): Promise<{ id: string; totalPrice: number } | null>;
+
+  // Linhas de comissão de UM vendedor, opcionalmente filtradas por período e
+  // por "ainda não paga" (onlyPending) — usado tanto pelo relatório de
+  // leitura quanto por CommissionService.generatePayout (sempre com
+  // onlyPending=true ali, para nunca somar uma comissão já incluída numa
+  // conta a pagar anterior).
+  findCommissionLines(
+    tenantId: string,
+    vendedorId: string,
+    options?: { dateFrom?: Date; dateTo?: Date; onlyPending?: boolean },
+  ): Promise<CommissionLine[]>;
+
+  // Marca em bloco as comissões geradas como pagas (comissaoPagaEm = paidAt)
+  // — chamado só depois que a AccountsPayable correspondente já foi criada
+  // com sucesso (mesmo racional de nunca marcar PurchaseOrder.ATENDIDO antes
+  // de confirmar as duas pontas). Devolve a contagem de itens atualizados.
+  markCommissionsPaid(tenantId: string, orderItemIds: string[], paidAt: Date): Promise<number>;
 }
 
 export const ORDER_REPOSITORY = Symbol('ORDER_REPOSITORY');

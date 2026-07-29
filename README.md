@@ -1002,3 +1002,137 @@ Testes: `shopee-order-status.mapper.spec.ts`, `shopee-order-normalizer.spec.ts`,
 **Nota de verificação:** `D:\Projeto SAAS\precifica-saas` não pôde ser montado no sandbox de shell desta sessão — todo o código acima foi revisado estaticamente (linha a linha, contra os contratos/interfaces existentes), mas `tsc --noEmit`/`jest` não puderam ser executados de fato. Mesma limitação já registrada na task #255; rodar a suíte de testes assim que houver acesso a um shell com o projeto montado é o próximo passo antes de considerar isto validado.
 
 **Pendente:** endpoint de comissão real da Shopee (`/api/v2/payment/get_escrow_detail`) para popular `feeAmount`/`netAmount` de verdade — hoje `feeAmount` fica em `0`. Primeiro sync real do usuário (clicar em "Sincronizar agora" no canal Shopee, tela de Pedidos) é quem confirma os formatos assumidos nesta sprint.
+
+## Benchmark Tiny ERP — Fase 4: Publicar anúncio novo em marketplace (29/07/2026)
+
+Achado original: a API v2 legada do Tiny expõe um webhook de envio de produto para o marketplace; até esta fase, todo `MarketplaceProvider` do Kyneti era read-only quanto a anúncios (só casava SKU com anúncios já existentes). Decisão de UX, a pedido explícito do usuário: espelhar como o próprio ERP Olist resolve o mapeamento de categoria/atributo hoje ("acho o mapeamento deles perfeito, muito intuitivo"), em vez de inventar um modelo novo. Desenho completo em `docs/marketplace-listing-publish-architecture.md`.
+
+**Modelo de categoria (módulo `catalog`), três peças deliberadamente separadas:** `ProductCategory` (árvore própria, profundidade arbitrária, self-relation — diferente da hierarquia de 1 nível de `Product.parentProductId` e do texto livre de `Product.internalCategory`); `CategoryAttribute` (atributo por CATEGORIA, não por produto, com `extendToChildren` para herança raiz→folha); `resolveEffectiveAttributes` (domínio puro, resolve a cadeia e aplica "a categoria mais específica vence"). `ProductCategoryService` expõe CRUD + `PRODUCT_CATEGORY_READER` (porta compartilhada).
+
+**Duas novas capacidades de provider:** `CategoryDiscoveryCapableProvider` (`searchCategories`/`getCategoryAttributes`, consultado ao configurar o mapeamento e para revalidar atributos obrigatórios no momento de publicar) e `ListingCreateCapableProvider` (`createListing`, só chamado depois do gate `canPublish`). Implementadas juntas em `MercadoLivreListingProvider` (`domain_discovery/search` + `GET /categories/:id/attributes` + `POST /items`) e `ShopeeListingProvider` (`get_category`/`get_attributes` + `media_space/upload_image` + `add_item` — a Shopee não tem busca nativa, então o filtro por substring roda no lado do Kyneti). **Aviso de honestidade:** nenhum dos dois foi exercitado contra uma chamada real, mesmo racional das demais integrações desta base.
+
+**Novo módulo `marketplace-publishing`:** `ChannelCategoryMappingService` (vínculo categoria interna ↔ categoria do canal, um por categoria+canal, nunca a categoria interna enviada direto ao marketplace) e `ListingPublicationService.publish` — gate `canPublish` (nome, foto, peso, categoria mapeada, todo atributo obrigatório do canal presente na mescla `effectiveAttributes`+`overrideAttributes`) roda ANTES de criar qualquer registro; sucesso ou falha vira uma linha nova em `ListingPublication` (append-only-por-tentativa, mesmo padrão do `FiscalInvoice` da Fase 3, `PENDENTE -> (PUBLICADO | ERRO)`); publicação confirmada linka o SKU em `ChannelListing` via novo `CHANNEL_LISTING_WRITER` (porta irmã de escrita de `CHANNEL_LISTING_READER`, Interface Segregation). **Safety Lock:** publicar é sempre ação manual (`POST /marketplace-publishing/listings/publish`, guard `ADMIN`/`PRICING_EDITOR`) — nunca scheduler, mesmo racional do `AdsActionDispatcherService`.
+
+**Groundwork necessário e não planejado:** `Product.categoryId` (já existia no schema desde a Fase 4/task #342, mas nunca exposto) propagado por `ProductsService`/DTOs/`ProductCatalogSummary`, com validação de posse por tenant contra `PRODUCT_CATEGORY_REPOSITORY`.
+
+**Endpoints:** `GET/POST/DELETE /marketplace-publishing/category-mappings` (+ `search`/`attributes`), `POST /marketplace-publishing/listings/publish`, `GET /marketplace-publishing/listings`.
+
+Testes: `channel-category-mapping.service.spec.ts`, `listing-publication.service.spec.ts` (gate rejeita antes de criar tentativa, sucesso marca PUBLICADO e vincula ChannelListing, recusa do provider e exceção de rede marcam ERRO), `mercado-livre-listing.provider.spec.ts`, `shopee-listing.provider.spec.ts` (inclui atributo sem correspondência sendo descartado, nunca falha a publicação por isso).
+
+**Gaps conhecidos:** Amazon/Magalu/TikTok sem provider ainda (só registrar em `LISTING_CAPABLE_PROVIDERS`); frontend de configuração/publicação ainda não construído; variações (Fase 2) publicadas hoje como anúncios independentes, sem vínculo de produto pai do lado do canal.
+
+**Nota de verificação:** revisão estática linha a linha contra os contratos existentes; `tsc --noEmit`/`jest` a rodar no ambiente do usuário (ver comandos abaixo) — mesma limitação de sandbox já registrada nas fases anteriores.
+
+## Benchmark Tiny ERP — Fase 5: Expedição em lote (29/07/2026)
+
+Achado original: a tela "Expedição" do ERP Olist agrupa pedidos já conferidos e gera etiqueta em lote, com um campo "Forma de envio" único que mistura nativo do marketplace, agregador/transportadora avulsa e opções puramente organizacionais (usuário confirmou via screenshot da própria tela). Decisão de escopo, a pedido explícito do usuário: *"Deve conter etiqueta via os marketplaces, cada marketplace tem a sua... bem como deve ter outras opções para gerar etiquetas avulsas como melhor envio, olist envios, frenet, correios."* Desenho completo em `docs/dispatch-batch-architecture.md`.
+
+**Por que estender `logistics_fulfillment`, não um módulo novo:** o lote agrupa pedidos que já passaram pelo Pick & Pack (`StockMovementAuditEvent` `RETAIL_SHIPMENT` já `APROVADO`) — mesmo racional de como a Ordem de Compra (Fase 1) estendeu o mesmo Hub de Provas com `PURCHASE_RECEIPT` em vez de um caminho de escrita paralelo. `DispatchBatch`/`DispatchBatchOrder` novos; `formaEnvio` é `String` livre (não um enum fechado) — a tradução para "o que fazer" fica inteiramente no domínio (`resolveLabelStrategy`, função pura, nunca lança, cai em `NONE` para qualquer valor desconhecido).
+
+**Dois caminhos de etiqueta:** `NATIVE_MARKETPLACE` (Mercado Envios/Shopee Envios) via nova capacidade `ShippingLabelCapableProvider` anexada às classes de provider já existentes (`MercadoLivreOrderProvider`, `ShopeeOrderProvider`), resolvida por `OrderProviderRegistry.findByMarketplaceCode(...).find(isShippingLabelCapable)`; e `GENERIC_FREIGHT` (Correios/Melhor Envio/Frenet) via módulo novo `freight-shipping`, com conexão por provider (`FreightProviderConnection`, uma linha por provider+tenant) e `FreightProviderRegistry`. **Aviso de honestidade:** Melhor Envio e Correios construídos só a partir de documentação pública, nunca exercitados contra conta real; Frenet é fundamentalmente um agregador de cotação — `FrenetFreightProvider.generateLabel` sempre devolve `success: false` com a melhor cotação na mensagem, nunca finge automatizar uma emissão que a API não expõe. `TRANSPORTADORA`/`RETIRAR_PESSOALMENTE`/`RETIRADO_NO_LOCAL`/`MOTOBOY` e `OLIST_ENVIOS`/`NUVEM_ENVIO`/`TIKTOK_SHIPPING`/`MAGALU_ENTREGAS`/`AMAZON_DBA` (sem API pública de etiqueta conhecida) resolvem para `NONE` — lote conclui sem etiqueta automática.
+
+**`DispatchBatchService`:** orquestra os gates puros do domínio (`canAddOrderToBatch`, `canIncludeInDispatchBatch`, `canGenerateLabelForOrder`, `canConcludeBatch`, `canCancelBatch`) e nunca lança em falha de provider — `generateLabel` sempre grava `markError`/`markLabeled`, permitindo retry sem perder o resto do lote. Nenhum canal normaliza endereço estruturado do destinatário hoje (mesmo gap já documentado para a NF-e), então a etiqueta avulsa exige `recipientAddress`+`packageWeightKg` informados manualmente por quem aciona. **Safety Lock:** gerar etiqueta e concluir/cancelar o lote são sempre ações manuais explícitas, nunca scheduler.
+
+**Endpoints:** `GET/POST /logistics-fulfillment/dispatch-batches` (+ `GET :id`), `POST/DELETE .../orders(/:batchOrderId)`, `POST .../orders/:batchOrderId/generate-label`, `POST .../conclude`, `POST .../cancel`; `GET/POST/DELETE /freight-shipping/connections`.
+
+**Groundwork corrigido nesta fase:** a migração Prisma da Fase 4 (`marketplace_publishing`, `catalog.product_categories`/`category_attributes`) existia só no `schema.prisma`, sem arquivo de migração correspondente no repositório — corrigido com uma migração retroativa idempotente antes de iniciar a Fase 5.
+
+Testes: `dispatch-batch.spec.ts` (domínio — estratégia + todos os gates), `dispatch-batch.service.spec.ts` (orquestração dos dois caminhos), `mercado-livre-order.provider.spec.ts`/`shopee-order.provider.spec.ts` (`getShippingLabel`), `melhor-envio-freight.provider.spec.ts`/`correios-freight.provider.spec.ts`/`frenet-freight.provider.spec.ts`.
+
+**Gaps conhecidos:** Olist Envios/Nuvem Envio/TikTok Shipping/Magalu Entregas/Amazon DBA sem automação (organizacional); Frenet quote-only por natureza do serviço; Melhor Envio/Correios pendentes de handshake real; endereço estruturado do destinatário ainda não normalizado em nenhum canal; frontend de expedição em lote ainda não construído.
+
+**Nota de verificação:** revisão estática linha a linha contra os contratos existentes; `tsc --noEmit`/`jest` a rodar no ambiente do usuário (ver comandos abaixo) — mesma limitação de sandbox já registrada nas fases anteriores.
+
+## Benchmark Bling ERP — parecer técnico + Quick Wins 1-7 (29/07/2026)
+
+Análise do `API Bling.json` (162 rotas, 407 schemas) contra o estado real do Kyneti — `docs/bling-erp-benchmark-analysis.md`. Mesma metodologia do benchmark Tiny ERP (Absorver/Aperfeiçoar/Descartar/Roadmap). Os 7 Quick Wins do roadmap, todos verificados (`tsc --noEmit` limpo + testes verdes no ambiente do usuário):
+
+1. **Intermediador na NF-e** (compliance NT 2020.006) — Grupo G (`indIntermed`/`infIntermed`) no payload da Focus NFe, `FiscalMarketplaceIntermediary` (config por canal).
+2. **CEST no `Product`** — campo novo, mesmo padrão de `ncm`/`gtin`.
+3. **`saldoFisico` vs `saldoVirtual`** por depósito — saldo reservado (pedidos em picking) separado do saldo livre para vender.
+4. **Baixa de conta com `juros`/`desconto`/`tarifa`** — `AccountsPayable.markPaid` aceita valor de baixa diferente do valor original.
+5. **Geração automática de combinações de variação** — `POST /products/:id/variants/generate-combinations`, cartesian product da grade de atributos.
+6. **`avisoRecebimento`/`maoPropria`/`valorDeclarado`** na etiqueta de expedição (Fase 5) — Correios (`servicoAdicional`) e Melhor Envio (`receipt`/`own_hand`).
+7. **CFOP de devolução/complementar** (`finalidade` da NF-e) — `NfeFinalidade` (Normal/Complementar/Ajuste/Devolução), CFOP 5202/6202 para devolução, `documentoReferenciado`/`notas_referenciadas`.
+
+Descartado deliberadamente (seção 3 do parecer): motor de FSM genérico (Situações/Transições), Contratos (assinatura recorrente), NFS-e, Homologação como entidade exposta, taxonomia de produto redundante, Propostas Comerciais, Borderôs, campos de nicho (armamento/combustível), multi-filial — nenhum com demanda real do usuário hoje.
+
+## Projeto Estruturante 1 — BOM real + Ordens de Produção (benchmark Bling, 29/07/2026)
+
+O gap mais crítico do benchmark (seção 1.1): `Product.isKit` era só decorativo (herdava embalagem/margem, nunca baixava estoque de verdade). Ver `docs/production-architecture.md` para o desenho completo.
+
+**BOM** (`catalog.ProductStructureComponent`, novo): composição do produto kit — `parentSkuCode`/`componentSkuCode`/`quantity` (Decimal, aceita fração). CRUD via `ProductStructureService`, endpoints `GET/PATCH /products/:id/structure`.
+
+**Ordens de Produção** (schema Postgres novo `production`): workflow `RASCUNHO -> EM_ANDAMENTO -> CONCLUIDA/CANCELADA`. Ao criar, resolve um SNAPSHOT dos componentes exigidos (BOM × quantidade a produzir) — congelado, nunca recalculado se a BOM mudar depois. Ao concluir, estende o Hub de Provas (`logistics_fulfillment`) com um novo tipo de evento, `PRODUCTION_OUTPUT` — debita os componentes na origem E credita o produto acabado no destino, no MESMO `auditEventId` (mesma regra de ouro estrutural do módulo). Prova de autorização é a própria ordem já confirmada pelo usuário, nunca mídia/NF (processo 100% interno).
+
+**Decisão de escopo deliberada:** esta rodada NÃO altera o fluxo de venda (`RETAIL_SHIPMENT`) para expandir um kit vendido em seus componentes automaticamente (o `lancamentoEstoque` do Bling) — risco alto num fluxo já em produção, sem demanda confirmada. O kit é produzido EXPLICITAMENTE via Ordem de Produção antes de vender, e depois é um produto normal com saldo próprio — mais alinhado à filosofia "ação explícita, nunca automática" (Safety Lock) já adotada no resto da plataforma.
+
+**Endpoints:** `POST/GET /production/orders` (+ `GET :id`), `PATCH .../iniciar`, `PATCH .../concluir`, `PATCH .../cancelar`.
+
+**Aplicação manual pendente** (schema novo, mesmo racional de `procurement`/`fiscal`): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_grant_app_runtime_production.sql` e `2026-07-29_apply_production_rls_only.sql`.
+
+**Gaps conhecidos:** sem UI no frontend ainda; BOM multinível não suportado (só bloqueia o kit compor a si mesmo); sem reserva de componente entre ordens concorrentes (validação de saldo suficiente ainda não existe).
+
+## Projeto Estruturante 2 — Produtos-Lotes / FEFO-validade (benchmark Bling, 29/07/2026)
+
+Gap do benchmark (seção 1.2): sem lote/validade, sellers de perecível (alimentício, cosmético, farmacêutico) não conseguiam rastrear qual unidade física vence primeiro nem bloquear a venda de lote vencido. Ver `docs/product-lots-architecture.md` para o desenho completo.
+
+**Cadastro** (`catalog.ProductLot`, novo): atributo do produto (`Product.controlaLote`, novo campo). Uma linha por `(tenantId, skuCode, lotCode)` — `dataValidade`, `diasPermitidoVenda` (janela de bloqueio ANTES do vencimento de fato, default 0), `status` (`ATIVO`/`INATIVO`). CRUD via `ProductLotService`, endpoints `GET/POST /products/:id/lots` + `PATCH .../lots/:lotCode/status`.
+
+**FEFO** (`selectLotsForConsumption`, domínio puro): dado o saldo disponível por lote e uma quantidade a consumir, aloca sempre do lote vendável que vence primeiro. Exposto como sugestão de leitura: `GET /logistics-fulfillment/lot-stock/.../fefo-suggestion?quantity=`.
+
+**Lançamento manual de lote** — extensão do Hub de Provas com `LOT_ADJUSTMENT` (Entrada/Saída/Balanço, espelha `LoteLancamentoDTO` do Bling): prova de autorização é a justificativa textual (`notes`), não mídia/NF (ajuste 100% interno). Endpoint `POST /logistics-fulfillment/lot-stock/adjustments`.
+
+**Decisão de escopo deliberada:** mesma filosofia "ação explícita, nunca automática" do Projeto Estruturante 1 — esta rodada NÃO altera os fluxos de venda/despacho/compra/produção existentes para debitar lote automaticamente. FEFO é só sugestão de leitura; a movimentação real do lote só acontece via o lançamento manual `LOT_ADJUSTMENT`.
+
+**Aplicação manual pendente** (tabela nova em schema existente, só RLS, sem grant separado): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_apply_product_lots_rls_only.sql` — depois de `npx prisma migrate deploy`.
+
+**Gaps conhecidos:** sem UI no frontend ainda; baixa automática de lote por FEFO nos fluxos de venda/despacho/compra/produção fora do escopo desta rodada; sem reserva de lote entre operações concorrentes.
+
+## Projeto Estruturante 3 — Vendedores + Comissão (benchmark Bling, 29/07/2026)
+
+Gap do benchmark (seção 1.3): sem vendedor interno nem comissão, todo pedido chegava só com o comprador do marketplace, sem forma de atribuir a venda a um vendedor da loja nem calcular/pagar comissão. Ver `docs/sellers-architecture.md` para o desenho completo.
+
+**Cadastro** (`sellers.Vendedor`, schema Postgres novo): `aliquotaComissaoPct` (obrigatório), `descontoMaximoPct` (opcional, informativo), `isActive`. CRUD via `VendedorService`, endpoints `POST/GET /sellers/vendedores` (+ `GET/PATCH :id`, `PATCH :id/active`).
+
+**Snapshot de comissão** — `OrderItem` ganhou 4 colunas novas (`vendedorId`/`comissaoAliquotaPct`/`comissaoValor`/`comissaoPagaEm`), mesmo padrão de `OrderItem.costPrice` (Etapa 19) e `ProductionOrderComponent` (Projeto Estruturante 1): a comissão é calculada e congelada no momento da atribuição — mudar a alíquota do vendedor depois nunca recalcula item já atribuído. Atribuição sempre manual: `POST /sellers/vendedores/:vendedorId/atribuir-item`.
+
+**Por que `CommissionService` mora em `sellers`, não em `orders`:** risco de ciclo de módulo identificado e evitado antes de rodar código — `FinancialIntelligenceModule` já importa `OrdersModule` (DRE); se `CommissionService` (precisa de Orders + de `ACCOUNTS_PAYABLE_WRITER` do Financial) morasse em Orders, fecharia o ciclo `Orders -> Financial -> Orders`. `SellersModule` importa os dois em vez disso (nenhum importa Sellers de volta), comunicando com Orders por uma porta nova estreita, `ORDER_COMMISSION_WRITER`.
+
+**Relatório + repasse:** `GET /sellers/vendedores/:vendedorId/comissoes` (filtra por `Order.orderedAt`, inclui pagas). `POST .../comissoes/gerar-conta-a-pagar` (Safety Lock, ADMIN): soma só comissão pendente do período, cria UMA `AccountsPayable` e só DEPOIS marca os itens como pagos — nunca marca pago antes da conta existir, mesmo padrão de `PurchaseOrderService.receive()`.
+
+**Aplicação manual pendente** (schema novo — grant E RLS; colunas novas em `orders.order_items` não precisam de nada, RLS é por linha): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_grant_app_runtime_sellers.sql` e `2026-07-29_apply_sellers_rls_only.sql`, nesta ordem, depois de `npx prisma migrate deploy`.
+
+**Gaps conhecidos:** sem UI no frontend ainda; sem split de comissão entre vendedores no mesmo item; atribuição sempre manual, sem vendedor-padrão automático; `descontoMaximoPct` informativo, sem gate de bloqueio em nenhum fluxo de venda; sem faixas progressivas de comissão.
+
+## Projeto Estruturante 4 — Naturezas de Operação / CFOP configurável (benchmark Bling, 29/07/2026)
+
+Gap do benchmark (seção 2, `NaturezasOperacoesDadosDTO`): `tax-code-resolver.ts` (`resolveCfop`) resolvia o CFOP de TODA NF-e com um único par hardcoded (5102/6102, revenda simples Simples Nacional), sem forma de o tenant configurar um CFOP diferente. Ver `docs/naturezas-operacao-architecture.md` para o desenho completo.
+
+**Cadastro** (`fiscal.NaturezaOperacao`, tabela nova em schema já existente): `nome` (único por tenant), `cfopVendaInterno`/`cfopVendaInterestadual` (obrigatórios), `cfopDevolucaoInterno`/`cfopDevolucaoInterestadual` (opcionais — ausentes caem no fallback hardcoded 5202/6202), `isActive`. CRUD via `NaturezaOperacaoService`, endpoints `POST/GET /fiscal/naturezas-operacao` (+ `GET/PATCH :id`, `PATCH :id/active`).
+
+**Domínio** — `resolveCfopFromNatureza` generaliza `resolveCfop`: mesma regra estrutural de antes (só finalidade DEVOLUCAO muda o CFOP), mas usando os códigos da natureza em vez dos hardcoded. `isValidNaturezaOperacaoCfopConfig` valida só o FORMATO (4 dígitos) — nunca a correção fiscal do valor, responsabilidade do tenant/contador (mesmo aviso de honestidade de `FiscalMarketplaceIntermediary`).
+
+**Resolução na emissão** (`FiscalInvoiceService.emit`): `naturezaOperacaoId` explícito no input > `FiscalSettings.defaultNaturezaOperacaoId` (natureza padrão do tenant, configurável em `PUT /fiscal/settings`) > ausência de ambos, cai no `resolveCfop` hardcoded histórico — **zero mudança de comportamento** para quem nunca configurou nada.
+
+**Decisão de escopo deliberada:** só o CFOP foi generalizado nesta rodada — CST de ICMS/PIS/COFINS e os campos `consumidor_final`/`indicador_inscricao_estadual_destinatario` do payload (hoje fixos, perfil B2C não-contribuinte) continuam como estão; generalizar a tributação inteira exigiria capturar mais dados do destinatário que `EmitInvoiceInput` não coleta hoje.
+
+**Aplicação manual pendente** (tabela nova em schema existente, só RLS, sem grant separado): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_apply_naturezas_operacao_rls_only.sql` — depois de `npx prisma migrate deploy`.
+
+**Gaps conhecidos:** sem UI no frontend ainda; CST de ICMS/PIS/COFINS continuam hardcoded; sem endpoint de "tributação calculada" completa (como o Bling expõe); sem fórmula de derivação venda→devolução (CFOP de devolução customizado é sempre explícito).
+
+## Projeto Estruturante 5 — Catálogo de Transportador/Serviço (benchmark Bling, 29/07/2026)
+
+Gap do benchmark: `DispatchBatch.formaEnvio` era (e continua sendo) uma string livre, traduzida por uma tabela hardcoded (`LABEL_STRATEGY_BY_FORMA_ENVIO`) só para decidir automação de etiqueta — sem cadastro real de transportador/serviço, sem estimativa de prazo, sem tolerância a variações de digitação. Ver `docs/carrier-catalog-architecture.md` para o desenho completo.
+
+**Decisão de escopo deliberada:** integração puramente ADITIVA — `DispatchBatch.formaEnvio` continua `String` livre e nenhum gate existente (`canAddOrderToBatch`, `canIncludeInDispatchBatch`, `canGenerateLabelForOrder`, `canConcludeBatch`, `canCancelBatch`) foi alterado; `DispatchBatchService.createBatch` manteve a assinatura original. O catálogo só ajuda a resolver qual string usar e a enriquecer um `formaEnvio` já gravado.
+
+**Cadastro** (`freight_shipping.Carrier` + `CarrierService`, tabelas novas em schema já existente): `Carrier.name` (único por tenant); `CarrierService.name` (único por transportador), `aliases: String[]` (variações de texto que também resolvem para o serviço), `estimativaEntregaDias` (opcional), `automationCode` (opcional — deve bater com um código que `resolveLabelStrategy` já conhece, nunca um valor livre), `isActive`. CRUD via `CarrierCatalogService`, endpoints `POST/GET /freight-shipping/carriers` (+ nested `.../services`).
+
+**Domínio** (`freight-shipping/domain/carrier-catalog.ts`) — `normalizeCarrierAlias` (tolerância a acento/caixa/espaço) + `matchCarrierServiceByFormaEnvio` (resolve formaEnvio → CarrierService cadastrado, por nome ou alias, ignorando inativos, `null` sem lançar se nada bater) + `resolveFormaEnvioForService` (fluxo inverso) + `isValidAutomationCode` (contra `KNOWN_FORMA_ENVIO_CODES`, exportado por `dispatch-batch.entity.ts`).
+
+**Integração com DispatchBatch:** `CreateDispatchBatchDto` ganhou `carrierServiceId` opcional (alternativa a `formaEnvio`, resolvido no controller ANTES de chamar `createBatch`); novo `GET /logistics-fulfillment/dispatch-batches/:id/carrier-match` enriquece um lote existente com o transportador/serviço correspondente ao seu `formaEnvio` já gravado.
+
+**Aplicação manual pendente** (tabelas novas em schema existente, só RLS, sem grant separado): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_apply_carrier_catalog_rls_only.sql` — depois de `npx prisma migrate deploy`.
+
+**Gaps conhecidos:** sem UI no frontend ainda; sem exclusão física (só `setActive`); `matchByFormaEnvio` varre todos os serviços ativos do tenant em memória (aceitável no volume esperado); sem sincronização automática de aliases a partir do canal de origem do pedido.

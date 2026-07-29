@@ -16,6 +16,14 @@ export const ORDER_EVENTS = {
   // conhecê-lo — ver docs/orders-architecture.md, seção 8. Nenhum
   // consumidor existe ainda.
   READY_FOR_FULFILLMENT: 'orders.ready-for-fulfillment',
+  // Benchmark Tiny ERP (28/07/2026, docs/tiny-erp-benchmark-analysis.md,
+  // seção 2.2) — entrega tentada e confirmada como falha (NAO_ENTREGUE).
+  // Consumido diretamente por OrderSyncOrchestrator para emitir um alerta
+  // operacional (mesmo AlertService já usado pra falha de sync) — não tem um
+  // listener em outro módulo ainda, mas fica registrado aqui pelo mesmo
+  // motivo dos demais: ponto de extensão único, sem acoplar quem dispara a
+  // quem eventualmente reagir.
+  DELIVERY_FAILED: 'orders.delivery-failed',
 } as const;
 
 export interface OrderPaidEvent {
@@ -46,4 +54,11 @@ export interface OrderReadyForFulfillmentEvent {
   channelCode: string;
   externalOrderId: string;
   skuCodes: string[]; // apenas os itens já resolvidos para um SKU interno
+}
+
+export interface OrderDeliveryFailedEvent {
+  tenantId: string;
+  orderId: string;
+  channelCode: string;
+  externalOrderId: string;
 }

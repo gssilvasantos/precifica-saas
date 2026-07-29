@@ -22,13 +22,24 @@ import { OrderStatus } from './order.entity';
 // específica do Mercado Livre) no repositório — é uma invariante razoável
 // para qualquer canal: nenhum e-commerce real "desenvia" ou "desentrega" um
 // pedido sozinho.
-const STAGE_RANK: Record<Exclude<OrderStatus, 'CANCELADO'>, number> = {
+const STAGE_RANK: Record<Exclude<OrderStatus, 'CANCELADO' | 'NAO_ENTREGUE'>, number> = {
   EM_ABERTO: 0,
-  PREPARANDO_ENVIO: 1,
-  FATURADO: 2,
-  ENVIADO: 3,
-  ENTREGUE: 4,
+  APROVADO: 1,
+  PREPARANDO_ENVIO: 2,
+  FATURADO: 3,
+  ENVIADO: 4,
+  ENTREGUE: 5,
 };
+
+// Benchmark Tiny ERP (28/07/2026, docs/tiny-erp-benchmark-analysis.md, seção
+// 2.2) — NAO_ENTREGUE não entra em STAGE_RANK: diferente dos demais
+// estágios, ele não representa "mais progresso", representa uma tentativa de
+// entrega que FALHOU. Só faz sentido chegar nele depois de despachado
+// (ENVIADO ou além) — e, diferente de CANCELADO, NÃO é terminal: uma
+// reentrega bem-sucedida ainda pode levar a ENTREGUE, e um novo envio pode
+// levar de volta a ENVIADO. Por isso NAO_ENTREGUE recebe um tratamento
+// próprio em vez de um rank fixo na escada linear.
+const NAO_ENTREGUE_MIN_RANK = STAGE_RANK.ENVIADO;
 
 export function resolveEffectiveStatus(previousStatus: OrderStatus | null, incomingStatus: OrderStatus): OrderStatus {
   if (previousStatus === null) return incomingStatus;
@@ -39,6 +50,23 @@ export function resolveEffectiveStatus(previousStatus: OrderStatus | null, incom
   // CANCELADO é terminal — uma resync não "descancela" um pedido sozinha
   // (o canal não modela isso como uma transição normal).
   if (previousStatus === 'CANCELADO') return previousStatus;
+
+  if (incomingStatus === 'NAO_ENTREGUE') {
+    if (previousStatus === 'NAO_ENTREGUE') return previousStatus;
+    // Sinal só é confiável a partir de ENVIADO — um "não entregue" antes
+    // disso seria incoerente (nunca chegou a ser despachado); nesse caso
+    // ignoramos e mantemos o estágio anterior, mesmo racional de não
+    // regredir usado no resto desta função.
+    return STAGE_RANK[previousStatus] >= NAO_ENTREGUE_MIN_RANK ? 'NAO_ENTREGUE' : previousStatus;
+  }
+
+  if (previousStatus === 'NAO_ENTREGUE') {
+    // Sai de NAO_ENTREGUE normalmente pra frente (reentrega -> ENVIADO de
+    // novo, ou confirmação direta de ENTREGUE) — nunca "regride" pra um
+    // estágio anterior a ENVIADO só porque uma resync incremental não trouxe
+    // informação nova de envio.
+    return STAGE_RANK[incomingStatus] >= NAO_ENTREGUE_MIN_RANK ? incomingStatus : previousStatus;
+  }
 
   return STAGE_RANK[incomingStatus] >= STAGE_RANK[previousStatus] ? incomingStatus : previousStatus;
 }

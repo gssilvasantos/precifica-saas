@@ -36,4 +36,9 @@ describe('determineOrderTransitionEvents', () => {
   it('EM_ABERTO -> CANCELADO nunca dispara PAID junto com CANCELLED', () => {
     expect(determineOrderTransitionEvents('EM_ABERTO', 'CANCELADO')).not.toContain('PAID');
   });
+
+  it('dispara DELIVERY_FAILED só na transição para NAO_ENTREGUE, nunca numa resync que confirma o mesmo status de novo', () => {
+    expect(determineOrderTransitionEvents('ENVIADO', 'NAO_ENTREGUE')).toContain('DELIVERY_FAILED');
+    expect(determineOrderTransitionEvents('NAO_ENTREGUE', 'NAO_ENTREGUE')).toEqual([]);
+  });
 });
