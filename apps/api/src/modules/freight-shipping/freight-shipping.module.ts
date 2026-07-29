@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../shared/prisma/prisma.module';
+import { ErpIntegrationModule } from '../erp-integration/erp-integration.module';
 import { FREIGHT_PROVIDER_CONNECTION_REPOSITORY } from './application/ports/freight-provider-connection-repository.port';
 import { PrismaFreightProviderConnectionRepository } from './infrastructure/prisma-freight-provider-connection.repository';
 import { FreightProviderConnectionService } from './application/freight-provider-connection.service';
@@ -27,8 +28,17 @@ import { CarriersController } from './interface/controllers/carriers.controller'
 // separado do módulo que CONSOME essa conexão (orders, marketplace-publishing).
 // Consumido por logistics-fulfillment (DispatchBatchService) via
 // FreightProviderRegistry, nunca importando as classes concretas.
+//
+// Importa ErpIntegrationModule só para consumir CredentialEncryptionService
+// (credencial de FreightProviderConnection em repouso) — mesmo racional de
+// FiscalModule importar ErpIntegrationModule pelo mesmo motivo (token do
+// Focus NFe). BUG DE PRODUÇÃO 29/07/2026: FreightProviderConnectionService
+// sempre dependeu de CredentialEncryptionService, mas este import nunca
+// existiu — nenhum teste Jest pega isso porque specs instanciam a classe
+// diretamente com mocks, nunca via container real do Nest; só apareceu
+// no primeiro boot real da aplicação no Render.
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, ErpIntegrationModule],
   controllers: [FreightConnectionsController, CarriersController],
   providers: [
     { provide: FREIGHT_PROVIDER_CONNECTION_REPOSITORY, useClass: PrismaFreightProviderConnectionRepository },
