@@ -6,6 +6,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { PricingDecisionService } from '../../application/pricing-decision.service';
 
@@ -15,7 +18,8 @@ import { PricingDecisionService } from '../../application/pricing-decision.servi
 // automação está desligada (ou para forçar uma aplicação pontual mesmo com
 // ela ligada). Só ADMIN aplica preço de verdade num canal — mesma régua de
 // "operação sensível" usada em connect/disconnect de ERP e sync-now.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('pricing-intelligence')
 export class ApplyPricingDecisionController {
   constructor(private readonly decisions: PricingDecisionService) {}

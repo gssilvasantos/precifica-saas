@@ -1,5 +1,15 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { FreightProviderConnectionService } from '../../application/freight-provider-connection.service';
 import { UpsertFreightConnectionDto } from '../dto/upsert-freight-connection.dto';
 
@@ -8,7 +18,10 @@ import { UpsertFreightConnectionDto } from '../dto/upsert-freight-connection.dto
 // credencial, leitura (nunca devolve o segredo, ver
 // FreightProviderConnectionService.omitCredential) liberada pra qualquer
 // papel autenticado.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: CONFERENCE — consumido só por DispatchBatchesController.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CONFERENCE)
 @Controller('freight-shipping/connections')
 export class FreightConnectionsController {
   constructor(private readonly connections: FreightProviderConnectionService) {}

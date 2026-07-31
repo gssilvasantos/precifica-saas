@@ -1,5 +1,13 @@
 import { Body, Controller, Logger, Param, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { OrderSyncOrchestrator } from '../../application/order-sync-orchestrator.service';
 
 // Dois caminhos de sincronização, além do OrdersSyncSchedulerJob (polling
@@ -28,8 +36,9 @@ export class OrdersSyncController {
 
   constructor(private readonly orchestrator: OrderSyncOrchestrator) {}
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
   @Roles(UserRole.ADMIN)
+  @RequireModule(ModuleCode.ORDERS)
   @Post(':providerCode/sync')
   async triggerSync(@Param('providerCode') providerCode: string) {
     await this.orchestrator.syncProvider(providerCode);

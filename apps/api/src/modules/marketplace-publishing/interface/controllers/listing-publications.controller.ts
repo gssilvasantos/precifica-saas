@@ -1,5 +1,15 @@
 import { Controller, Get, Param, Post, Query, Body, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { ListingPublicationService } from '../../application/listing-publication.service';
 import { PublishListingDto } from '../dto/publish-listing.dto';
 
@@ -9,7 +19,10 @@ import { PublishListingDto } from '../dto/publish-listing.dto';
 // consequência externa/reputacional real e irreversível de desfazer. Mesmo
 // padrão de guards do resto da base: leitura liberada, escrita exige
 // ADMIN/PRICING_EDITOR.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: CATALOG — publica um Product (SKU) num marketplace.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('marketplace-publishing/listings')
 export class ListingPublicationsController {
   constructor(private readonly listings: ListingPublicationService) {}

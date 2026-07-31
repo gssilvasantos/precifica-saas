@@ -1,5 +1,15 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { DispatchBatchService } from '../../application/dispatch-batch.service';
 import { CarrierCatalogService } from '../../../freight-shipping/application/carrier-catalog.service';
 import { CreateDispatchBatchDto } from '../dto/create-dispatch-batch.dto';
@@ -10,7 +20,11 @@ import { GenerateDispatchLabelDto } from '../dto/generate-dispatch-label.dto';
 // qualquer papel autenticado; escrita (criar/gerenciar lote, gerar etiqueta,
 // concluir/cancelar) exige ADMIN/PRICING_EDITOR, mesmo padrão do resto da
 // base.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: CONFERENCE — mesmo fluxo de expedição/pick&pack da tela de
+// Conferência.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CONFERENCE)
 @Controller('logistics-fulfillment/dispatch-batches')
 export class DispatchBatchesController {
   constructor(

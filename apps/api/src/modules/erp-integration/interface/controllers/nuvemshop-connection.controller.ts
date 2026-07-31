@@ -6,12 +6,16 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { NuvemshopConnectionService } from '../../application/nuvemshop-connection.service';
 import { NuvemshopChannelListingSyncService } from '../../application/nuvemshop-channel-listing-sync.service';
 import { ConnectNuvemshopDto } from '../dto/connect-nuvemshop.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.INTEGRATIONS)
 @Controller('erp-integration/nuvemshop')
 export class NuvemshopConnectionController {
   constructor(

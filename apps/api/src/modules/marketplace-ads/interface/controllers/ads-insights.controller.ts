@@ -1,12 +1,21 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, CurrentUser, AuthenticatedUser } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  CurrentUser,
+  AuthenticatedUser,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { AdsInsightsService } from '../../application/ads-insights.service';
 import { AdsDashboardQueryDto } from '../dto/ads-dashboard-query.dto';
 import { AppDataMode } from '../../../../shared/contracts/order-financials-reader.port';
 
 const DEFAULT_WINDOW_DAYS = 30;
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.ADS)
 @Controller('marketplace-ads')
 export class AdsInsightsController {
   constructor(private readonly insights: AdsInsightsService) {}

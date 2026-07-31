@@ -1,5 +1,15 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { CommissionService } from '../../application/commission.service';
 import { AssignVendedorItemDto } from '../dto/assign-vendedor-item.dto';
 import { GenerateCommissionPayoutDto } from '../dto/generate-commission-payout.dto';
@@ -10,7 +20,11 @@ import { GenerateCommissionPayoutDto } from '../dto/generate-commission-payout.d
 // ao vendedor). Nunca no OrdersController — este bounded context só
 // enxerga OrderItem através de ORDER_COMMISSION_WRITER (ver
 // CommissionService), nunca a tabela nem a classe concreta de Orders.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: FINANCE (mesmo racional de VendedoresController — gera
+// AccountsPayable).
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FINANCE)
 @Controller('sellers/vendedores/:vendedorId')
 export class CommissionsController {
   constructor(private readonly commissions: CommissionService) {}

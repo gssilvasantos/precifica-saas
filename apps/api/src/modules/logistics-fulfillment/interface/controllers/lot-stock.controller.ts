@@ -1,5 +1,15 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { StockMovementAuditEventService } from '../../application/stock-movement-audit-event.service';
 import { LotAvailabilityService } from '../../application/lot-availability.service';
 import { AdjustLotDto } from '../dto/adjust-lot.dto';
@@ -10,7 +20,10 @@ import { AdjustLotDto } from '../dto/adjust-lot.dto';
 // (metadado: validade, diasPermitidoVenda) mora no Catalog
 // (POST/GET /products/:id/lots) — este controller nunca cria lote, só
 // movimenta/consulta o ledger de um lote já cadastrado.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: REPLENISHMENT — mesma fronteira de estoque/abastecimento.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.REPLENISHMENT)
 @Controller('logistics-fulfillment/lot-stock')
 export class LotStockController {
   constructor(

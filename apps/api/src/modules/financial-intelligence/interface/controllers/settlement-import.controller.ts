@@ -1,5 +1,15 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { ReceivableReconciliationService } from '../../application/receivable-reconciliation.service';
 import { ImportSettlementDto } from '../dto/import-settlement.dto';
 
@@ -9,7 +19,8 @@ import { ImportSettlementDto } from '../dto/import-settlement.dto';
 // da API de cada marketplace. Um futuro job/webhook por canal chamaria
 // ReceivableReconciliationService.reconcile(...) no mesmo lugar — nada aqui
 // muda quando isso existir.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FINANCE)
 @Controller('financial-intelligence/settlements')
 export class SettlementImportController {
   constructor(private readonly reconciliation: ReceivableReconciliationService) {}

@@ -1,5 +1,15 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { PromotionCampaignService } from '../../application/promotion-campaign.service';
 import { PromotionIntelligenceService } from '../../application/promotion-intelligence.service';
 import { CreatePromotionCampaignDto } from '../dto/create-promotion-campaign.dto';
@@ -10,7 +20,8 @@ import { MarginPreviewQueryDto } from '../dto/margin-preview-query.dto';
 // (mesmo padrão de outras telas só-leitura); criar campanha e decidir
 // adesão exigem ADMIN/PRICING_EDITOR (mesma role que edita preço/margem em
 // todo o resto da plataforma).
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.PROMOTIONS)
 @Controller('promotion-intelligence/campaigns')
 export class PromotionCampaignsController {
   constructor(

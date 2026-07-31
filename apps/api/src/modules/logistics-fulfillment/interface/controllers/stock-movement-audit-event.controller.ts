@@ -1,5 +1,15 @@
 import { Body, Controller, Get, Inject, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { FILE_STORAGE } from '../../../../shared/contracts/tokens';
 import { FileStorage } from '../../../../shared/contracts/file-storage.port';
 import { StockMovementAuditEventService } from '../../application/stock-movement-audit-event.service';
@@ -19,7 +29,8 @@ import {
 // nunca por este controller); aqui só existe o caminho MANUAL de montar um
 // lote FULL_DISPATCH, e as ações de conferência (mídia/aprovar/divergente)
 // comuns aos dois tipos de evento.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CONFERENCE)
 @Controller('logistics-fulfillment/audit-events')
 export class StockMovementAuditEventController {
   constructor(

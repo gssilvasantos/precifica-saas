@@ -1,5 +1,15 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { NaturezaOperacaoService } from '../../application/natureza-operacao.service';
 import { CreateNaturezaOperacaoDto } from '../dto/create-natureza-operacao.dto';
 import { UpdateNaturezaOperacaoDto } from '../dto/update-natureza-operacao.dto';
@@ -9,7 +19,8 @@ import { SetNaturezaOperacaoActiveDto } from '../dto/set-natureza-operacao-activ
 // 29/07/2026, ver docs/naturezas-operacao-architecture.md). Só ADMIN
 // cadastra/edita — mesmo racional de FiscalMarketplaceIntermediariesController
 // (dado fiscal sensível, com consequência legal na emissão de NF-e).
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FISCAL_SETTINGS)
 @Controller('fiscal/naturezas-operacao')
 export class NaturezasOperacaoController {
   constructor(private readonly naturezasOperacao: NaturezaOperacaoService) {}

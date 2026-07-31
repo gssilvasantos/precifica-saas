@@ -1,8 +1,17 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, CurrentUser, AuthenticatedUser } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  CurrentUser,
+  AuthenticatedUser,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { ChannelListingsQueryService } from '../../application/channel-listings-query.service';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.INTEGRATIONS)
 @Controller('erp-integration/channel-listings')
 export class ChannelListingsController {
   constructor(private readonly listings: ChannelListingsQueryService) {}

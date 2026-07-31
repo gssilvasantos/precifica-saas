@@ -1,5 +1,15 @@
 import { Controller, Get, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, UserRole, CurrentUser, AuthenticatedUser } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  UserRole,
+  CurrentUser,
+  AuthenticatedUser,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { AdsAuditSeederService } from '../../application/ads-audit-seeder.service';
 
 // Modo de Demonstração / Audit Mode do módulo de Ads — mesmo padrão de
@@ -8,8 +18,9 @@ import { AdsAuditSeederService } from '../../application/ads-audit-seeder.servic
 // porque cada módulo semeia o próprio domínio — o frontend (AppModeToggle)
 // chama os dois em sequência num único clique de "Semear dados de
 // demonstração", ver docs/audit-mode.md.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
 @Roles(UserRole.ADMIN)
+@RequireModule(ModuleCode.ADS)
 @Controller('marketplace-ads/audit-mode')
 export class AdsAuditModeController {
   constructor(private readonly auditSeeder: AdsAuditSeederService) {}

@@ -6,6 +6,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { AccountsPayableService } from '../../application/accounts-payable.service';
 import { CreateAccountsPayableDto } from '../dto/create-accounts-payable.dto';
@@ -18,7 +21,8 @@ import { AccountsPayableStatus } from '../../domain/accounts-payable.entity';
 // ReceivablesController/WarehousesController: leitura liberada pra qualquer
 // papel autenticado, escrita (criar/editar/baixar/cancelar) exige
 // ADMIN/PRICING_EDITOR.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FINANCE)
 @Controller('financial-intelligence/accounts-payable')
 export class AccountsPayableController {
   constructor(private readonly payables: AccountsPayableService) {}

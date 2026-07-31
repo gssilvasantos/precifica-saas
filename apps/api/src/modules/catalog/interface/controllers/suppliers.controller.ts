@@ -6,12 +6,16 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { SuppliersService } from '../../application/suppliers.service';
 import { CreateSupplierDto } from '../dto/create-supplier.dto';
 import { UpdateSupplierDto } from '../dto/update-supplier.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('suppliers')
 export class SuppliersController {
   constructor(private readonly suppliers: SuppliersService) {}

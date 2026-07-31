@@ -1,6 +1,16 @@
 import { Controller, Delete, Get, Logger, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { MercadoLivreConnectionService } from '../../application/mercado-livre-connection.service';
 import { MercadoLivreHandshakeService } from '../../application/mercado-livre-handshake.service';
 import { MercadoLivreCallbackQueryDto } from '../dto/mercado-livre-callback-query.dto';
@@ -25,7 +35,8 @@ export class MercadoLivreConnectionController {
     private readonly handshakeService: MercadoLivreHandshakeService,
   ) {}
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+  @RequireModule(ModuleCode.INTEGRATIONS)
   @Get('status')
   getStatus(@CurrentUser() user: AuthenticatedUser) {
     return this.connectionService.getStatus(user.tenantId);
@@ -34,8 +45,9 @@ export class MercadoLivreConnectionController {
   // Passo 1 — o frontend chama isto autenticado e redireciona o navegador
   // do usuário para a `authorizeUrl` devolvida (tela de login/aprovação do
   // próprio Mercado Livre, fora da nossa aplicação).
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
   @Roles(UserRole.ADMIN)
+  @RequireModule(ModuleCode.INTEGRATIONS)
   @Get('authorize')
   authorize(@CurrentUser() user: AuthenticatedUser) {
     return { authorizeUrl: this.connectionService.buildAuthorizationUrl(user.tenantId) };
@@ -64,8 +76,9 @@ export class MercadoLivreConnectionController {
     }
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
   @Roles(UserRole.ADMIN)
+  @RequireModule(ModuleCode.INTEGRATIONS)
   @Delete('connect')
   disconnect(@CurrentUser() user: AuthenticatedUser) {
     return this.connectionService.disconnect(user.tenantId);
@@ -76,8 +89,9 @@ export class MercadoLivreConnectionController {
   // Ver o comentário de arquitetura em mercado-livre-handshake.service.ts
   // para por que isto é deliberadamente separado do pipeline de ingestão
   // real (POST /orders/providers/:providerCode/sync).
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
   @Roles(UserRole.ADMIN)
+  @RequireModule(ModuleCode.INTEGRATIONS)
   @Post('test-connection')
   testConnection(@CurrentUser() user: AuthenticatedUser) {
     return this.handshakeService.testConnection(user.tenantId);

@@ -8,10 +8,14 @@ export interface JwtPayload {
   sub: string; // userId
   tenantId: string;
   role: UserRole;
+  // Baked no token, mesmo racional de `role` — revogar exige novo login (ver
+  // ModuleAccessGuard). ADMIN ignora este campo (sempre acesso total).
+  moduleAccess: string[];
 }
 
 export interface AuthenticatedUser {
   userId: string;
   tenantId: string;
   role: UserRole;
+  moduleAccess: string[];
 }

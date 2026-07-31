@@ -6,12 +6,16 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { PackagingsService } from '../../application/packaging.service';
 import { CreatePackagingDto } from '../dto/create-packaging.dto';
 import { UpdatePackagingDto } from '../dto/update-packaging.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('packagings')
 export class PackagingController {
   constructor(private readonly packagings: PackagingsService) {}

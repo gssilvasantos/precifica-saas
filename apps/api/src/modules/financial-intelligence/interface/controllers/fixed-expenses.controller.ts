@@ -6,12 +6,16 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { FixedExpensesService } from '../../application/fixed-expenses.service';
 import { CreateFixedExpenseDto } from '../dto/create-fixed-expense.dto';
 import { UpdateFixedExpenseDto } from '../dto/update-fixed-expense.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FINANCE)
 @Controller('financial-intelligence/fixed-expenses')
 export class FixedExpensesController {
   constructor(private readonly expenses: FixedExpensesService) {}

@@ -1,12 +1,25 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { ChannelCategoryMappingService } from '../../application/channel-category-mapping.service';
 import { SetChannelCategoryMappingDto } from '../dto/set-channel-category-mapping.dto';
 
 // Configuração do mapeamento categoria interna <-> categoria do canal (Fase
 // 4, benchmark Tiny ERP) — mesmo padrão de guards do resto da base: leitura
 // liberada, escrita exige ADMIN/PRICING_EDITOR.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: CATALOG — passo de configuração de ListingPublicationService.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('marketplace-publishing/category-mappings')
 export class ChannelCategoryMappingsController {
   constructor(private readonly mappings: ChannelCategoryMappingService) {}

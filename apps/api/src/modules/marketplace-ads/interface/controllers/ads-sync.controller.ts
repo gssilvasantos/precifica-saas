@@ -1,5 +1,13 @@
 import { Controller, Param, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { AdsSyncOrchestrator } from '../../application/ads-sync-orchestrator.service';
 
 // Trigger manual ("sincronizar agora"), além do AdsSyncSchedulerJob
@@ -11,8 +19,9 @@ import { AdsSyncOrchestrator } from '../../application/ads-sync-orchestrator.ser
 export class AdsSyncController {
   constructor(private readonly orchestrator: AdsSyncOrchestrator) {}
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
   @Roles(UserRole.ADMIN)
+  @RequireModule(ModuleCode.ADS)
   @Post(':providerCode/sync')
   async triggerSync(@Param('providerCode') providerCode: string) {
     await this.orchestrator.syncProvider(providerCode);

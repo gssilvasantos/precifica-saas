@@ -7,6 +7,7 @@ export interface AuthUser {
   tenantId: string;
   role: UserRole;
   isPlatformAdmin: boolean;
+  moduleAccess: string[];
 }
 
 export interface AuthResponse {

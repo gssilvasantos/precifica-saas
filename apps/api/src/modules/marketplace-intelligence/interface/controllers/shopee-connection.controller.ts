@@ -1,6 +1,16 @@
 import { Controller, Delete, Get, Logger, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { ShopeeConnectionService } from '../../application/shopee-connection.service';
 import { ShopeeHandshakeService } from '../../application/shopee-handshake.service';
 import { ShopeeCallbackQueryDto } from '../dto/shopee-callback-query.dto';
@@ -21,7 +31,8 @@ export class ShopeeConnectionController {
     private readonly handshakeService: ShopeeHandshakeService,
   ) {}
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+  @RequireModule(ModuleCode.INTEGRATIONS)
   @Get('status')
   getStatus(@CurrentUser() user: AuthenticatedUser) {
     return this.connectionService.getStatus(user.tenantId);
@@ -30,8 +41,9 @@ export class ShopeeConnectionController {
   // Passo 1 — o frontend chama isto autenticado e redireciona o navegador
   // do usuário para a `authorizeUrl` devolvida (tela de login/aprovação da
   // própria Shopee, fora da nossa aplicação).
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
   @Roles(UserRole.ADMIN)
+  @RequireModule(ModuleCode.INTEGRATIONS)
   @Get('authorize')
   authorize(@CurrentUser() user: AuthenticatedUser) {
     return { authorizeUrl: this.connectionService.buildAuthorizationUrl(user.tenantId) };
@@ -53,8 +65,9 @@ export class ShopeeConnectionController {
     }
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
   @Roles(UserRole.ADMIN)
+  @RequireModule(ModuleCode.INTEGRATIONS)
   @Delete('connect')
   disconnect(@CurrentUser() user: AuthenticatedUser) {
     return this.connectionService.disconnect(user.tenantId);
@@ -64,8 +77,9 @@ export class ShopeeConnectionController {
   // /shop/get_shop_info), sem persistir nenhum pedido/produto — mesmo
   // racional de MercadoLivreConnectionController.testConnection, ver
   // shopee-handshake.service.ts.
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
   @Roles(UserRole.ADMIN)
+  @RequireModule(ModuleCode.INTEGRATIONS)
   @Post('test-connection')
   testConnection(@CurrentUser() user: AuthenticatedUser) {
     return this.handshakeService.testConnection(user.tenantId);

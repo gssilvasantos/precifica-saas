@@ -6,12 +6,16 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { TaxProfilesService } from '../../application/tax-profiles.service';
 import { CreateTaxProfileDto } from '../dto/create-tax-profile.dto';
 import { UpdateTaxProfileDto } from '../dto/update-tax-profile.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FISCAL_SETTINGS)
 @Controller('tax-profiles')
 export class TaxProfilesController {
   constructor(private readonly taxProfiles: TaxProfilesService) {}

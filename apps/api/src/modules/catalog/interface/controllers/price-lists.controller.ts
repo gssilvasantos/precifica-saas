@@ -1,5 +1,15 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { PriceListService } from '../../application/price-list.service';
 import { CreatePriceListDto } from '../dto/create-price-list.dto';
 import { UpdatePriceListDto } from '../dto/update-price-list.dto';
@@ -7,7 +17,8 @@ import { SetPriceListExceptionDto } from '../dto/set-price-list-exception.dto';
 
 // Lista de Preços (Fase 2, benchmark Tiny ERP, seção 1.5). Mesmo padrão de
 // guards do resto do módulo: leitura liberada, escrita exige ADMIN/PRICING_EDITOR.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('price-lists')
 export class PriceListsController {
   constructor(private readonly priceLists: PriceListService) {}

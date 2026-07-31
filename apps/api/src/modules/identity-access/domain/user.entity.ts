@@ -9,6 +9,7 @@ export interface User {
   role: UserRole;
   isActive: boolean;
   isPlatformAdmin: boolean;
+  moduleAccess: string[];
   createdAt: Date;
   updatedAt: Date;
 }

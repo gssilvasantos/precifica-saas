@@ -6,6 +6,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { PurchaseOrderService } from '../../application/purchase-order.service';
 import { CreatePurchaseOrderDto } from '../dto/create-purchase-order.dto';
@@ -16,7 +19,11 @@ import { PurchaseOrderStatus } from '../../domain/purchase-order.entity';
 // docs/tiny-erp-benchmark-analysis.md, seção 1.3). Mesmo padrão de guards de
 // AccountsPayableController: leitura liberada pra qualquer papel
 // autenticado, escrita (criar/avançar/receber/cancelar) exige ADMIN/PRICING_EDITOR.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: REPLENISHMENT — recebimento credita estoque (mesma
+// fronteira de Abastecimento/ReplenishmentAdvisor).
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.REPLENISHMENT)
 @Controller('procurement/purchase-orders')
 export class PurchaseOrdersController {
   constructor(private readonly purchaseOrders: PurchaseOrderService) {}

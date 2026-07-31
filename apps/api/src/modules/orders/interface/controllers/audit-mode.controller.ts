@@ -1,5 +1,15 @@
 import { Controller, Get, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { AuditSeederService } from '../../application/audit-seeder.service';
 
 // Modo de Demonstração / Audit Mode (ver docs/audit-mode.md) — os três
@@ -7,8 +17,9 @@ import { AuditSeederService } from '../../application/audit-seeder.service';
 // de infraestrutura de teste, não uma ação do dia a dia de um operador
 // comum, mesmo racional do toggle "acessível apenas para Admin" pedido
 // para o Dashboard.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
 @Roles(UserRole.ADMIN)
+@RequireModule(ModuleCode.ORDERS)
 @Controller('audit-mode')
 export class AuditModeController {
   constructor(private readonly auditSeeder: AuditSeederService) {}

@@ -1,11 +1,20 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, CurrentUser, AuthenticatedUser } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  CurrentUser,
+  AuthenticatedUser,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { FinancialOrchestrator } from '../../application/financial-orchestrator.service';
 import { DreQueryDto } from '../dto/dre-query.dto';
 
 // DRE por canal (Etapa 20) — consumido pelo Dashboard para o gráfico de
 // barras comparativo de lucratividade entre marketplaces (docs/financial-intelligence-architecture.md).
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FINANCE)
 @Controller('financial-intelligence/dre')
 export class DreController {
   constructor(private readonly orchestrator: FinancialOrchestrator) {}

@@ -6,6 +6,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { PackagingUsageEventsService } from '../../application/packaging-usage-event.service';
 import { RecordPackagingUsageDto } from '../dto/record-packaging-usage.dto';
@@ -14,7 +17,8 @@ import { RecordPackagingUsageDto } from '../dto/record-packaging-usage.dto';
 // não existir um módulo de Vendas/Pedidos, este é o único jeito de registrar
 // consumo de embalagem (ex.: um script de importação de vendas históricas,
 // ou um teste manual do fluxo de DRE).
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('packaging-usage-events')
 export class PackagingUsageEventController {
   constructor(private readonly usageEvents: PackagingUsageEventsService) {}

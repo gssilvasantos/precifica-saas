@@ -6,11 +6,16 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { LogisticsSettingsService } from '../../application/logistics-settings.service';
 import { UpdateLogisticsSettingsDto } from '../dto/update-logistics-settings.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+// Gate de módulo: REPLENISHMENT (fator de peso cúbico usado pelo Abastecimento).
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.REPLENISHMENT)
 @Controller('logistics-intelligence/settings')
 export class LogisticsSettingsController {
   constructor(private readonly settings: LogisticsSettingsService) {}

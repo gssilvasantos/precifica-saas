@@ -1,5 +1,15 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { CarrierCatalogService } from '../../application/carrier-catalog.service';
 import { CreateCarrierDto } from '../dto/create-carrier.dto';
 import { UpdateCarrierDto } from '../dto/update-carrier.dto';
@@ -14,7 +24,11 @@ import { SetCarrierServiceActiveDto } from '../dto/set-carrier-service-active.dt
 // liberada pra qualquer papel autenticado — este é um cadastro operacional
 // (nenhum dado fiscal sensível envolvido, ao contrário de Naturezas de
 // Operação).
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: CONFERENCE — usado por DispatchBatchesController pra
+// resolver formaEnvio -> transportador/serviço.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CONFERENCE)
 @Controller('freight-shipping/carriers')
 export class CarriersController {
   constructor(private readonly catalog: CarrierCatalogService) {}

@@ -1,5 +1,15 @@
 import { Body, Controller, Get, Param, Patch, Put, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { WarehouseService } from '../../application/warehouse.service';
 import { ProductWarehouseLocationService } from '../../application/product-warehouse-location.service';
 import { UpdateLeadTimeDto } from '../dto/update-lead-time.dto';
@@ -10,7 +20,8 @@ import { SetProductLocationDto } from '../dto/set-product-location.dto';
 // (mesmo padrão de outras telas só-leitura da plataforma); só as ações do
 // Hub de Provas (StockMovementAuditEventController) e a edição de lead time
 // abaixo exigem ADMIN/PRICING_EDITOR.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.REPLENISHMENT)
 @Controller('logistics-fulfillment/warehouses')
 export class WarehousesController {
   constructor(

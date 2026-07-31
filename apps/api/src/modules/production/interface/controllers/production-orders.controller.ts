@@ -6,6 +6,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { ProductionOrderService } from '../../application/production-order.service';
 import { CreateProductionOrderDto } from '../dto/create-production-order.dto';
@@ -16,7 +19,11 @@ import { ProductionOrderStatus } from '../../domain/production-order.entity';
 // docs/production-architecture.md). Mesmo padrão de guards de
 // PurchaseOrdersController: leitura liberada pra qualquer papel autenticado,
 // escrita (criar/iniciar/concluir/cancelar) exige ADMIN/PRICING_EDITOR.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: REPLENISHMENT — conclusão credita/debita estoque, mesma
+// fronteira de Ordens de Compra.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.REPLENISHMENT)
 @Controller('production/orders')
 export class ProductionOrdersController {
   constructor(private readonly productionOrders: ProductionOrderService) {}

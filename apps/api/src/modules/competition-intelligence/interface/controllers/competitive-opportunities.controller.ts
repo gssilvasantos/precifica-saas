@@ -6,13 +6,19 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { MonitoredListingsAdminService } from '../../application/monitored-listings-admin.service';
 import { CompetitiveOpportunitiesQueryService } from '../../application/competitive-opportunities-query.service';
 import { CompetitionMonitorOrchestrator } from '../../application/competition-monitor-orchestrator.service';
 import { CreateMonitoredListingDto } from '../dto/create-monitored-listing.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+// Gate de módulo: CATALOG — radar de preço de concorrência alimenta decisão
+// de precificação do produto (mesma tela de Produtos).
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('competition-intelligence')
 export class CompetitiveOpportunitiesController {
   constructor(

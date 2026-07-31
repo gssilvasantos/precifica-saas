@@ -1,5 +1,15 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { FiscalInvoiceService } from '../../application/fiscal-invoice.service';
 import { EmitInvoiceDto } from '../dto/emit-invoice.dto';
 import { CancelInvoiceDto } from '../dto/cancel-invoice.dto';
@@ -8,7 +18,8 @@ import { CancelInvoiceDto } from '../dto/cancel-invoice.dto';
 // guards do resto da base: leitura liberada, escrita (emitir/cancelar)
 // exige ADMIN/PRICING_EDITOR — um documento fiscal tem consequência legal,
 // então nunca fica aberto a VIEWER.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FISCAL_SETTINGS)
 @Controller('fiscal/invoices')
 export class FiscalInvoicesController {
   constructor(private readonly invoices: FiscalInvoiceService) {}

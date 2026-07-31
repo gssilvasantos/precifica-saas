@@ -59,10 +59,13 @@ class FakeFileStorage implements FileStorage {
 // Usuário canned injetado pelo fake do JwtAuthGuard — ADMIN, então passa
 // livremente pelo RolesGuard REAL (que continua no grafo, sem ser
 // sobrescrito) em todos os endpoints @Roles(ADMIN, PRICING_EDITOR).
+// moduleAccess vazio é proposital — ADMIN sempre passa pelo ModuleAccessGuard
+// sem checar a lista (ver identity-access/interface/guards/module-access.guard.ts).
 const CURRENT_USER: AuthenticatedUser = {
   userId: 'op-1',
   tenantId: 'tenant-1',
   role: UserRole.ADMIN,
+  moduleAccess: [],
 };
 
 describe('Pick & Pack — fluxo E2E completo (Sprint 27, validação em produção)', () => {

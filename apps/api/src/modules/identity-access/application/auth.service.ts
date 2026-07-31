@@ -42,7 +42,7 @@ export class AuthService {
       role: UserRole.ADMIN, // primeiro usuário de uma conta nova é sempre admin
     });
 
-    return this.buildAuthResponse(user.id, tenant.id, user.role, user.isPlatformAdmin);
+    return this.buildAuthResponse(user.id, tenant.id, user.role, user.isPlatformAdmin, user.moduleAccess);
   }
 
   async login(input: LoginInput) {
@@ -79,14 +79,20 @@ export class AuthService {
       throw new UnauthorizedException('E-mail ou senha inválidos.');
     }
 
-    return this.buildAuthResponse(candidate.id, candidate.tenantId, candidate.role, candidate.isPlatformAdmin);
+    return this.buildAuthResponse(candidate.id, candidate.tenantId, candidate.role, candidate.isPlatformAdmin, candidate.moduleAccess);
   }
 
-  private buildAuthResponse(userId: string, tenantId: string, role: UserRole, isPlatformAdmin: boolean) {
-    const payload: JwtPayload = { sub: userId, tenantId, role };
+  private buildAuthResponse(
+    userId: string,
+    tenantId: string,
+    role: UserRole,
+    isPlatformAdmin: boolean,
+    moduleAccess: string[],
+  ) {
+    const payload: JwtPayload = { sub: userId, tenantId, role, moduleAccess };
     return {
       accessToken: this.jwt.sign(payload),
-      user: { id: userId, tenantId, role, isPlatformAdmin },
+      user: { id: userId, tenantId, role, isPlatformAdmin, moduleAccess },
     };
   }
 }

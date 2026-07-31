@@ -6,12 +6,16 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { CatalogSettingsService } from '../../application/catalog-settings.service';
 import { UpdateCatalogSettingsDto } from '../dto/update-catalog-settings.dto';
 import { UpdateFinancialPolicyDto } from '../dto/update-financial-policy.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FISCAL_SETTINGS)
 @Controller('catalog/settings')
 export class CatalogSettingsController {
   constructor(private readonly settings: CatalogSettingsService) {}

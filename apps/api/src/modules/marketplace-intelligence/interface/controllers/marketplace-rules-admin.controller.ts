@@ -6,6 +6,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { MarketplaceRulesAdminService } from '../../application/marketplace-rules-admin.service';
 import { CreateManualRuleDto } from '../dto/create-manual-rule.dto';
@@ -13,7 +16,10 @@ import { CreateManualRuleDto } from '../dto/create-manual-rule.dto';
 // "Painel Marketplace Intelligence" (governança): revisar pendências,
 // aprovar/rejeitar, pin/unpin, cadastro manual (seção 6 do documento de
 // arquitetura do módulo).
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: INTEGRATIONS — mesma fronteira de MarketplaceProvidersController.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.INTEGRATIONS)
 @Controller('marketplace-intelligence/rules')
 export class MarketplaceRulesAdminController {
   constructor(private readonly admin: MarketplaceRulesAdminService) {}

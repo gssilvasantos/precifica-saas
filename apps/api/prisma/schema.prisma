@@ -210,6 +210,13 @@ model User {
   // PlatformAdminGuard, nunca embutido no JWT (revogar não pode esperar o
   // usuário deslogar e logar de novo).
   isPlatformAdmin Boolean  @default(false)
+  // Painel de Equipe (30/07/2026) — quais módulos (ver
+  // shared/access-control/module-code.ts) este usuário pode acessar. Só é
+  // checado para PRICING_EDITOR/VIEWER — ADMIN sempre tem acesso total,
+  // independente do conteúdo deste array (ver ModuleAccessGuard). String[]
+  // simples em vez de tabela própria: é um conjunto pequeno e fixo de
+  // códigos, não precisa de metadado próprio por vínculo.
+  moduleAccess    String[] @default([])
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

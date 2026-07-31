@@ -12,27 +12,33 @@ import {
   Plug,
   Settings,
   Building2,
+  Users,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../features/auth/auth-context';
+import type { ModuleCode } from '../lib/module-codes';
 
 // Ícones lucide-react (mesmo pacote já trazido pela fundação shadcn/ui) no
 // lugar dos SVGs desenhados à mão — conjunto abstrato/técnico de propósito
 // (grid, prancheta, gráfico de barras...), nunca imagens de carrinho de
 // compra, etiqueta de preço com "$" ou vitrine: identidade "Dashboard de
 // Inteligência", não varejo.
-const NAV_ITEMS = [
+//
+// `module` é opcional de propósito: Dashboard agrega dado de vários módulos
+// (sem controller próprio pra travar), então fica sempre visível — mesmo
+// racional documentado em module-code.ts do backend.
+const NAV_ITEMS: { to: string; label: string; icon: typeof LayoutGrid; module?: ModuleCode }[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutGrid },
-  { to: '/pedidos', label: 'Pedidos', icon: ClipboardList },
-  { to: '/ads', label: 'Ads', icon: Megaphone },
-  { to: '/catalogo', label: 'Produtos', icon: Package },
-  { to: '/governanca-map', label: 'Governança MAP', icon: ShieldCheck },
-  { to: '/promocoes', label: 'Promoções', icon: Tag },
-  { to: '/financeiro', label: 'Financeiro', icon: BarChart3 },
-  { to: '/abastecimento', label: 'Abastecimento', icon: Truck },
-  { to: '/conferencia', label: 'Conferência', icon: ListChecks },
-  { to: '/integracoes', label: 'Integrações', icon: Plug },
-  { to: '/configuracoes-fiscais', label: 'Configurações Fiscais', icon: Settings },
+  { to: '/pedidos', label: 'Pedidos', icon: ClipboardList, module: 'ORDERS' },
+  { to: '/ads', label: 'Ads', icon: Megaphone, module: 'ADS' },
+  { to: '/catalogo', label: 'Produtos', icon: Package, module: 'CATALOG' },
+  { to: '/governanca-map', label: 'Governança MAP', icon: ShieldCheck, module: 'CATALOG' },
+  { to: '/promocoes', label: 'Promoções', icon: Tag, module: 'PROMOTIONS' },
+  { to: '/financeiro', label: 'Financeiro', icon: BarChart3, module: 'FINANCE' },
+  { to: '/abastecimento', label: 'Abastecimento', icon: Truck, module: 'REPLENISHMENT' },
+  { to: '/conferencia', label: 'Conferência', icon: ListChecks, module: 'CONFERENCE' },
+  { to: '/integracoes', label: 'Integrações', icon: Plug, module: 'INTEGRATIONS' },
+  { to: '/configuracoes-fiscais', label: 'Configurações Fiscais', icon: Settings, module: 'FISCAL_SETTINGS' },
 ];
 
 interface Props {
@@ -47,9 +53,22 @@ interface Props {
 // certo (Light/Dark) sem lógica condicional aqui.
 export default function Sidebar({ isOpen, onClose }: Props) {
   const { user } = useAuth();
-  const navItems = user?.isPlatformAdmin
-    ? [...NAV_ITEMS, { to: '/admin', label: 'Administração', icon: Building2 }]
-    : NAV_ITEMS;
+
+  // ADMIN (papel de tenant) sempre vê tudo, mesmo racional do backend
+  // (ModuleAccessGuard libera ADMIN sem checar moduleAccess) — evita que o
+  // dono da conta se tranque fora de um módulo por engano. Para os demais
+  // papéis, o item some se o módulo não estiver em user.moduleAccess; isto é
+  // só UX (a proteção de verdade é o @RequireModule no backend).
+  const isTenantAdmin = user?.role === 'ADMIN';
+  const visibleItems = NAV_ITEMS.filter(
+    (item) => !item.module || isTenantAdmin || user?.moduleAccess?.includes(item.module),
+  );
+
+  const navItems = [
+    ...visibleItems,
+    ...(isTenantAdmin ? [{ to: '/equipe', label: 'Equipe', icon: Users }] : []),
+    ...(user?.isPlatformAdmin ? [{ to: '/admin', label: 'Administração', icon: Building2 }] : []),
+  ];
 
   return (
     <>

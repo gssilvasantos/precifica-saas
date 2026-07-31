@@ -1,5 +1,15 @@
 import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, UserRole, CurrentUser, AuthenticatedUser } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  UserRole,
+  CurrentUser,
+  AuthenticatedUser,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { AdsActionDispatcherService } from '../../application/ads-action-dispatcher.service';
 import { AppDataMode } from '../../../../shared/contracts/order-financials-reader.port';
 
@@ -12,7 +22,8 @@ import { AppDataMode } from '../../../../shared/contracts/order-financials-reade
 // @Roles(ADMIN) em vez de qualquer usuário autenticado: pausar uma campanha
 // de ads é uma decisão financeira do negócio, mesmo padrão de acesso já
 // usado em AdsSyncController.triggerSync.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.ADS)
 @Controller('marketplace-ads/actions')
 export class AdsActionsController {
   constructor(private readonly dispatcher: AdsActionDispatcherService) {}

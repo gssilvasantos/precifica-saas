@@ -6,6 +6,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { ProductsService } from '../../application/products.service';
 import { ProductAuditLogService } from '../../application/product-audit-log.service';
@@ -20,7 +23,8 @@ import { SetProductStructureDto } from '../dto/set-product-structure.dto';
 import { CreateProductLotDto } from '../dto/create-product-lot.dto';
 import { UpdateProductLotStatusDto } from '../dto/update-product-lot-status.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('products')
 export class ProductsController {
   constructor(

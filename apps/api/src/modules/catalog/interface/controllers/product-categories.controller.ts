@@ -6,6 +6,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { ProductCategoryService } from '../../application/product-category.service';
 import { CreateProductCategoryDto } from '../dto/create-product-category.dto';
@@ -15,7 +18,8 @@ import { SetCategoryAttributeDto } from '../dto/set-category-attribute.dto';
 // Árvore de categoria + atributos por categoria (Fase 4, benchmark Tiny
 // ERP) — mesmo padrão de guards do resto do Catalog: leitura liberada,
 // escrita exige ADMIN/PRICING_EDITOR.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('product-categories')
 export class ProductCategoriesController {
   constructor(private readonly categories: ProductCategoryService) {}

@@ -5,6 +5,9 @@
 export { JwtAuthGuard } from './interface/guards/jwt-auth.guard';
 export { RolesGuard } from './interface/guards/roles.guard';
 export { Roles } from './interface/decorators/roles.decorator';
+export { ModuleAccessGuard } from './interface/guards/module-access.guard';
+export { RequireModule } from './interface/decorators/require-module.decorator';
 export { CurrentUser } from './interface/decorators/current-user.decorator';
 export type { AuthenticatedUser } from './domain/auth.types';
 export { UserRole } from '@prisma/client';
+export { ModuleCode } from '../../shared/access-control/module-code';

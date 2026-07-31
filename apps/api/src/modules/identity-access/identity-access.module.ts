@@ -11,6 +11,8 @@ import { PlatformAdminController } from './interface/controllers/platform-admin.
 import { JwtStrategy } from './infrastructure/jwt.strategy';
 import { RolesGuard } from './interface/guards/roles.guard';
 import { PlatformAdminGuard } from './interface/guards/platform-admin.guard';
+import { ModuleAccessGuard } from './interface/guards/module-access.guard';
+import { TeamController } from './interface/controllers/team.controller';
 import { PrismaTenantRepository } from './infrastructure/prisma-tenant.repository';
 import { PrismaUserRepository } from './infrastructure/prisma-user.repository';
 import { TENANT_REPOSITORY } from './application/ports/tenant-repository.port';
@@ -28,7 +30,7 @@ import { USER_REPOSITORY } from './application/ports/user-repository.port';
       }),
     }),
   ],
-  controllers: [AuthController, PlatformAdminController],
+  controllers: [AuthController, PlatformAdminController, TeamController],
   providers: [
     TenantsService,
     UsersService,
@@ -37,6 +39,7 @@ import { USER_REPOSITORY } from './application/ports/user-repository.port';
     JwtStrategy,
     RolesGuard,
     PlatformAdminGuard,
+    ModuleAccessGuard,
     { provide: TENANT_REPOSITORY, useClass: PrismaTenantRepository },
     { provide: USER_REPOSITORY, useClass: PrismaUserRepository },
   ],

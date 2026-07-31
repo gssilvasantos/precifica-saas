@@ -53,7 +53,9 @@ class FakeFileStorage implements FileStorage {
   }
 }
 
-const CURRENT_USER: AuthenticatedUser = { userId: 'op-load-test', tenantId: 'tenant-1', role: UserRole.ADMIN };
+// moduleAccess vazio é proposital — ADMIN sempre passa pelo ModuleAccessGuard
+// sem checar a lista (ver identity-access/interface/guards/module-access.guard.ts).
+const CURRENT_USER: AuthenticatedUser = { userId: 'op-load-test', tenantId: 'tenant-1', role: UserRole.ADMIN, moduleAccess: [] };
 
 async function buildApp(): Promise<{
   app: INestApplication;

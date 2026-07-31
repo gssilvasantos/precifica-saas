@@ -1,10 +1,13 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard } from '../../../identity-access/public-api';
+import { JwtAuthGuard, RolesGuard, ModuleAccessGuard, RequireModule, ModuleCode } from '../../../identity-access/public-api';
 import { ChangeEventsQueryService } from '../../application/change-events-query.service';
 
 // Feed que alimenta o painel "Marketplace Intelligence" — acompanhar a
 // evolução das políticas dos marketplaces ao longo do tempo.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo: INTEGRATIONS — mesma fronteira de MarketplaceProvidersController.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.INTEGRATIONS)
 @Controller('marketplace-intelligence/change-events')
 export class MarketplaceChangeEventsController {
   constructor(private readonly changeEvents: ChangeEventsQueryService) {}

@@ -6,13 +6,17 @@ import {
   CurrentUser,
   AuthenticatedUser,
   UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
 } from '../../../identity-access/public-api';
 import { OlistConnectionService } from '../../application/olist-connection.service';
 import { ErpSyncOrchestrator } from '../../application/erp-sync-orchestrator.service';
 import { ErpSyncEventsQueryService } from '../../application/erp-sync-events-query.service';
 import { ConnectOlistDto } from '../dto/connect-olist.dto';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.INTEGRATIONS)
 @Controller('erp-integration/olist')
 export class OlistConnectionController {
   constructor(

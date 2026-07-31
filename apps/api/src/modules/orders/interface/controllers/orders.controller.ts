@@ -1,5 +1,13 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, CurrentUser, AuthenticatedUser } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  CurrentUser,
+  AuthenticatedUser,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { OrdersService } from '../../application/orders.service';
 import { OrderListQueryDto } from '../dto/order-list-query.dto';
 import { AppDataMode } from '../../domain/order.entity';
@@ -10,7 +18,8 @@ import { AppDataMode } from '../../domain/order.entity';
 // envio, Faturado, Enviado, Entregue) sem uma query por aba. Rota estática
 // 'status-counts' precisa vir ANTES de ':id' para não ser interpretada como
 // um id.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.ORDERS)
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}

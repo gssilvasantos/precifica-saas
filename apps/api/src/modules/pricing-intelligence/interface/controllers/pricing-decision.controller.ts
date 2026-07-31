@@ -1,5 +1,13 @@
 import { Controller, Get, NotFoundException, Param, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, CurrentUser, AuthenticatedUser } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  CurrentUser,
+  AuthenticatedUser,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { PricingDecisionService } from '../../application/pricing-decision.service';
 
 // Endpoint de inspeção/teste manual — chama o mesmo caminho que o
@@ -7,7 +15,8 @@ import { PricingDecisionService } from '../../application/pricing-decision.servi
 // BUY_BOX_LOST, mas sob demanda (sem precisar esperar um evento real).
 // Útil para validar a regra de margem mínima sem depender de um radar de
 // concorrência funcionando de ponta a ponta ainda.
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.CATALOG)
 @Controller('pricing-intelligence/decisions')
 export class PricingDecisionController {
   constructor(private readonly decisions: PricingDecisionService) {}

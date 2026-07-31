@@ -1,5 +1,15 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard, RolesGuard, Roles, CurrentUser, AuthenticatedUser, UserRole } from '../../../identity-access/public-api';
+import {
+  JwtAuthGuard,
+  RolesGuard,
+  Roles,
+  CurrentUser,
+  AuthenticatedUser,
+  UserRole,
+  ModuleAccessGuard,
+  RequireModule,
+  ModuleCode,
+} from '../../../identity-access/public-api';
 import { VendedorService } from '../../application/vendedor.service';
 import { CreateVendedorDto } from '../dto/create-vendedor.dto';
 import { UpdateVendedorDto } from '../dto/update-vendedor.dto';
@@ -11,7 +21,12 @@ import { SetVendedorActiveDto } from '../dto/set-vendedor-active.dto';
 // pedido, relatório de comissão e geração de conta a pagar moram no Orders
 // (ver orders/interface/controllers/orders.controller.ts) — este
 // controller nunca conhece OrderItem.
-@UseGuards(JwtAuthGuard, RolesGuard)
+//
+// Gate de módulo (30/07/2026, Painel de Equipe): mapeado em FINANCE — o
+// racional de Vendedores/Comissão é sempre repasse financeiro (gera
+// AccountsPayable), mesma fronteira que CommissionsController.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule(ModuleCode.FINANCE)
 @Controller('sellers/vendedores')
 export class VendedoresController {
   constructor(private readonly vendedores: VendedorService) {}
