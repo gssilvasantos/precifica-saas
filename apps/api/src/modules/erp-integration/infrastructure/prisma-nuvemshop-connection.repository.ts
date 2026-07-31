@@ -30,6 +30,16 @@ export class PrismaNuvemshopConnectionRepository implements NuvemshopConnectionR
   }
 
   async markSynced(tenantId: string, syncedAt: Date): Promise<void> {
-    await this.prisma.nuvemshopConnection.update({ where: { tenantId }, data: { lastSyncedAt: syncedAt } });
+    await this.prisma.nuvemshopConnection.update({
+      where: { tenantId },
+      data: { lastSyncedAt: syncedAt, lastSyncStatus: 'SUCCESS', lastSyncError: null },
+    });
+  }
+
+  async markSyncFailed(tenantId: string, error: string): Promise<void> {
+    await this.prisma.nuvemshopConnection.update({
+      where: { tenantId },
+      data: { lastSyncStatus: 'FAILED', lastSyncError: error },
+    });
   }
 }

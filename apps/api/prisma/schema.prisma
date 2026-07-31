@@ -1099,12 +1099,20 @@ model ProviderHealth {
 // nome dele. Token estático (API V2) — ver seção 8 do doc de arquitetura
 // para o porquê de V2 em vez de V3/OAuth2 nesta primeira entrega.
 model OlistConnection {
-  tenantId     String    @id
-  apiTokenEnc  String // criptografado em repouso
-  isActive     Boolean   @default(true)
-  lastSyncedAt DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  tenantId       String    @id
+  apiTokenEnc    String // criptografado em repouso
+  isActive       Boolean   @default(true)
+  lastSyncedAt   DateTime?
+  // 31/07/2026 — visibilidade de falha (bug relatado: "Olist não está
+  // importando", sync falhava calado). ErpSyncOrchestrator.syncTenant grava
+  // aqui o resultado de CADA tentativa (agendada OU manual): sucesso limpa os
+  // dois campos, falha preenche lastSyncError com a mensagem real. Sem isso,
+  // getStatus() só tinha lastSyncedAt (null pra sempre se toda tentativa
+  // falhar), e o usuário nunca via o motivo.
+  lastSyncStatus String? // SUCCESS | FAILED — null antes da 1ª tentativa
+  lastSyncError  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@map("olist_connections")
   @@schema("erp_integration")
@@ -1147,6 +1155,11 @@ model NuvemshopConnection {
   accessTokenEnc String // criptografado em repouso (CredentialEncryptionService)
   isActive       Boolean   @default(true)
   lastSyncedAt   DateTime?
+  // Mesmo racional de OlistConnection.lastSyncStatus/lastSyncError (ver
+  // comentário lá) — aqui grava o resultado de
+  // NuvemshopChannelListingSyncService.syncTenant (vínculo de SKU x anúncio).
+  lastSyncStatus String?
+  lastSyncError  String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

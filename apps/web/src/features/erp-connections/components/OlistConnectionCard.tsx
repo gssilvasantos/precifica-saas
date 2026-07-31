@@ -74,8 +74,19 @@ export function OlistConnectionCard() {
         </dl>
       )}
 
+      {/* Mesmo racional do card da Nuvemshop — mostra o motivo mesmo sem clicar
+          em "Sincronizar agora" (cobre falha do scheduler automático). */}
+      {status?.connected && status.lastSyncStatus === 'FAILED' && status.lastSyncError && (
+        <p className="mt-3 rounded-md border border-margin-danger/30 bg-margin-danger/5 px-3 py-2 text-sm text-margin-danger">
+          Última tentativa de sincronização falhou: {status.lastSyncError}
+        </p>
+      )}
+
       {!connected && (
-        <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+        // Mesmo fix de autofill do card da Nuvemshop (ver comentário lá) —
+        // autoComplete="off" no form + autoComplete="new-password" no campo +
+        // data-lpignore/1p-ignore/bwignore para os gerenciadores de senha de terceiros.
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3" autoComplete="off">
           <label className="block text-sm sm:max-w-sm">
             <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">Token da API (Olist V2)</span>
             <input
@@ -85,6 +96,11 @@ export function OlistConnectionCard() {
               placeholder="Token gerado no painel do Olist"
               required
               minLength={10}
+              name="olist-api-token"
+              autoComplete="new-password"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>

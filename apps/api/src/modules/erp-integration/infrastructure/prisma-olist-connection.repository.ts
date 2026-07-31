@@ -9,18 +9,21 @@ import {
 export class PrismaOlistConnectionRepository implements OlistConnectionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private readonly select = {
+    tenantId: true,
+    apiTokenEnc: true,
+    isActive: true,
+    lastSyncedAt: true,
+    lastSyncStatus: true,
+    lastSyncError: true,
+  } as const;
+
   findByTenant(tenantId: string): Promise<OlistConnectionRecord | null> {
-    return this.prisma.olistConnection.findUnique({
-      where: { tenantId },
-      select: { tenantId: true, apiTokenEnc: true, isActive: true, lastSyncedAt: true },
-    });
+    return this.prisma.olistConnection.findUnique({ where: { tenantId }, select: this.select });
   }
 
   findAllActive(): Promise<OlistConnectionRecord[]> {
-    return this.prisma.olistConnection.findMany({
-      where: { isActive: true },
-      select: { tenantId: true, apiTokenEnc: true, isActive: true, lastSyncedAt: true },
-    });
+    return this.prisma.olistConnection.findMany({ where: { isActive: true }, select: this.select });
   }
 
   upsert(tenantId: string, apiTokenEnc: string): Promise<OlistConnectionRecord> {
@@ -28,7 +31,7 @@ export class PrismaOlistConnectionRepository implements OlistConnectionRepositor
       where: { tenantId },
       create: { tenantId, apiTokenEnc, isActive: true },
       update: { apiTokenEnc, isActive: true },
-      select: { tenantId: true, apiTokenEnc: true, isActive: true, lastSyncedAt: true },
+      select: this.select,
     });
   }
 
@@ -37,6 +40,16 @@ export class PrismaOlistConnectionRepository implements OlistConnectionRepositor
   }
 
   async markSynced(tenantId: string, syncedAt: Date): Promise<void> {
-    await this.prisma.olistConnection.update({ where: { tenantId }, data: { lastSyncedAt: syncedAt } });
+    await this.prisma.olistConnection.update({
+      where: { tenantId },
+      data: { lastSyncedAt: syncedAt, lastSyncStatus: 'SUCCESS', lastSyncError: null },
+    });
+  }
+
+  async markSyncFailed(tenantId: string, error: string): Promise<void> {
+    await this.prisma.olistConnection.update({
+      where: { tenantId },
+      data: { lastSyncStatus: 'FAILED', lastSyncError: error },
+    });
   }
 }

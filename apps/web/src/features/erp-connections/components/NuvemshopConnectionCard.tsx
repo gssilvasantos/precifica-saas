@@ -80,8 +80,23 @@ export function NuvemshopConnectionCard() {
         </dl>
       )}
 
+      {/* Mostra o motivo mesmo sem clicar em "Sincronizar agora" — cobre falha do
+          scheduler automático, não só do clique manual (ver comentário no backend,
+          ErpSyncOrchestrator/NuvemshopChannelListingSyncService.syncTenant). */}
+      {status?.connected && status.lastSyncStatus === 'FAILED' && status.lastSyncError && (
+        <p className="mt-3 rounded-md border border-margin-danger/30 bg-margin-danger/5 px-3 py-2 text-sm text-margin-danger">
+          Última tentativa de sincronização falhou: {status.lastSyncError}
+        </p>
+      )}
+
       {!connected && (
-        <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+        // autoComplete="off" no <form> + name específico/não-genérico + autoComplete
+        // dedicado em cada campo + data-lpignore/data-1p-ignore/data-bwignore (LastPass/
+        // 1Password/Bitwarden) — o navegador insistia em auto-preencher Store ID/Access
+        // Token com login salvo não relacionado porque um <input type="password"> ao
+        // lado de um <input type="text"> sem atributos é o padrão clássico de
+        // "formulário de login" que o Chrome tenta casar com credenciais guardadas.
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3" autoComplete="off">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
               <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">Store ID</span>
@@ -90,6 +105,14 @@ export function NuvemshopConnectionCard() {
                 onChange={(e) => setStoreId(e.target.value)}
                 placeholder="123456"
                 required
+                name="nuvemshop-store-id"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </label>
@@ -102,6 +125,11 @@ export function NuvemshopConnectionCard() {
                 placeholder="Token do app privado"
                 required
                 minLength={10}
+                name="nuvemshop-access-token"
+                autoComplete="new-password"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </label>

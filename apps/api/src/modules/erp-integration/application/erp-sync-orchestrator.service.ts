@@ -72,7 +72,17 @@ export class ErpSyncOrchestrator {
     }
   }
 
-  async syncTenant(tenantId: string): Promise<void> {
+  // 31/07/2026 — bug relatado ("Olist não está importando os anúncios"):
+  // este método engolia TODO erro internamente (log + ProviderHealth +
+  // ProviderSyncLog) e retornava void mesmo em falha — nem o scheduler nem o
+  // clique manual em "Sincronizar agora" (OlistConnectionController.syncNow)
+  // tinham como saber que algo deu errado. Agora retorna um resultado
+  // explícito E grava lastSyncStatus/lastSyncError em OlistConnection (visível
+  // em getStatus, mesmo para falhas do scheduler que ninguém clicou para
+  // disparar). syncAllTenants continua isolando falha de um tenant das
+  // demais (não rethrow aqui) — só syncNow (chamada manual) precisa saber na
+  // hora, e faz isso lendo o retorno.
+  async syncTenant(tenantId: string): Promise<{ success: boolean; error?: string }> {
     const correlationId = randomUUID();
     const logId = await this.syncLogs.start(PROVIDER_CODE, correlationId);
     let candidatesFound = 0;
@@ -102,17 +112,21 @@ export class ErpSyncOrchestrator {
 
       await this.connections.markSynced(tenantId, new Date());
       await this.syncLogs.finish(logId, { status: 'SUCCESS', candidatesFound, candidatesApplied });
+      return { success: true };
     } catch (error) {
-      const consecutiveFailures = await this.health.recordFailure(PROVIDER_CODE, (error as Error).message);
+      const message = (error as Error).message;
+      const consecutiveFailures = await this.health.recordFailure(PROVIDER_CODE, message);
+      await this.connections.markSyncFailed(tenantId, message);
       await this.syncLogs.finish(logId, {
         status: 'FAILED',
         candidatesFound,
         candidatesApplied,
-        errorDetails: (error as Error).message,
+        errorDetails: message,
       });
       this.logger.error(
-        `Sync do Olist falhou para o tenant ${tenantId} (${consecutiveFailures} falhas consecutivas): ${(error as Error).message}`,
+        `Sync do Olist falhou para o tenant ${tenantId} (${consecutiveFailures} falhas consecutivas): ${message}`,
       );
+      return { success: false, error: message };
     }
   }
 

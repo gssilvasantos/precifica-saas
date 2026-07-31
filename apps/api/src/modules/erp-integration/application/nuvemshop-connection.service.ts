@@ -10,6 +10,8 @@ export interface NuvemshopConnectionStatus {
   connected: boolean;
   isActive: boolean;
   lastSyncedAt: Date | null;
+  lastSyncStatus: string | null;
+  lastSyncError: string | null;
 }
 
 @Injectable()
@@ -43,8 +45,14 @@ export class NuvemshopConnectionService {
 
   async getStatus(tenantId: string): Promise<NuvemshopConnectionStatus> {
     const existing = await this.connections.findByTenant(tenantId);
-    if (!existing) return { connected: false, isActive: false, lastSyncedAt: null };
-    return { connected: true, isActive: existing.isActive, lastSyncedAt: existing.lastSyncedAt };
+    if (!existing) return { connected: false, isActive: false, lastSyncedAt: null, lastSyncStatus: null, lastSyncError: null };
+    return {
+      connected: true,
+      isActive: existing.isActive,
+      lastSyncedAt: existing.lastSyncedAt,
+      lastSyncStatus: existing.lastSyncStatus,
+      lastSyncError: existing.lastSyncError,
+    };
   }
 
   async getDecryptedCredentials(tenantId: string): Promise<{ storeId: string; accessToken: string } | null> {

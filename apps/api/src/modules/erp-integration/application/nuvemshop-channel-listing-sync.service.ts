@@ -48,7 +48,10 @@ export class NuvemshopChannelListingSyncService {
     }
   }
 
-  async syncTenant(tenantId: string): Promise<void> {
+  // Mesmo fix de visibilidade de ErpSyncOrchestrator.syncTenant (ver
+  // comentário lá) — retorna resultado explícito e grava
+  // lastSyncStatus/lastSyncError em NuvemshopConnection.
+  async syncTenant(tenantId: string): Promise<{ success: boolean; error?: string }> {
     const correlationId = randomUUID();
     const logId = await this.syncLogs.start(CHANNEL_LISTINGS_PROVIDER_CODE, correlationId);
     let candidatesFound = 0;
@@ -83,15 +86,19 @@ export class NuvemshopChannelListingSyncService {
 
       await this.connections.markSynced(tenantId, new Date());
       await this.syncLogs.finish(logId, { status: 'SUCCESS', candidatesFound, candidatesApplied });
+      return { success: true };
     } catch (error) {
-      await this.health.recordFailure(CHANNEL_LISTINGS_PROVIDER_CODE, (error as Error).message);
+      const message = (error as Error).message;
+      await this.health.recordFailure(CHANNEL_LISTINGS_PROVIDER_CODE, message);
+      await this.connections.markSyncFailed(tenantId, message);
       await this.syncLogs.finish(logId, {
         status: 'FAILED',
         candidatesFound,
         candidatesApplied,
-        errorDetails: (error as Error).message,
+        errorDetails: message,
       });
-      this.logger.error(`Sync de listings da Nuvemshop falhou para o tenant ${tenantId}: ${(error as Error).message}`);
+      this.logger.error(`Sync de listings da Nuvemshop falhou para o tenant ${tenantId}: ${message}`);
+      return { success: false, error: message };
     }
   }
 }

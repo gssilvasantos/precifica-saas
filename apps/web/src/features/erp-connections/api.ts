@@ -7,12 +7,16 @@ export interface NuvemshopConnectionStatus {
   connected: boolean;
   isActive: boolean;
   lastSyncedAt: string | null;
+  lastSyncStatus: string | null;
+  lastSyncError: string | null;
 }
 
 export interface OlistConnectionStatus {
   connected: boolean;
   isActive: boolean;
   lastSyncedAt: string | null;
+  lastSyncStatus: string | null;
+  lastSyncError: string | null;
 }
 
 // ---------------------------------------------------------------------------

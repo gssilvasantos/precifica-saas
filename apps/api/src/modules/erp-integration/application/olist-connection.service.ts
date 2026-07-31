@@ -10,6 +10,8 @@ export interface OlistConnectionStatus {
   connected: boolean;
   isActive: boolean;
   lastSyncedAt: Date | null;
+  lastSyncStatus: string | null;
+  lastSyncError: string | null;
 }
 
 // Camada de aplicação que sabe de credenciais em claro — a única do módulo.
@@ -47,8 +49,14 @@ export class OlistConnectionService {
 
   async getStatus(tenantId: string): Promise<OlistConnectionStatus> {
     const existing = await this.connections.findByTenant(tenantId);
-    if (!existing) return { connected: false, isActive: false, lastSyncedAt: null };
-    return { connected: true, isActive: existing.isActive, lastSyncedAt: existing.lastSyncedAt };
+    if (!existing) return { connected: false, isActive: false, lastSyncedAt: null, lastSyncStatus: null, lastSyncError: null };
+    return {
+      connected: true,
+      isActive: existing.isActive,
+      lastSyncedAt: existing.lastSyncedAt,
+      lastSyncStatus: existing.lastSyncStatus,
+      lastSyncError: existing.lastSyncError,
+    };
   }
 
   async getDecryptedToken(tenantId: string): Promise<string | null> {

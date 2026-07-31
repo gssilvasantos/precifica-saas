@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Post, UseGuards } from '@nestjs/common';
 import {
   JwtAuthGuard,
   RolesGuard,
@@ -40,10 +40,15 @@ export class NuvemshopConnectionController {
     return this.connectionService.disconnect(user.tenantId);
   }
 
+  // Mesmo fix de visibilidade do OlistConnectionController.syncNow (ver
+  // comentário lá).
   @Roles(UserRole.ADMIN)
   @Post('sync-now')
   async syncNow(@CurrentUser() user: AuthenticatedUser) {
-    await this.listingSync.syncTenant(user.tenantId);
+    const result = await this.listingSync.syncTenant(user.tenantId);
+    if (!result.success) {
+      throw new BadRequestException(result.error ?? 'Falha desconhecida ao sincronizar com a Nuvemshop.');
+    }
     return { triggered: true };
   }
 }

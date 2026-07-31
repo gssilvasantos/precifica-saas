@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Post, Query, UseGuards } from '@nestjs/common';
 import {
   JwtAuthGuard,
   RolesGuard,
@@ -46,10 +46,19 @@ export class OlistConnectionController {
 
   // Dispara uma sincronização imediata, ignorando o intervalo do scheduler —
   // útil logo após conectar, para não esperar até 60 min pelo primeiro import.
+  // 31/07/2026 — antes disparava e retornava {triggered:true} mesmo quando a
+  // sincronização falhava por baixo dos panos (ver comentário em
+  // ErpSyncOrchestrator.syncTenant). Agora lê o resultado real e devolve o
+  // erro pro frontend — syncMutation.isError no OlistConnectionCard já
+  // renderiza extractErrorMessage(syncMutation.error), só faltava o backend
+  // propagar a mensagem de verdade.
   @Roles(UserRole.ADMIN)
   @Post('sync-now')
   async syncNow(@CurrentUser() user: AuthenticatedUser) {
-    await this.orchestrator.syncTenant(user.tenantId);
+    const result = await this.orchestrator.syncTenant(user.tenantId);
+    if (!result.success) {
+      throw new BadRequestException(result.error ?? 'Falha desconhecida ao sincronizar com o Olist.');
+    }
     return { triggered: true };
   }
 
