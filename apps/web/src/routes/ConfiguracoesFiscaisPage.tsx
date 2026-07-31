@@ -2,6 +2,9 @@ import { useAuth } from '../features/auth/auth-context';
 import TaxProfilesSection from '../features/tax-profiles/components/TaxProfilesSection';
 import DefaultMarginsForm from '../features/catalog-settings/components/DefaultMarginsForm';
 import FinancialPolicyForm from '../features/catalog-settings/components/FinancialPolicyForm';
+import FiscalSettingsForm from '../features/fiscal-settings/components/FiscalSettingsForm';
+import NaturezasOperacaoSection from '../features/fiscal-settings/components/NaturezasOperacaoSection';
+import FiscalIntermediariesSection from '../features/fiscal-settings/components/FiscalIntermediariesSection';
 
 // Bloco 3 do sprint de Layout/UI — CRUD real sobre contratos que já
 // existiam por inteiro no backend (TaxProfile + as duas rotas de
@@ -17,8 +20,8 @@ export default function ConfiguracoesFiscaisPage() {
       <div>
         <h1 className="font-serif text-3xl font-semibold text-foreground">Configurações Fiscais</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Perfis fiscais por regime, margens padrão para produtos importados e o piso financeiro global aplicado a
-          toda decisão de preço.
+          Perfis fiscais por regime, margens padrão, piso financeiro global e os dados do emitente (CNPJ, CFOP,
+          intermediador de marketplace) usados na emissão de NF-e.
         </p>
         {!canEdit && (
           <p className="mt-2 text-xs text-muted-foreground">
@@ -30,6 +33,9 @@ export default function ConfiguracoesFiscaisPage() {
       <TaxProfilesSection canEdit={canEdit} />
       <DefaultMarginsForm canEdit={canEdit} />
       <FinancialPolicyForm canEdit={canEdit} />
+      <FiscalSettingsForm canEdit={canEdit} />
+      <NaturezasOperacaoSection canEdit={canEdit} />
+      <FiscalIntermediariesSection canEdit={canEdit} />
     </div>
   );
 }

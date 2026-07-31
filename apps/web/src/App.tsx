@@ -10,6 +10,7 @@ import ProductPricingPage from './routes/ProductPricingPage';
 import IntegracoesPage from './routes/IntegracoesPage';
 import FinanceiroPage from './routes/FinanceiroPage';
 import ConfiguracoesFiscaisPage from './routes/ConfiguracoesFiscaisPage';
+import FiscalInvoicesPage from './routes/FiscalInvoicesPage';
 import AbastecimentoPage from './routes/AbastecimentoPage';
 import ConferenciaPage from './routes/ConferenciaPage';
 import ConferenciaDetalhePage from './routes/ConferenciaDetalhePage';
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="/promocoes" element={<PromotionsPage />} />
             <Route path="/promocoes/:campaignId" element={<PromotionCampaignDetailPage />} />
             <Route path="/configuracoes-fiscais" element={<ConfiguracoesFiscaisPage />} />
+            <Route path="/notas-fiscais" element={<FiscalInvoicesPage />} />
             <Route path="/equipe" element={<TeamPage />} />
             <Route path="/admin" element={<PlatformAdminPage />} />
             <Route path="/" element={<Navigate to="/catalogo" replace />} />

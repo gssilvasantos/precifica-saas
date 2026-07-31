@@ -13,6 +13,7 @@ import {
   Settings,
   Building2,
   Users,
+  FileText,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../features/auth/auth-context';
@@ -38,6 +39,7 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof LayoutGrid; module?: 
   { to: '/abastecimento', label: 'Abastecimento', icon: Truck, module: 'REPLENISHMENT' },
   { to: '/conferencia', label: 'Conferência', icon: ListChecks, module: 'CONFERENCE' },
   { to: '/integracoes', label: 'Integrações', icon: Plug, module: 'INTEGRATIONS' },
+  { to: '/notas-fiscais', label: 'Notas Fiscais', icon: FileText, module: 'FISCAL_SETTINGS' },
   { to: '/configuracoes-fiscais', label: 'Configurações Fiscais', icon: Settings, module: 'FISCAL_SETTINGS' },
 ];
 
