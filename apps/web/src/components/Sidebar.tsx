@@ -14,6 +14,10 @@ import {
   Building2,
   Users,
   FileText,
+  Factory,
+  Boxes,
+  Receipt,
+  Layers3,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../features/auth/auth-context';
@@ -34,9 +38,13 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof LayoutGrid; module?: 
   { to: '/ads', label: 'Ads', icon: Megaphone, module: 'ADS' },
   { to: '/catalogo', label: 'Produtos', icon: Package, module: 'CATALOG' },
   { to: '/governanca-map', label: 'Governança MAP', icon: ShieldCheck, module: 'CATALOG' },
+  { to: '/fornecedores', label: 'Fornecedores', icon: Factory, module: 'CATALOG' },
+  { to: '/embalagens', label: 'Embalagens', icon: Boxes, module: 'CATALOG' },
+  { to: '/listas-de-preco', label: 'Listas de Preço', icon: Receipt, module: 'CATALOG' },
   { to: '/promocoes', label: 'Promoções', icon: Tag, module: 'PROMOTIONS' },
   { to: '/financeiro', label: 'Financeiro', icon: BarChart3, module: 'FINANCE' },
   { to: '/abastecimento', label: 'Abastecimento', icon: Truck, module: 'REPLENISHMENT' },
+  { to: '/lotes', label: 'Lotes', icon: Layers3, module: 'REPLENISHMENT' },
   { to: '/conferencia', label: 'Conferência', icon: ListChecks, module: 'CONFERENCE' },
   { to: '/integracoes', label: 'Integrações', icon: Plug, module: 'INTEGRATIONS' },
   { to: '/notas-fiscais', label: 'Notas Fiscais', icon: FileText, module: 'FISCAL_SETTINGS' },

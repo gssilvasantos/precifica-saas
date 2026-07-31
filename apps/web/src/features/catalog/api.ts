@@ -17,6 +17,9 @@ export interface Product {
   photoUrls: string[];
   sourceSystem: 'MANUAL' | 'ERP_OLIST';
   isActive: boolean;
+  // Produtos-Lotes (Projeto Estruturante 2) — precisa ser true antes de
+  // cadastrar qualquer lote para este produto (ver ProductLotService.create).
+  controlaLote: boolean;
 }
 
 export async function fetchProducts(): Promise<Product[]> {
@@ -30,6 +33,13 @@ export async function fetchProducts(): Promise<Product[]> {
 // a tela de fato usa, mesma disciplina do resto do frontend.
 export async function updateProductMapPrice(id: string, mapPrice: number | null): Promise<Product> {
   const { data } = await apiClient.patch<Product>(`/products/${id}`, { mapPrice });
+  return data;
+}
+
+// Produtos-Lotes — liga o controle de lote para este produto (pré-requisito
+// para cadastrar lotes, ver features/product-lots/api.ts).
+export async function updateProductControlaLote(id: string, controlaLote: boolean): Promise<Product> {
+  const { data } = await apiClient.patch<Product>(`/products/${id}`, { controlaLote });
   return data;
 }
 

@@ -20,6 +20,10 @@ import PromotionsPage from './routes/PromotionsPage';
 import PromotionCampaignDetailPage from './routes/PromotionCampaignDetailPage';
 import PlatformAdminPage from './routes/PlatformAdminPage';
 import TeamPage from './routes/TeamPage';
+import SuppliersPage from './routes/SuppliersPage';
+import PackagingPage from './routes/PackagingPage';
+import PriceListsPage from './routes/PriceListsPage';
+import LotsPage from './routes/LotsPage';
 
 export default function App() {
   return (
@@ -47,6 +51,10 @@ export default function App() {
             <Route path="/promocoes/:campaignId" element={<PromotionCampaignDetailPage />} />
             <Route path="/configuracoes-fiscais" element={<ConfiguracoesFiscaisPage />} />
             <Route path="/notas-fiscais" element={<FiscalInvoicesPage />} />
+            <Route path="/fornecedores" element={<SuppliersPage />} />
+            <Route path="/embalagens" element={<PackagingPage />} />
+            <Route path="/listas-de-preco" element={<PriceListsPage />} />
+            <Route path="/lotes" element={<LotsPage />} />
             <Route path="/equipe" element={<TeamPage />} />
             <Route path="/admin" element={<PlatformAdminPage />} />
             <Route path="/" element={<Navigate to="/catalogo" replace />} />
