@@ -29,6 +29,11 @@ import PurchaseOrdersPage from './routes/PurchaseOrdersPage';
 import ProductionOrdersPage from './routes/ProductionOrdersPage';
 import CarriersPage from './routes/CarriersPage';
 import DispatchBatchesPage from './routes/DispatchBatchesPage';
+import CategoriesPage from './routes/CategoriesPage';
+import ListingsPage from './routes/ListingsPage';
+import CompetitionRadarPage from './routes/CompetitionRadarPage';
+import MarketplaceGovernancePage from './routes/MarketplaceGovernancePage';
+import TagsPage from './routes/TagsPage';
 
 export default function App() {
   return (
@@ -65,6 +70,11 @@ export default function App() {
             <Route path="/ordens-de-producao" element={<ProductionOrdersPage />} />
             <Route path="/transportadoras" element={<CarriersPage />} />
             <Route path="/expedicao-em-lote" element={<DispatchBatchesPage />} />
+            <Route path="/categorias" element={<CategoriesPage />} />
+            <Route path="/publicar-anuncio" element={<ListingsPage />} />
+            <Route path="/radar-concorrencia" element={<CompetitionRadarPage />} />
+            <Route path="/governanca-marketplace" element={<MarketplaceGovernancePage />} />
+            <Route path="/tags" element={<TagsPage />} />
             <Route path="/equipe" element={<TeamPage />} />
             <Route path="/admin" element={<PlatformAdminPage />} />
             <Route path="/" element={<Navigate to="/catalogo" replace />} />

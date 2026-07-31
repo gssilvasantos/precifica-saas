@@ -8,6 +8,8 @@ import {
   type ReplenishmentStatus,
 } from '../features/logistics-fulfillment/api';
 import { ORDER_CHANNELS } from '../features/orders/channels';
+import { fetchCubicWeightFactor, updateCubicWeightFactor } from '../features/logistics-intelligence/api';
+import { useAuth } from '../features/auth/auth-context';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
@@ -29,6 +31,8 @@ const numberFormatter = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 
 // pelo próprio backend (ReplenishmentAdvisorService) — o que precisa de
 // atenção agora já aparece no topo.
 export default function AbastecimentoPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const [channelCode, setChannelCode] = useState('NUVEMSHOP');
   const queryClient = useQueryClient();
 
@@ -90,6 +94,8 @@ export default function AbastecimentoPage() {
         onChange={(days) => leadTimeMutation.mutate(days)}
         isSaving={leadTimeMutation.isPending}
       />
+
+      <CubicWeightFactorConfig isAdmin={isAdmin} />
 
       <Card className="overflow-hidden p-0">
         <div className="overflow-x-auto">
@@ -199,6 +205,86 @@ function LeadTimeConfig({
           </span>
         )}
       </div>
+    </Card>
+  );
+}
+
+// Fator de peso cúbico — divisor usado para converter volume (cm³) em peso
+// cubado (kg); o frete cobra pelo maior entre peso real e peso cubado. Config
+// única por tenant, mesmo padrão de LeadTimeConfig acima.
+function CubicWeightFactorConfig({ isAdmin }: { isAdmin: boolean }) {
+  const queryClient = useQueryClient();
+  const [customValue, setCustomValue] = useState('');
+
+  const factorQuery = useQuery({ queryKey: ['cubic-weight-factor'], queryFn: fetchCubicWeightFactor });
+
+  const updateMutation = useMutation({
+    mutationFn: (factor: number) => updateCubicWeightFactor(factor),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['cubic-weight-factor'] }),
+  });
+
+  const CUBIC_FACTOR_PRESETS = [5000, 6000];
+
+  return (
+    <Card className="flex flex-wrap items-center gap-3 px-5 py-4">
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Fator de peso cúbico</p>
+        <p className="text-xs text-muted-foreground">
+          Divisor (cm³ por kg) usado para calcular o peso cubado — o frete considera o maior entre peso real e cubado.
+        </p>
+      </div>
+
+      {isAdmin ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {CUBIC_FACTOR_PRESETS.map((factor) => (
+            <button
+              key={factor}
+              type="button"
+              disabled={updateMutation.isPending}
+              onClick={() => updateMutation.mutate(factor)}
+              className={cn(
+                'rounded-full px-3 py-1 text-xs font-medium transition disabled:opacity-50',
+                factorQuery.data === factor ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
+              )}
+            >
+              {factor}
+            </button>
+          ))}
+
+          <form
+            className="flex items-center gap-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const parsed = Number(customValue);
+              if (Number.isInteger(parsed) && parsed > 0) updateMutation.mutate(parsed);
+            }}
+          >
+            <input
+              type="number"
+              min={1}
+              placeholder="outro"
+              value={customValue}
+              onChange={(e) => setCustomValue(e.target.value)}
+              className="h-7 w-24 rounded-md border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <Button type="submit" variant="outline" size="sm" disabled={updateMutation.isPending}>
+              Aplicar
+            </Button>
+          </form>
+
+          {factorQuery.data !== undefined && (
+            <span className="text-xs text-muted-foreground">
+              Atual: <strong className="text-foreground">{factorQuery.data}</strong>
+            </span>
+          )}
+        </div>
+      ) : (
+        factorQuery.data !== undefined && (
+          <span className="text-xs text-muted-foreground">
+            Atual: <strong className="text-foreground">{factorQuery.data}</strong>
+          </span>
+        )
+      )}
     </Card>
   );
 }

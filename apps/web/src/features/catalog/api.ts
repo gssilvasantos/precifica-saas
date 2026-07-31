@@ -20,6 +20,11 @@ export interface Product {
   // Produtos-Lotes (Projeto Estruturante 2) — precisa ser true antes de
   // cadastrar qualquer lote para este produto (ver ProductLotService.create).
   controlaLote: boolean;
+  // Árvore de categoria (Fase 4) — id de catalog.ProductCategory, usado para
+  // publicar anúncio em marketplace (resolve atributos herdados + mapeamento
+  // de categoria do canal). null = produto ainda sem categoria definida.
+  categoryId: string | null;
+  weightKg: number;
 }
 
 export async function fetchProducts(): Promise<Product[]> {
@@ -40,6 +45,14 @@ export async function updateProductMapPrice(id: string, mapPrice: number | null)
 // para cadastrar lotes, ver features/product-lots/api.ts).
 export async function updateProductControlaLote(id: string, controlaLote: boolean): Promise<Product> {
   const { data } = await apiClient.patch<Product>(`/products/${id}`, { controlaLote });
+  return data;
+}
+
+// Fase 4 (Publicar Anúncio Novo) — vincula o produto a uma categoria interna
+// (catalog.ProductCategory), pré-requisito para publicar em marketplace (ver
+// features/marketplace-publishing/api.ts). Aceita null para desvincular.
+export async function updateProductCategory(id: string, categoryId: string | null): Promise<Product> {
+  const { data } = await apiClient.patch<Product>(`/products/${id}`, { categoryId });
   return data;
 }
 

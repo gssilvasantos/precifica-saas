@@ -23,6 +23,11 @@ import {
   Cog,
   Route,
   Send,
+  FolderTree,
+  Rocket,
+  Radar,
+  ShieldAlert,
+  Tags,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../features/auth/auth-context';
@@ -46,6 +51,9 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof LayoutGrid; module?: 
   { to: '/fornecedores', label: 'Fornecedores', icon: Factory, module: 'CATALOG' },
   { to: '/embalagens', label: 'Embalagens', icon: Boxes, module: 'CATALOG' },
   { to: '/listas-de-preco', label: 'Listas de Preço', icon: Receipt, module: 'CATALOG' },
+  { to: '/categorias', label: 'Categorias e Publicação', icon: FolderTree, module: 'CATALOG' },
+  { to: '/publicar-anuncio', label: 'Publicar Anúncio', icon: Rocket, module: 'CATALOG' },
+  { to: '/radar-concorrencia', label: 'Radar de Concorrência', icon: Radar, module: 'CATALOG' },
   { to: '/promocoes', label: 'Promoções', icon: Tag, module: 'PROMOTIONS' },
   { to: '/financeiro', label: 'Financeiro', icon: BarChart3, module: 'FINANCE' },
   { to: '/abastecimento', label: 'Abastecimento', icon: Truck, module: 'REPLENISHMENT' },
@@ -57,6 +65,8 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof LayoutGrid; module?: 
   { to: '/transportadoras', label: 'Transportadoras', icon: Route, module: 'CONFERENCE' },
   { to: '/expedicao-em-lote', label: 'Expedição em Lote', icon: Send, module: 'CONFERENCE' },
   { to: '/integracoes', label: 'Integrações', icon: Plug, module: 'INTEGRATIONS' },
+  { to: '/governanca-marketplace', label: 'Governança Marketplace', icon: ShieldAlert, module: 'INTEGRATIONS' },
+  { to: '/tags', label: 'Tags', icon: Tags },
   { to: '/notas-fiscais', label: 'Notas Fiscais', icon: FileText, module: 'FISCAL_SETTINGS' },
   { to: '/configuracoes-fiscais', label: 'Configurações Fiscais', icon: Settings, module: 'FISCAL_SETTINGS' },
 ];
