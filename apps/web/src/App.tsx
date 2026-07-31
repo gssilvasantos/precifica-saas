@@ -24,6 +24,11 @@ import SuppliersPage from './routes/SuppliersPage';
 import PackagingPage from './routes/PackagingPage';
 import PriceListsPage from './routes/PriceListsPage';
 import LotsPage from './routes/LotsPage';
+import SellersPage from './routes/SellersPage';
+import PurchaseOrdersPage from './routes/PurchaseOrdersPage';
+import ProductionOrdersPage from './routes/ProductionOrdersPage';
+import CarriersPage from './routes/CarriersPage';
+import DispatchBatchesPage from './routes/DispatchBatchesPage';
 
 export default function App() {
   return (
@@ -55,6 +60,11 @@ export default function App() {
             <Route path="/embalagens" element={<PackagingPage />} />
             <Route path="/listas-de-preco" element={<PriceListsPage />} />
             <Route path="/lotes" element={<LotsPage />} />
+            <Route path="/vendedores" element={<SellersPage />} />
+            <Route path="/ordens-de-compra" element={<PurchaseOrdersPage />} />
+            <Route path="/ordens-de-producao" element={<ProductionOrdersPage />} />
+            <Route path="/transportadoras" element={<CarriersPage />} />
+            <Route path="/expedicao-em-lote" element={<DispatchBatchesPage />} />
             <Route path="/equipe" element={<TeamPage />} />
             <Route path="/admin" element={<PlatformAdminPage />} />
             <Route path="/" element={<Navigate to="/catalogo" replace />} />

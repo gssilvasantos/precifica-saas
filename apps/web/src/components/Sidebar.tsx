@@ -18,6 +18,11 @@ import {
   Boxes,
   Receipt,
   Layers3,
+  Percent,
+  ShoppingCart,
+  Cog,
+  Route,
+  Send,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../features/auth/auth-context';
@@ -45,7 +50,12 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof LayoutGrid; module?: 
   { to: '/financeiro', label: 'Financeiro', icon: BarChart3, module: 'FINANCE' },
   { to: '/abastecimento', label: 'Abastecimento', icon: Truck, module: 'REPLENISHMENT' },
   { to: '/lotes', label: 'Lotes', icon: Layers3, module: 'REPLENISHMENT' },
+  { to: '/ordens-de-compra', label: 'Ordens de Compra', icon: ShoppingCart, module: 'REPLENISHMENT' },
+  { to: '/ordens-de-producao', label: 'Ordens de Produção', icon: Cog, module: 'REPLENISHMENT' },
+  { to: '/vendedores', label: 'Vendedores', icon: Percent, module: 'FINANCE' },
   { to: '/conferencia', label: 'Conferência', icon: ListChecks, module: 'CONFERENCE' },
+  { to: '/transportadoras', label: 'Transportadoras', icon: Route, module: 'CONFERENCE' },
+  { to: '/expedicao-em-lote', label: 'Expedição em Lote', icon: Send, module: 'CONFERENCE' },
   { to: '/integracoes', label: 'Integrações', icon: Plug, module: 'INTEGRATIONS' },
   { to: '/notas-fiscais', label: 'Notas Fiscais', icon: FileText, module: 'FISCAL_SETTINGS' },
   { to: '/configuracoes-fiscais', label: 'Configurações Fiscais', icon: Settings, module: 'FISCAL_SETTINGS' },
