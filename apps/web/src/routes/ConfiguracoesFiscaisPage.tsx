@@ -15,13 +15,13 @@ export default function ConfiguracoesFiscaisPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="font-serif text-3xl font-semibold text-ink-900">Configurações Fiscais</h1>
-        <p className="mt-1 max-w-2xl text-sm text-ink-500">
+        <h1 className="font-serif text-3xl font-semibold text-foreground">Configurações Fiscais</h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
           Perfis fiscais por regime, margens padrão para produtos importados e o piso financeiro global aplicado a
           toda decisão de preço.
         </p>
         {!canEdit && (
-          <p className="mt-2 text-xs text-ink-500">
+          <p className="mt-2 text-xs text-muted-foreground">
             Você tem acesso somente leitura — edição é restrita ao papel Administrador.
           </p>
         )}

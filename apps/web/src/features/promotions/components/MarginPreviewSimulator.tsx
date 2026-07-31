@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { enrollSkuInCampaign, previewCampaignMargin, type MarginPreview } from '../api';
+import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const percent = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -39,14 +41,14 @@ export default function MarginPreviewSimulator({ campaignId, canEnroll }: Props)
   const isVerde = preview?.marginStatus === 'VERDE';
 
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-card">
-      <h2 className="font-serif text-base font-semibold text-ink-900">Semáforo de Margem</h2>
-      <p className="mt-1 text-xs text-ink-500">
+    <Card className="p-5">
+      <h2 className="font-serif text-base font-semibold text-foreground">Semáforo de Margem</h2>
+      <p className="mt-1 text-xs text-muted-foreground">
         Simule a margem líquida de um SKU nesta campanha antes de confirmar a inscrição.
       </p>
 
       <div className="mt-3 flex flex-wrap items-end gap-2">
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           SKU
           <input
             type="text"
@@ -57,10 +59,10 @@ export default function MarginPreviewSimulator({ campaignId, canEnroll }: Props)
               enrollMutation.reset();
             }}
             placeholder="Ex.: CAM-001"
-            className="mt-1 block w-40 rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 block w-40 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Preço promocional
           <input
             type="number"
@@ -72,17 +74,12 @@ export default function MarginPreviewSimulator({ campaignId, canEnroll }: Props)
               setPreview(null);
               enrollMutation.reset();
             }}
-            className="mt-1 block w-32 rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 block w-32 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
-        <button
-          type="button"
-          onClick={() => previewMutation.mutate()}
-          disabled={!canSimulate || previewMutation.isPending}
-          className="rounded-lg border border-ink-300 px-4 py-2 text-sm font-medium text-ink-700 transition hover:border-gold hover:text-gold disabled:opacity-50"
-        >
+        <Button variant="outline" onClick={() => previewMutation.mutate()} disabled={!canSimulate || previewMutation.isPending}>
           {previewMutation.isPending ? 'Calculando…' : 'Simular'}
-        </button>
+        </Button>
       </div>
 
       {previewMutation.isError && (
@@ -90,7 +87,7 @@ export default function MarginPreviewSimulator({ campaignId, canEnroll }: Props)
       )}
 
       {preview && (
-        <div className="mt-4 rounded-xl border border-ink-300/60 p-4">
+        <div className="mt-4 rounded-xl border border-border p-4">
           <div className="flex items-center justify-between">
             <span
               className={`rounded-full px-3 py-1 text-xs font-semibold ${
@@ -99,26 +96,26 @@ export default function MarginPreviewSimulator({ campaignId, canEnroll }: Props)
             >
               {isVerde ? 'VERDE — margem positiva' : 'VERMELHO — margem negativa ou zero'}
             </span>
-            <span className="font-sans text-lg font-semibold text-ink-900">
+            <span className="font-sans text-lg font-semibold text-foreground">
               {currency.format(preview.netMarginAmount)} ({percent.format(preview.netMarginPct)}%)
             </span>
           </div>
 
-          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ink-700 sm:grid-cols-4">
+          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-foreground sm:grid-cols-4">
             <div>
-              <dt className="text-ink-500">Custo</dt>
+              <dt className="text-muted-foreground">Custo</dt>
               <dd className="font-sans font-medium">{currency.format(preview.costPriceUsed)}</dd>
             </div>
             <div>
-              <dt className="text-ink-500">Taxas do canal</dt>
+              <dt className="text-muted-foreground">Taxas do canal</dt>
               <dd className="font-sans font-medium">{currency.format(preview.feesAmount)}</dd>
             </div>
             <div>
-              <dt className="text-ink-500">Impostos</dt>
+              <dt className="text-muted-foreground">Impostos</dt>
               <dd className="font-sans font-medium">{currency.format(preview.taxAmount)}</dd>
             </div>
             <div>
-              <dt className="text-ink-500">Logística</dt>
+              <dt className="text-muted-foreground">Logística</dt>
               <dd className="font-sans font-medium">{currency.format(preview.logisticsCost)}</dd>
             </div>
           </dl>
@@ -132,14 +129,9 @@ export default function MarginPreviewSimulator({ campaignId, canEnroll }: Props)
 
           {canEnroll && (
             <div className="mt-4">
-              <button
-                type="button"
-                onClick={() => enrollMutation.mutate()}
-                disabled={enrollMutation.isPending}
-                className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-ink-700 disabled:opacity-50"
-              >
+              <Button onClick={() => enrollMutation.mutate()} disabled={enrollMutation.isPending}>
                 {enrollMutation.isPending ? 'Inscrevendo…' : 'Inscrever SKU na campanha'}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -156,6 +148,6 @@ export default function MarginPreviewSimulator({ campaignId, canEnroll }: Props)
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

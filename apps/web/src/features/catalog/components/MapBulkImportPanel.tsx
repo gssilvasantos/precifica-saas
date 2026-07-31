@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { bulkImportMapPrice } from '../api';
+import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
 
 // Painel de importação em massa da Política de Preço Mínimo (MAP) — CSV
 // (sku_code,map_price) lido no navegador via FileReader e enviado como texto
@@ -34,10 +36,10 @@ export default function MapBulkImportPanel() {
   };
 
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-card">
-      <h2 className="font-serif text-base font-semibold text-ink-900">Importação em massa (CSV)</h2>
-      <p className="mt-1 text-xs text-ink-500">
-        Colunas <code className="rounded bg-canvas px-1 py-0.5">sku_code,map_price</code>. Política tudo-ou-nada: se
+    <Card className="p-5">
+      <h2 className="font-serif text-base font-semibold text-foreground">Importação em massa (CSV)</h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Colunas <code className="rounded bg-muted px-1 py-0.5">sku_code,map_price</code>. Política tudo-ou-nada: se
         qualquer linha tiver erro, nada é aplicado — corrija a planilha e reenvie.
       </p>
 
@@ -49,22 +51,13 @@ export default function MapBulkImportPanel() {
           className="hidden"
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="rounded-lg border border-ink-300 px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-gold hover:text-gold"
-        >
+        <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
           Escolher arquivo
-        </button>
-        <span className="text-xs text-ink-500">{fileName ?? 'Nenhum arquivo selecionado'}</span>
-        <button
-          type="button"
-          onClick={() => importMutation.mutate()}
-          disabled={!fileContent || importMutation.isPending}
-          className="ml-auto rounded-lg bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-ink-700 disabled:opacity-50"
-        >
+        </Button>
+        <span className="text-xs text-muted-foreground">{fileName ?? 'Nenhum arquivo selecionado'}</span>
+        <Button size="sm" className="ml-auto" onClick={() => importMutation.mutate()} disabled={!fileContent || importMutation.isPending}>
           {importMutation.isPending ? 'Importando…' : 'Importar'}
-        </button>
+        </Button>
       </div>
 
       {importMutation.data && importMutation.data.errors.length === 0 && (
@@ -92,6 +85,6 @@ export default function MapBulkImportPanel() {
           Não foi possível importar — tente novamente.
         </p>
       )}
-    </div>
+    </Card>
   );
 }

@@ -21,9 +21,9 @@ export default function ChannelBadge({ channelCode, size = 'md' }: Props) {
       >
         {meta.initial}
       </span>
-      <span className="text-sm font-medium text-ink-900">{meta.label}</span>
+      <span className="text-sm font-medium text-foreground">{meta.label}</span>
       {!meta.implemented && (
-        <span className="rounded-full bg-ink-300/40 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-ink-500">
+        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
           em breve
         </span>
       )}

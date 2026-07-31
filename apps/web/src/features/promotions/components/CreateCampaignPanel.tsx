@@ -3,6 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ORDER_CHANNELS } from '../../orders/channels';
 import { createPromotionCampaign } from '../api';
+import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
 
 // Criação de campanha promocional — POST /promotion-intelligence/campaigns
 // (ADMIN + PRICING_EDITOR no backend). Reaproveita a lista de canais de
@@ -34,38 +36,34 @@ export default function CreateCampaignPanel() {
 
   if (!isOpen) {
     return (
-      <button
-        type="button"
-        onClick={() => setIsOpen(true)}
-        className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-ink-700"
-      >
+      <Button onClick={() => setIsOpen(true)}>
         Nova campanha
-      </button>
+      </Button>
     );
   }
 
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-card">
-      <h2 className="font-serif text-base font-semibold text-ink-900">Nova campanha promocional</h2>
+    <Card className="p-5">
+      <h2 className="font-serif text-base font-semibold text-foreground">Nova campanha promocional</h2>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Nome da campanha
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Ex.: Black Friday 2026"
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
 
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Canal
           <select
             value={channelCode}
             onChange={(e) => setChannelCode(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {ORDER_CHANNELS.map((c) => (
               <option key={c.code} value={c.code}>
@@ -75,23 +73,23 @@ export default function CreateCampaignPanel() {
           </select>
         </label>
 
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Início
           <input
             type="date"
             value={startAt}
             onChange={(e) => setStartAt(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
 
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Fim
           <input
             type="date"
             value={endAt}
             onChange={(e) => setEndAt(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
       </div>
@@ -101,22 +99,17 @@ export default function CreateCampaignPanel() {
       )}
 
       <div className="mt-4 flex gap-2">
-        <button
-          type="button"
-          onClick={() => createMutation.mutate()}
-          disabled={!canSubmit || createMutation.isPending}
-          className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-ink-700 disabled:opacity-50"
-        >
+        <Button onClick={() => createMutation.mutate()} disabled={!canSubmit || createMutation.isPending}>
           {createMutation.isPending ? 'Criando…' : 'Criar campanha'}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="outline"
+          className="hover:border-margin-danger hover:text-margin-danger"
           onClick={() => setIsOpen(false)}
-          className="rounded-lg border border-ink-300 px-4 py-2 text-sm font-medium text-ink-700 transition hover:border-margin-danger hover:text-margin-danger"
         >
           Cancelar
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }

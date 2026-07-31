@@ -17,6 +17,9 @@ import {
 import { fetchProducts } from '../features/catalog/api';
 import { ensureAudioUnlocked, playChecklistCompleteChime, playScanErrorTone, playScanSuccessTone } from '../lib/audio-feedback';
 import { retryWithBackoff } from '../lib/retry';
+import { Card } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { cn } from '../lib/utils';
 
 // Sprint 27 (Pick & Pack) — a tela é o "juiz" pedido pelo usuário: mostra o
 // checklist com fotos, grava a conferência em vídeo (MediaDevices API +
@@ -311,7 +314,7 @@ export default function ConferenciaDetalhePage() {
   }
 
   if (eventQuery.isLoading) {
-    return <p className="text-sm text-ink-500">Carregando evento de conferência…</p>;
+    return <p className="text-sm text-muted-foreground">Carregando evento de conferência…</p>;
   }
   if (!event) {
     return <p className="text-sm text-margin-danger">Evento de conferência não encontrado.</p>;
@@ -319,21 +322,21 @@ export default function ConferenciaDetalhePage() {
 
   if (event.conferenceStatus !== 'PENDENTE') {
     return (
-      <div className="rounded-2xl bg-surface p-6 shadow-card">
-        <h1 className="font-serif text-2xl font-semibold text-ink-900">Conferência já decidida</h1>
-        <p className="mt-2 text-sm text-ink-500">
-          Este evento já está <strong className="text-ink-900">{event.conferenceStatus}</strong> e não pode ser
+      <Card className="p-6">
+        <h1 className="font-serif text-2xl font-semibold text-foreground">Conferência já decidida</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Este evento já está <strong className="text-foreground">{event.conferenceStatus}</strong> e não pode ser
           reaberto nesta tela.
         </p>
-      </div>
+      </Card>
     );
   }
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-serif text-3xl font-semibold text-ink-900">Conferência de Expedição</h1>
-        <p className="mt-1 text-sm text-ink-500">
+        <h1 className="font-serif text-3xl font-semibold text-foreground">Conferência de Expedição</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           {event.orderIds.length > 0 ? `${event.orderIds.length} pedido(s) vinculado(s)` : 'Reabastecimento preventivo'}{' '}
           — bipe cada item e grave a conferência em vídeo antes de finalizar a embalagem.
         </p>
@@ -341,23 +344,23 @@ export default function ConferenciaDetalhePage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Checklist com fotos */}
-        <div className="rounded-2xl bg-surface p-5 shadow-card">
+        <Card className="p-5">
           <div className="flex items-center justify-between">
-            <h2 className="font-serif text-lg font-semibold text-ink-900">Checklist de bipagem</h2>
+            <h2 className="font-serif text-lg font-semibold text-foreground">Checklist de bipagem</h2>
             {checklist.length > 0 && (
-              <span className="font-sans text-xs font-semibold text-ink-500">
+              <span className="font-sans text-xs font-semibold text-muted-foreground">
                 {totalScanned} / {totalExpected} un.
               </span>
             )}
           </div>
 
           {checklist.length > 0 && (
-            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-ink-300/30">
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
               <div
-                className={[
+                className={cn(
                   'h-full rounded-full transition-all duration-300 ease-out',
                   checklistComplete ? 'bg-margin-good' : 'bg-neon',
-                ].join(' ')}
+                )}
                 style={{ width: `${progressPct}%` }}
               />
             </div>
@@ -369,32 +372,28 @@ export default function ConferenciaDetalhePage() {
               value={skuInput}
               onChange={(e) => setSkuInput(e.target.value)}
               placeholder="Bipe ou digite o SKU e pressione Enter"
-              className={[
-                'flex-1 rounded-lg border bg-surface px-3 py-2 text-sm text-ink-900 focus:outline-none focus:ring-1',
+              className={cn(
+                'flex-1 rounded-md border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2',
                 inputShake
-                  ? 'animate-shake border-margin-danger focus:border-margin-danger focus:ring-margin-danger'
-                  : 'border-ink-300 focus:border-neon focus:ring-neon',
-              ].join(' ')}
+                  ? 'animate-shake border-margin-danger focus-visible:ring-margin-danger'
+                  : 'border-input focus-visible:ring-ring',
+              )}
             />
-            <button
-              type="submit"
-              disabled={scanMutation.isPending}
-              className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neon hover:text-ink-900 disabled:opacity-50"
-            >
+            <Button type="submit" disabled={scanMutation.isPending}>
               Bipar
-            </button>
+            </Button>
           </form>
           {scanError && <p className="mt-2 text-xs text-margin-danger">{scanError}</p>}
 
           {showCompleteBanner && (
-            <div className="animate-neonPulse mt-3 rounded-lg bg-neon-dim px-3 py-2 text-xs font-semibold text-ink-900">
+            <div className="animate-neonPulse mt-3 rounded-lg bg-neon-dim px-3 py-2 text-xs font-semibold text-foreground">
               Checklist 100% concluído — pode seguir para a gravação/finalização.
             </div>
           )}
 
           <div className="mt-4 space-y-2">
             {checklist.length === 0 && (
-              <p className="text-sm text-ink-500">
+              <p className="text-sm text-muted-foreground">
                 Nenhum item no checklist deste evento (reabastecimento preventivo — aprovação depende só da mídia).
               </p>
             )}
@@ -408,12 +407,12 @@ export default function ConferenciaDetalhePage() {
               />
             ))}
           </div>
-        </div>
+        </Card>
 
         {/* Auditoria visual em vídeo */}
-        <div className="rounded-2xl bg-surface p-5 shadow-card">
+        <Card className="p-5">
           <div className="flex items-center justify-between">
-            <h2 className="font-serif text-lg font-semibold text-ink-900">Auditoria visual (vídeo)</h2>
+            <h2 className="font-serif text-lg font-semibold text-foreground">Auditoria visual (vídeo)</h2>
             {isRecording && (
               <span className="flex items-center gap-1.5 text-xs font-semibold text-margin-danger">
                 <span className="h-2 w-2 animate-recPulse rounded-full bg-margin-danger" />
@@ -421,7 +420,7 @@ export default function ConferenciaDetalhePage() {
               </span>
             )}
           </div>
-          <p className="mt-1 text-xs text-ink-500">
+          <p className="mt-1 text-xs text-muted-foreground">
             {checklist.length > 0
               ? 'A gravação começa sozinha assim que você bipar o primeiro item. Retenção de 30 dias.'
               : 'A gravação fica vinculada automaticamente a este evento. Retenção de 30 dias.'}
@@ -433,10 +432,7 @@ export default function ConferenciaDetalhePage() {
               autoPlay
               muted
               playsInline
-              className={[
-                'aspect-video w-full rounded-xl bg-ink-900 object-cover',
-                isRecording ? 'ring-2 ring-margin-danger' : '',
-              ].join(' ')}
+              className={cn('aspect-video w-full rounded-xl bg-ink-900 object-cover', isRecording && 'ring-2 ring-margin-danger')}
             />
           </div>
 
@@ -451,23 +447,18 @@ export default function ConferenciaDetalhePage() {
 
           <div className="mt-3 flex items-center gap-3">
             {!isRecording && !videoAlreadyFinalized && (
-              <button
-                type="button"
-                onClick={startRecording}
-                className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-semibold text-white hover:bg-neon hover:text-ink-900"
-              >
+              <Button onClick={startRecording}>
                 {hasScannedAtLeastOne ? 'Tentar câmera novamente' : 'Iniciar gravação manualmente'}
-              </button>
+              </Button>
             )}
             {isRecording && (
-              <button
-                type="button"
+              <Button
                 onClick={stopRecording}
                 disabled={isFinalizingVideo}
-                className="rounded-lg bg-margin-danger px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                className="bg-margin-danger text-white hover:bg-margin-danger/90"
               >
                 {isFinalizingVideo ? 'Finalizando…' : 'Parar gravação'}
-              </button>
+              </Button>
             )}
             {videoAlreadyFinalized && (
               <span className="rounded-full bg-margin-good/15 px-3 py-1 text-xs font-medium text-margin-good">
@@ -475,13 +466,13 @@ export default function ConferenciaDetalhePage() {
               </span>
             )}
           </div>
-        </div>
+        </Card>
       </div>
 
       {actionError && <p className="text-sm text-margin-danger">{actionError}</p>}
 
-      <div className="flex flex-col gap-3 rounded-2xl bg-surface p-5 shadow-card sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-xs text-ink-500">
+      <Card className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs text-muted-foreground">
           {videoSessionCorrupted && 'Gravação comprometida por falha de rede — reporte a divergência. '}
           {!videoSessionCorrupted && !checklistComplete && checklist.length > 0 && 'Ainda faltam itens a bipar. '}
           {!videoSessionCorrupted &&
@@ -496,43 +487,33 @@ export default function ConferenciaDetalhePage() {
         </div>
 
         <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => setShowDivergenceForm((v) => !v)}
-            className="rounded-lg border border-ink-300 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-canvas"
-          >
+          <Button variant="outline" onClick={() => setShowDivergenceForm((v) => !v)}>
             Reportar divergência
-          </button>
-          <button
-            type="button"
-            onClick={handleFinalize}
-            disabled={!canFinalize}
-            className="rounded-lg bg-ink-900 px-5 py-2 text-sm font-semibold text-white hover:bg-neon hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-40"
-          >
+          </Button>
+          <Button onClick={handleFinalize} disabled={!canFinalize}>
             Finalizar Embalagem
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
 
       {showDivergenceForm && (
-        <div className="rounded-2xl bg-surface p-5 shadow-card">
-          <label className="text-xs font-medium uppercase tracking-wide text-ink-500">Motivo da divergência</label>
+        <Card className="p-5">
+          <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Motivo da divergência</label>
           <textarea
             value={divergenceNotes}
             onChange={(e) => setDivergenceNotes(e.target.value)}
             rows={3}
-            className="mt-2 w-full rounded-lg border border-ink-300 bg-surface px-3 py-2 text-sm text-ink-900 focus:border-neon focus:outline-none focus:ring-1 focus:ring-neon"
+            className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             placeholder="Ex.: faltou 1 unidade do SKU-123 no lote físico"
           />
-          <button
-            type="button"
+          <Button
             onClick={() => divergentMutation.mutate(divergenceNotes)}
             disabled={!divergenceNotes.trim() || divergentMutation.isPending}
-            className="mt-2 rounded-lg bg-margin-danger px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="mt-2 bg-margin-danger text-white hover:bg-margin-danger/90"
           >
             Confirmar divergência
-          </button>
-        </div>
+          </Button>
+        </Card>
       )}
     </div>
   );
@@ -551,22 +532,19 @@ function ChecklistRow({
 
   return (
     <div
-      className={[
-        'flex items-center gap-3 rounded-xl border border-ink-300/40 px-3 py-2',
-        justScanned ? 'animate-scanFlash' : '',
-      ].join(' ')}
+      className={cn('flex items-center gap-3 rounded-xl border border-border px-3 py-2', justScanned && 'animate-scanFlash')}
     >
       {photoUrl ? (
         <img src={photoUrl} alt={item.skuCode} className="h-12 w-12 rounded-lg object-cover" />
       ) : (
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-ink-300/30 text-[10px] text-ink-500">
+        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted text-[10px] text-muted-foreground">
           sem foto
         </div>
       )}
 
       <div className="flex-1">
-        <p className="font-sans text-sm font-medium text-ink-900">{item.skuCode}</p>
-        <p className="text-xs text-ink-500">
+        <p className="font-sans text-sm font-medium text-foreground">{item.skuCode}</p>
+        <p className="text-xs text-muted-foreground">
           {item.scannedQuantity} / {item.expectedQuantity} bipado(s)
         </p>
       </div>

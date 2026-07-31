@@ -1,4 +1,6 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { Button } from './button';
+import { cn } from '../../lib/utils';
 
 export interface PaginationProps {
   page: number;
@@ -9,11 +11,12 @@ export interface PaginationProps {
 
 // Paginação genérica (extraída de OrderTable, 29/07/2026 — pedido do
 // usuário: com dezenas de páginas, só Anterior/Próxima não é prático).
-// Anterior/Próxima + botões numerados com reticências (janela ao redor da
-// página atual, sempre mostrando primeira/última) + campo "ir para página"
-// pra pular direto sem clicar N vezes. Pensada pra qualquer tela paginada
-// por OFFSET real no banco (nunca cursor) — mesmo padrão de
-// GET /orders?page=X (prisma skip/take).
+// Retrofit shadcn/ui (mesma data, fase seguinte) — botões migrados para o
+// primitivo Button (variant="outline"/"default" em vez de bg-ink-900/
+// border-ink-300 hardcoded), assim o número da página ativa reaproveita o
+// par primary/primary-foreground já resolvido para Light/Dark. O campo "ir
+// para página" segue os tokens semânticos (border-input/bg-background) por
+// ainda não existir um primitivo Input dedicado.
 export function Pagination({ page, totalPages, onPageChange, className }: PaginationProps) {
   const [goToValue, setGoToValue] = useState('');
 
@@ -32,52 +35,39 @@ export function Pagination({ page, totalPages, onPageChange, className }: Pagina
   const pageNumbers = buildPageWindow(page, totalPages);
 
   return (
-    <div className={['flex flex-wrap items-center gap-3', className ?? ''].join(' ')}>
-      <button
-        type="button"
-        disabled={page <= 1}
-        onClick={() => onPageChange(clamp(page - 1))}
-        className="rounded-lg border border-ink-300 px-3 py-1 font-medium text-ink-700 transition hover:border-neon disabled:cursor-not-allowed disabled:opacity-40"
-      >
+    <div className={cn('flex flex-wrap items-center gap-3', className)}>
+      <Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(clamp(page - 1))}>
         Anterior
-      </button>
+      </Button>
 
       <div className="flex gap-1">
         {pageNumbers.map((entry, idx) =>
           entry === 'ellipsis' ? (
-            <span key={`ellipsis-${idx}`} className="px-1.5 text-ink-500">
+            <span key={`ellipsis-${idx}`} className="px-1.5 text-muted-foreground">
               …
             </span>
           ) : (
-            <button
+            <Button
               type="button"
               key={entry}
-              onClick={() => onPageChange(entry)}
+              size="sm"
+              variant={entry === page ? 'default' : 'outline'}
               aria-current={entry === page ? 'page' : undefined}
-              className={[
-                'min-w-[2rem] rounded-lg border px-2 py-1 font-medium transition',
-                entry === page
-                  ? 'border-ink-900 bg-ink-900 text-white'
-                  : 'border-ink-300 text-ink-700 hover:border-neon',
-              ].join(' ')}
+              className="min-w-[2rem] px-2"
+              onClick={() => onPageChange(entry)}
             >
               {entry}
-            </button>
+            </Button>
           ),
         )}
       </div>
 
-      <button
-        type="button"
-        disabled={page >= totalPages}
-        onClick={() => onPageChange(clamp(page + 1))}
-        className="rounded-lg border border-ink-300 px-3 py-1 font-medium text-ink-700 transition hover:border-neon disabled:cursor-not-allowed disabled:opacity-40"
-      >
+      <Button type="button" variant="outline" size="sm" disabled={page >= totalPages} onClick={() => onPageChange(clamp(page + 1))}>
         Próxima
-      </button>
+      </Button>
 
       <form onSubmit={handleGoTo} className="flex items-center gap-1.5">
-        <label htmlFor="pagination-goto" className="text-ink-500">
+        <label htmlFor="pagination-goto" className="text-muted-foreground">
           Ir para
         </label>
         <input
@@ -88,14 +78,11 @@ export function Pagination({ page, totalPages, onPageChange, className }: Pagina
           value={goToValue}
           onChange={(event: ChangeEvent<HTMLInputElement>) => setGoToValue(event.target.value)}
           placeholder={String(page)}
-          className="w-16 rounded-lg border border-ink-300 bg-surface px-2 py-1 text-ink-900 focus:border-neon focus:outline-none focus:ring-1 focus:ring-neon"
+          className="h-8 w-16 rounded-md border border-input bg-background px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         />
-        <button
-          type="submit"
-          className="rounded-lg border border-ink-300 px-2.5 py-1 font-medium text-ink-700 transition hover:border-neon"
-        >
+        <Button type="submit" variant="outline" size="sm">
           Ir
-        </button>
+        </Button>
       </form>
     </div>
   );

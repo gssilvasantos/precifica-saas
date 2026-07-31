@@ -11,6 +11,9 @@ import type { MercadoLivreHandshakeResult } from '../features/marketplace-connec
 import { NuvemshopConnectionCard } from '../features/erp-connections/components/NuvemshopConnectionCard';
 import { OlistConnectionCard } from '../features/erp-connections/components/OlistConnectionCard';
 import { ShopeeConnectionCard } from '../features/marketplace-connections/components/ShopeeConnectionCard';
+import { Card } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { cn } from '../lib/utils';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
@@ -86,18 +89,18 @@ export default function IntegracoesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-serif text-3xl font-semibold text-ink-900">Integrações</h1>
-        <p className="mt-1 text-sm text-ink-500">
+        <h1 className="font-serif text-3xl font-semibold text-foreground">Integrações</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           Conecte suas contas de marketplace para o Kyneti ingerir pedidos reais e calcular o DRE automaticamente.
         </p>
       </div>
 
       {callbackChannel && (
         <div
-          className={[
+          className={cn(
             'rounded-xl border p-4 text-sm',
             callbackWasError ? 'border-margin-danger/40 bg-margin-danger/10' : 'border-margin-good/40 bg-margin-good/10',
-          ].join(' ')}
+          )}
         >
           <p className={callbackWasError ? 'font-medium text-margin-danger' : 'font-medium text-margin-good'}>
             {callbackWasError
@@ -107,11 +110,11 @@ export default function IntegracoesPage() {
         </div>
       )}
 
-      <div className="rounded-2xl bg-surface p-6 shadow-card">
+      <Card className="p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-ink-900">Mercado Livre</h2>
-            <p className="mt-1 text-sm text-ink-500">
+            <h2 className="text-lg font-semibold text-foreground">Mercado Livre</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
               OAuth2 com renovação automática de token (ver docs/auth-security.md).
             </p>
           </div>
@@ -132,31 +135,24 @@ export default function IntegracoesPage() {
 
         <div className="mt-5 flex flex-wrap gap-2">
           {!connected && (
-            <button
-              onClick={() => connectMutation.mutate()}
-              disabled={connectMutation.isPending}
-              className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-ink-700 disabled:opacity-50"
-            >
+            <Button onClick={() => connectMutation.mutate()} disabled={connectMutation.isPending}>
               {connectMutation.isPending ? 'Redirecionando…' : 'Conectar com Mercado Livre'}
-            </button>
+            </Button>
           )}
 
           {connected && (
             <>
-              <button
-                onClick={() => testMutation.mutate()}
-                disabled={testMutation.isPending}
-                className="rounded-lg border border-ink-300 px-4 py-2 text-sm font-medium text-ink-700 transition hover:border-gold hover:text-gold disabled:opacity-50"
-              >
+              <Button variant="outline" onClick={() => testMutation.mutate()} disabled={testMutation.isPending}>
                 {testMutation.isPending ? 'Testando conexão…' : 'Testar conexão'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="outline"
+                className="border-margin-danger/40 text-margin-danger hover:bg-margin-danger/10 hover:text-margin-danger"
                 onClick={() => disconnectMutation.mutate()}
                 disabled={disconnectMutation.isPending}
-                className="rounded-lg border border-margin-danger/40 px-4 py-2 text-sm font-medium text-margin-danger transition hover:bg-margin-danger/10 disabled:opacity-50"
               >
                 {disconnectMutation.isPending ? 'Desconectando…' : 'Desconectar'}
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -172,7 +168,7 @@ export default function IntegracoesPage() {
             Não foi possível iniciar o fluxo de conexão — confirme se sua conta tem papel de Admin.
           </p>
         )}
-      </div>
+      </Card>
 
       <ShopeeConnectionCard />
 
@@ -186,22 +182,22 @@ export default function IntegracoesPage() {
 function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-ink-500">{label}</dt>
-      <dd className="mt-0.5 font-sans text-ink-900">{value}</dd>
+      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 font-sans text-foreground">{value}</dd>
     </div>
   );
 }
 
 function StatusBadge({ loading, connected }: { loading: boolean; connected: boolean }) {
   if (loading) {
-    return <span className="rounded-full bg-ink-300/40 px-3 py-1 text-xs font-medium text-ink-700">Verificando…</span>;
+    return <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">Verificando…</span>;
   }
   return (
     <span
-      className={[
+      className={cn(
         'flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium',
-        connected ? 'bg-margin-good/15 text-margin-good' : 'bg-ink-300/40 text-ink-700',
-      ].join(' ')}
+        connected ? 'bg-margin-good/15 text-margin-good' : 'bg-muted text-muted-foreground',
+      )}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-margin-good' : 'bg-ink-500'}`} />
       {connected ? 'Conectado' : 'Desconectado'}
@@ -212,22 +208,22 @@ function StatusBadge({ loading, connected }: { loading: boolean; connected: bool
 function HandshakeResultPanel({ result }: { result: MercadoLivreHandshakeResult }) {
   return (
     <div
-      className={[
+      className={cn(
         'mt-4 rounded-xl border p-4 text-sm',
         result.success ? 'border-margin-good/40 bg-margin-good/10' : 'border-margin-danger/40 bg-margin-danger/10',
-      ].join(' ')}
+      )}
     >
       <p className={result.success ? 'font-medium text-margin-good' : 'font-medium text-margin-danger'}>
         {result.success ? 'Conexão testada com sucesso.' : 'Teste de conexão falhou.'}
       </p>
       {result.success ? (
-        <ul className="mt-2 space-y-1 text-ink-700">
+        <ul className="mt-2 space-y-1 text-foreground">
           <li>Pedidos encontrados: {result.ordersFound}</li>
           <li>Token renovado durante o teste: {result.tokenRefreshed ? 'sim' : 'não'}</li>
           {result.sampleOrderId && <li>Exemplo de pedido: #{result.sampleOrderId}</li>}
         </ul>
       ) : (
-        <p className="mt-2 text-ink-700">{result.errorMessage}</p>
+        <p className="mt-2 text-foreground">{result.errorMessage}</p>
       )}
     </div>
   );

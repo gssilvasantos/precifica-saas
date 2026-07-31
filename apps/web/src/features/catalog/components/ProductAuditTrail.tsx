@@ -28,19 +28,19 @@ export default function ProductAuditTrail({ productId }: Props) {
   const entries = auditQuery.data ?? [];
 
   return (
-    <div className="rounded-lg bg-canvas px-4 py-3">
-      {auditQuery.isLoading && <p className="text-xs text-ink-500">Carregando histórico…</p>}
+    <div className="rounded-lg bg-muted px-4 py-3">
+      {auditQuery.isLoading && <p className="text-xs text-muted-foreground">Carregando histórico…</p>}
       {!auditQuery.isLoading && entries.length === 0 && (
-        <p className="text-xs text-ink-500">Nenhuma mudança de MAP registrada para este produto ainda.</p>
+        <p className="text-xs text-muted-foreground">Nenhuma mudança de MAP registrada para este produto ainda.</p>
       )}
       {entries.length > 0 && (
         <ul className="space-y-2">
           {entries.map((entry) => (
             <li key={entry.id} className="text-xs">
-              <span className="font-medium text-ink-900">{formatMapValue(entry.oldValue)}</span>
-              <span className="mx-1 text-ink-500">→</span>
-              <span className="font-medium text-ink-900">{formatMapValue(entry.newValue)}</span>
-              <span className="ml-2 text-ink-500">
+              <span className="font-medium text-foreground">{formatMapValue(entry.oldValue)}</span>
+              <span className="mx-1 text-muted-foreground">→</span>
+              <span className="font-medium text-foreground">{formatMapValue(entry.newValue)}</span>
+              <span className="ml-2 text-muted-foreground">
                 · {SOURCE_LABEL[entry.source] ?? entry.source} · {dateFormat.format(new Date(entry.changedAt))}
               </span>
             </li>

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchFinancialPolicy, updateFinancialPolicy } from '../api';
+import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
 
 interface Props {
   canEdit: boolean;
@@ -47,15 +49,15 @@ export default function FinancialPolicyForm({ canEdit }: Props) {
     (targetRoas.trim() === '' || Number(targetRoas) > 0);
 
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-card">
-      <h2 className="font-serif text-xl font-semibold text-ink-900">Política financeira global</h2>
-      <p className="mt-1 text-sm text-ink-500">
+    <Card className="p-5">
+      <h2 className="font-serif text-xl font-semibold text-foreground">Política financeira global</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
         Piso financeiro aplicado a toda decisão de preço (defesa em profundidade, junto com o MAP) e meta de ROAS
         usada pelo motor de otimização de Ads.
       </p>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-3 sm:max-w-2xl">
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Alíquota (%)
           <input
             type="number"
@@ -65,10 +67,10 @@ export default function FinancialPolicyForm({ canEdit }: Props) {
             disabled={!canEdit}
             value={taxRatePct}
             onChange={(e) => setTaxRatePct(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none disabled:bg-canvas disabled:text-ink-500"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-muted disabled:text-muted-foreground"
           />
         </label>
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Margem líquida mínima (%)
           <input
             type="number"
@@ -78,10 +80,10 @@ export default function FinancialPolicyForm({ canEdit }: Props) {
             disabled={!canEdit}
             value={minProfitMarginPct}
             onChange={(e) => setMinProfitMarginPct(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none disabled:bg-canvas disabled:text-ink-500"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-muted disabled:text-muted-foreground"
           />
         </label>
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Meta de ROAS
           <input
             type="number"
@@ -91,26 +93,21 @@ export default function FinancialPolicyForm({ canEdit }: Props) {
             value={targetRoas}
             onChange={(e) => setTargetRoas(e.target.value)}
             placeholder="Opcional"
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none disabled:bg-canvas disabled:text-ink-500"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-muted disabled:text-muted-foreground"
           />
         </label>
       </div>
 
       {canEdit && (
         <div className="mt-4">
-          <button
-            type="button"
-            onClick={() => updateMutation.mutate()}
-            disabled={!canSubmit || updateMutation.isPending}
-            className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-ink-700 disabled:opacity-50"
-          >
+          <Button onClick={() => updateMutation.mutate()} disabled={!canSubmit || updateMutation.isPending}>
             {updateMutation.isPending ? 'Salvando…' : 'Salvar política'}
-          </button>
+          </Button>
           {updateMutation.isSuccess && (
             <span className="ml-3 text-xs font-medium text-margin-good">Salvo.</span>
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

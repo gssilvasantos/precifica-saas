@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchDefaultMargins, updateDefaultMargins } from '../api';
+import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
 
 interface Props {
   canEdit: boolean;
@@ -41,14 +43,14 @@ export default function DefaultMarginsForm({ canEdit }: Props) {
     Number(minimumMarginPct) <= 100;
 
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-card">
-      <h2 className="font-serif text-xl font-semibold text-ink-900">Margens padrão por SKU</h2>
-      <p className="mt-1 text-sm text-ink-500">
+    <Card className="p-5">
+      <h2 className="font-serif text-xl font-semibold text-foreground">Margens padrão por SKU</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
         Aplicadas a produtos importados do ERP que ainda não têm margem própria definida.
       </p>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2 sm:max-w-md">
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Margem desejada (%)
           <input
             type="number"
@@ -58,10 +60,10 @@ export default function DefaultMarginsForm({ canEdit }: Props) {
             disabled={!canEdit}
             value={desiredMarginPct}
             onChange={(e) => setDesiredMarginPct(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none disabled:bg-canvas disabled:text-ink-500"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-muted disabled:text-muted-foreground"
           />
         </label>
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Margem mínima (%)
           <input
             type="number"
@@ -71,26 +73,21 @@ export default function DefaultMarginsForm({ canEdit }: Props) {
             disabled={!canEdit}
             value={minimumMarginPct}
             onChange={(e) => setMinimumMarginPct(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none disabled:bg-canvas disabled:text-ink-500"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-muted disabled:text-muted-foreground"
           />
         </label>
       </div>
 
       {canEdit && (
         <div className="mt-4">
-          <button
-            type="button"
-            onClick={() => updateMutation.mutate()}
-            disabled={!canSubmit || updateMutation.isPending}
-            className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-ink-700 disabled:opacity-50"
-          >
+          <Button onClick={() => updateMutation.mutate()} disabled={!canSubmit || updateMutation.isPending}>
             {updateMutation.isPending ? 'Salvando…' : 'Salvar margens'}
-          </button>
+          </Button>
           {updateMutation.isSuccess && (
             <span className="ml-3 text-xs font-medium text-margin-good">Salvo.</span>
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

@@ -8,6 +8,8 @@ import {
 } from '../api';
 import { extractErrorMessage } from '../../../lib/extract-error-message';
 import { ConnectionStatusBadge } from './ConnectionStatusBadge';
+import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
@@ -57,11 +59,11 @@ export function NuvemshopConnectionCard() {
   }
 
   return (
-    <div className="rounded-2xl bg-surface p-6 shadow-card">
+    <Card className="p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-ink-900">Nuvemshop</h2>
-          <p className="mt-1 text-sm text-ink-500">
+          <h2 className="text-lg font-semibold text-foreground">Nuvemshop</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
             Loja própria — vínculo de catálogo por SKU (`ChannelListing`) e simulador de margem com taxa de gateway.
           </p>
         </div>
@@ -82,17 +84,17 @@ export function NuvemshopConnectionCard() {
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
-              <span className="mb-1 block text-xs uppercase tracking-wide text-ink-500">Store ID</span>
+              <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">Store ID</span>
               <input
                 value={storeId}
                 onChange={(e) => setStoreId(e.target.value)}
                 placeholder="123456"
                 required
-                className="w-full rounded-lg border border-ink-300 bg-transparent px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </label>
             <label className="text-sm">
-              <span className="mb-1 block text-xs uppercase tracking-wide text-ink-500">Access Token</span>
+              <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">Access Token</span>
               <input
                 value={accessToken}
                 onChange={(e) => setAccessToken(e.target.value)}
@@ -100,20 +102,16 @@ export function NuvemshopConnectionCard() {
                 placeholder="Token do app privado"
                 required
                 minLength={10}
-                className="w-full rounded-lg border border-ink-300 bg-transparent px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </label>
           </div>
-          <p className="text-xs text-ink-500">
+          <p className="text-xs text-muted-foreground">
             Gere em: Nuvemshop → Configurações → Meus Aplicativos → Criar app privado.
           </p>
-          <button
-            type="submit"
-            disabled={connectMutation.isPending}
-            className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-ink-700 disabled:opacity-50"
-          >
+          <Button type="submit" disabled={connectMutation.isPending}>
             {connectMutation.isPending ? 'Validando…' : 'Conectar Nuvemshop'}
-          </button>
+          </Button>
           {connectMutation.isError && (
             <p className="text-sm text-margin-danger">{extractErrorMessage(connectMutation.error)}</p>
           )}
@@ -122,20 +120,17 @@ export function NuvemshopConnectionCard() {
 
       {connected && (
         <div className="mt-5 flex flex-wrap gap-2">
-          <button
-            onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending}
-            className="rounded-lg border border-ink-300 px-4 py-2 text-sm font-medium text-ink-700 transition hover:border-gold hover:text-gold disabled:opacity-50"
-          >
+          <Button variant="outline" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
             {syncMutation.isPending ? 'Sincronizando…' : 'Sincronizar agora'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            className="border-margin-danger/40 text-margin-danger hover:bg-margin-danger/10 hover:text-margin-danger"
             onClick={() => disconnectMutation.mutate()}
             disabled={disconnectMutation.isPending}
-            className="rounded-lg border border-margin-danger/40 px-4 py-2 text-sm font-medium text-margin-danger transition hover:bg-margin-danger/10 disabled:opacity-50"
           >
             {disconnectMutation.isPending ? 'Desconectando…' : 'Desconectar'}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -143,15 +138,15 @@ export function NuvemshopConnectionCard() {
       {syncMutation.isError && (
         <p className="mt-3 text-sm text-margin-danger">{extractErrorMessage(syncMutation.error)}</p>
       )}
-    </div>
+    </Card>
   );
 }
 
 function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-ink-500">{label}</dt>
-      <dd className="mt-0.5 font-sans text-ink-900">{value}</dd>
+      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 font-sans text-foreground">{value}</dd>
     </div>
   );
 }

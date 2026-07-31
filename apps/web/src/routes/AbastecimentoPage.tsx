@@ -8,6 +8,9 @@ import {
   type ReplenishmentStatus,
 } from '../features/logistics-fulfillment/api';
 import { ORDER_CHANNELS } from '../features/orders/channels';
+import { Card } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { cn } from '../lib/utils';
 
 const LEAD_TIME_PRESETS = [3, 7, 15];
 
@@ -15,7 +18,7 @@ const STATUS_META: Record<ReplenishmentStatus, { label: string; className: strin
   CRITICO: { label: 'Crítico', className: 'bg-margin-danger/15 text-margin-danger' },
   ATENCAO: { label: 'Atenção', className: 'bg-margin-warning/15 text-margin-warning' },
   OK: { label: 'OK', className: 'bg-margin-good/15 text-margin-good' },
-  SEM_GIRO: { label: 'Sem giro', className: 'bg-ink-300/40 text-ink-500' },
+  SEM_GIRO: { label: 'Sem giro', className: 'bg-muted text-muted-foreground' },
 };
 
 const numberFormatter = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
@@ -61,8 +64,8 @@ export default function AbastecimentoPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="font-serif text-3xl font-semibold text-ink-900">Inteligência de Abastecimento</h1>
-          <p className="mt-1 text-sm text-ink-500">
+          <h1 className="font-serif text-3xl font-semibold text-foreground">Inteligência de Abastecimento</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             Giro real de venda cruzado com o saldo do Full — a sugestão de envio do físico já considera o lead time
             configurado abaixo. Ordenado do mais urgente para o menos urgente.
           </p>
@@ -71,7 +74,7 @@ export default function AbastecimentoPage() {
         <select
           value={channelCode}
           onChange={(e) => setChannelCode(e.target.value)}
-          className="rounded-lg border border-ink-300 bg-surface px-3 py-1.5 text-sm text-ink-900 focus:border-neon focus:outline-none focus:ring-1 focus:ring-neon"
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           {ORDER_CHANNELS.map((c) => (
             <option key={c.code} value={c.code}>
@@ -88,44 +91,46 @@ export default function AbastecimentoPage() {
         isSaving={leadTimeMutation.isPending}
       />
 
-      <div className="overflow-x-auto rounded-2xl bg-surface shadow-card">
-        <table className="w-full min-w-[820px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-ink-300/60 text-xs uppercase tracking-wide text-ink-500">
-              <th className="px-5 py-3 font-medium">SKU</th>
-              <th className="px-5 py-3 font-medium">Curva ABC</th>
-              <th className="px-5 py-3 font-medium text-right">
-                Giro na Plataforma {ORDER_CHANNELS.find((c) => c.code === channelCode)?.label ?? channelCode}
-              </th>
-              <th className="px-5 py-3 font-medium text-right">Saldo Atual no Full</th>
-              <th className="px-5 py-3 font-medium text-right">Saldo no Físico</th>
-              <th className="px-5 py-3 font-medium text-right">Sugestão de Envio do Físico</th>
-              <th className="px-5 py-3 font-medium">Status de Abastecimento</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tableQuery.isLoading && (
-              <tr>
-                <td colSpan={7} className="px-5 py-8 text-center text-ink-500">
-                  Calculando sugestões de reposição…
-                </td>
+      <Card className="overflow-hidden p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-5 py-3 font-medium">SKU</th>
+                <th className="px-5 py-3 font-medium">Curva ABC</th>
+                <th className="px-5 py-3 font-medium text-right">
+                  Giro na Plataforma {ORDER_CHANNELS.find((c) => c.code === channelCode)?.label ?? channelCode}
+                </th>
+                <th className="px-5 py-3 font-medium text-right">Saldo Atual no Full</th>
+                <th className="px-5 py-3 font-medium text-right">Saldo no Físico</th>
+                <th className="px-5 py-3 font-medium text-right">Sugestão de Envio do Físico</th>
+                <th className="px-5 py-3 font-medium">Status de Abastecimento</th>
               </tr>
-            )}
+            </thead>
+            <tbody>
+              {tableQuery.isLoading && (
+                <tr>
+                  <td colSpan={7} className="px-5 py-8 text-center text-muted-foreground">
+                    Calculando sugestões de reposição…
+                  </td>
+                </tr>
+              )}
 
-            {!tableQuery.isLoading && rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-5 py-8 text-center text-ink-500">
-                  Nenhum SKU com venda ou saldo neste canal ainda.
-                </td>
-              </tr>
-            )}
+              {!tableQuery.isLoading && rows.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-5 py-8 text-center text-muted-foreground">
+                    Nenhum SKU com venda ou saldo neste canal ainda.
+                  </td>
+                </tr>
+              )}
 
-            {rows.map((row) => (
-              <ReplenishmentRowView key={row.skuCode} row={row} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+              {rows.map((row) => (
+                <ReplenishmentRowView key={row.skuCode} row={row} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -142,10 +147,10 @@ function LeadTimeConfig({
   const [customValue, setCustomValue] = useState('');
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-surface px-5 py-4 shadow-card">
+    <Card className="flex flex-wrap items-center gap-3 px-5 py-4">
       <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-ink-500">Lead time do CD Full</p>
-        <p className="text-xs text-ink-500">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Lead time do CD Full</p>
+        <p className="text-xs text-muted-foreground">
           Dias entre despachar do físico e o estoque ficar disponível para venda neste depósito.
         </p>
       </div>
@@ -157,10 +162,10 @@ function LeadTimeConfig({
             type="button"
             disabled={isSaving}
             onClick={() => onChange(days)}
-            className={[
+            className={cn(
               'rounded-full px-3 py-1 text-xs font-medium transition disabled:opacity-50',
-              currentLeadTimeDays === days ? 'bg-ink-900 text-white' : 'bg-canvas text-ink-700 hover:bg-ink-300/40',
-            ].join(' ')}
+              currentLeadTimeDays === days ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
+            )}
           >
             {days} dias
           </button>
@@ -181,24 +186,20 @@ function LeadTimeConfig({
             placeholder="outro"
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
-            className="w-20 rounded-lg border border-ink-300 bg-surface px-2 py-1 text-xs text-ink-900 focus:border-neon focus:outline-none focus:ring-1 focus:ring-neon"
+            className="h-7 w-20 rounded-md border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="rounded-lg border border-ink-300 px-2.5 py-1 text-xs font-medium text-ink-700 hover:bg-canvas disabled:opacity-50"
-          >
+          <Button type="submit" variant="outline" size="sm" disabled={isSaving}>
             Aplicar
-          </button>
+          </Button>
         </form>
 
         {currentLeadTimeDays !== undefined && (
-          <span className="text-xs text-ink-500">
-            Atual: <strong className="text-ink-900">{currentLeadTimeDays} dias</strong>
+          <span className="text-xs text-muted-foreground">
+            Atual: <strong className="text-foreground">{currentLeadTimeDays} dias</strong>
           </span>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -206,17 +207,17 @@ function ReplenishmentRowView({ row }: { row: ReplenishmentRow }) {
   const statusMeta = STATUS_META[row.status];
 
   return (
-    <tr className="border-b border-ink-300/30 last:border-0 hover:bg-canvas/60">
-      <td className="px-5 py-3 font-sans font-medium text-ink-900">{row.skuCode}</td>
+    <tr className="border-b border-border/60 last:border-0 hover:bg-muted/40">
+      <td className="px-5 py-3 font-sans font-medium text-foreground">{row.skuCode}</td>
       <td className="px-5 py-3">
-        <span className="rounded-full bg-ink-300/30 px-2 py-0.5 text-[10px] font-semibold text-ink-700">
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
           {row.abcClass}
         </span>
       </td>
-      <td className="px-5 py-3 text-right font-sans text-ink-700">{numberFormatter.format(row.giroDiario)}/dia</td>
-      <td className="px-5 py-3 text-right font-sans text-ink-700">{numberFormatter.format(row.saldoFull)}</td>
-      <td className="px-5 py-3 text-right font-sans text-ink-700">{numberFormatter.format(row.saldoFisico)}</td>
-      <td className="px-5 py-3 text-right font-sans font-semibold text-ink-900">
+      <td className="px-5 py-3 text-right font-sans text-foreground">{numberFormatter.format(row.giroDiario)}/dia</td>
+      <td className="px-5 py-3 text-right font-sans text-foreground">{numberFormatter.format(row.saldoFull)}</td>
+      <td className="px-5 py-3 text-right font-sans text-foreground">{numberFormatter.format(row.saldoFisico)}</td>
+      <td className="px-5 py-3 text-right font-sans font-semibold text-foreground">
         {row.sugestaoEnvio > 0 ? numberFormatter.format(row.sugestaoEnvio) : '—'}
         {row.physicalShortfall && (
           <span className="ml-1.5 rounded-full bg-margin-warning/15 px-1.5 py-0.5 text-[9px] font-medium text-margin-warning">

@@ -17,7 +17,7 @@ export interface MarginStatusInfo {
 
 export function computeMarginStatus(marginPct: number | null, minimumMarginPct: number): MarginStatusInfo {
   if (marginPct === null) {
-    return { status: 'SEM_DADO', label: 'Sem canal vinculado', badgeClass: 'bg-ink-300/40 text-ink-700' };
+    return { status: 'SEM_DADO', label: 'Sem canal vinculado', badgeClass: 'bg-muted text-muted-foreground' };
   }
   if (marginPct < 0) {
     return { status: 'PREJUIZO', label: 'Prejuízo', badgeClass: 'bg-margin-danger/15 text-margin-danger' };

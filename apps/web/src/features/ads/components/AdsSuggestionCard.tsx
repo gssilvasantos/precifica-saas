@@ -3,6 +3,9 @@ import { useState } from 'react';
 import type { AdsActionSuggestion } from '../api';
 import { confirmAdsAction, rejectAdsAction } from '../api';
 import ChannelBadge from '../../../components/orders/ChannelBadge';
+import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
+import { cn } from '../../../lib/utils';
 
 interface Props {
   suggestion: AdsActionSuggestion;
@@ -43,22 +46,17 @@ export default function AdsSuggestionCard({ suggestion, canAct }: Props) {
   const metadataEntries = suggestion.metadata ? Object.entries(suggestion.metadata) : [];
 
   return (
-    <div
-      className={[
-        'rounded-2xl bg-surface p-5 shadow-card',
-        isAi ? 'ring-1 ring-neon/50 shadow-neonGlow' : 'ring-1 ring-margin-danger/30',
-      ].join(' ')}
-    >
+    <Card className={cn('p-5', isAi ? 'ring-1 ring-neon/50 shadow-neonGlow' : 'ring-1 ring-margin-danger/30')}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <ChannelBadge channelCode={suggestion.channelCode} size="sm" />
-          <span className="text-sm font-medium text-ink-900">{suggestion.campaignName}</span>
+          <span className="text-sm font-medium text-foreground">{suggestion.campaignName}</span>
         </div>
         <span
-          className={[
+          className={cn(
             'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide',
-            isAi ? 'bg-neon/15 text-ink-900' : 'bg-ink-300/40 text-ink-700',
-          ].join(' ')}
+            isAi ? 'bg-neon/15 text-foreground' : 'bg-muted text-muted-foreground',
+          )}
         >
           {isAi ? '✦ Sugestão da IA' : 'Regra automática'}
         </span>
@@ -71,7 +69,7 @@ export default function AdsSuggestionCard({ suggestion, canAct }: Props) {
       {/* Reasoning — bloco principal do card, tipografia maior/mais legível
           que o resto (o texto que a "confirmação humana consciente" precisa
           ler primeiro). */}
-      <p className="mt-3 rounded-xl bg-canvas px-4 py-3 font-serif text-base leading-relaxed text-ink-900">
+      <p className="mt-3 rounded-xl bg-muted px-4 py-3 font-serif text-base leading-relaxed text-foreground">
         {suggestion.reason}
       </p>
 
@@ -79,12 +77,12 @@ export default function AdsSuggestionCard({ suggestion, canAct }: Props) {
       {isAi && suggestion.confidenceScore !== null && (
         <div className="mt-3 flex items-center gap-3 rounded-xl border border-neon/30 bg-neon/5 px-4 py-3">
           <div className="shrink-0">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-ink-500">Confiança da IA</p>
-            <p className="font-serif text-2xl font-semibold text-ink-900">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Confiança da IA</p>
+            <p className="font-serif text-2xl font-semibold text-foreground">
               {Math.round(suggestion.confidenceScore * 100)}%
             </p>
           </div>
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-ink-300/40">
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
             <div
               className="h-full rounded-full bg-neon"
               style={{ width: `${Math.round(suggestion.confidenceScore * 100)}%` }}
@@ -98,16 +96,16 @@ export default function AdsSuggestionCard({ suggestion, canAct }: Props) {
           <button
             type="button"
             onClick={() => setShowMetadata((v) => !v)}
-            className="text-xs font-medium text-ink-500 underline decoration-dotted underline-offset-2 hover:text-ink-700"
+            className="text-xs font-medium text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
           >
             {showMetadata ? 'Ocultar detalhes' : 'Ver detalhes do cálculo'}
           </button>
           {showMetadata && (
-            <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg bg-canvas px-3 py-2 text-xs sm:grid-cols-3">
+            <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg bg-muted px-3 py-2 text-xs sm:grid-cols-3">
               {metadataEntries.map(([key, value]) => (
                 <div key={key}>
-                  <dt className="text-ink-500">{key}</dt>
-                  <dd className="font-medium text-ink-700">{String(value)}</dd>
+                  <dt className="text-muted-foreground">{key}</dt>
+                  <dd className="font-medium text-foreground">{String(value)}</dd>
                 </div>
               ))}
             </dl>
@@ -115,28 +113,29 @@ export default function AdsSuggestionCard({ suggestion, canAct }: Props) {
         </div>
       )}
 
-      <p className="mt-3 text-[11px] text-ink-500">
+      <p className="mt-3 text-[11px] text-muted-foreground">
         Nenhuma ação é aplicada automaticamente — confirmar ou rejeitar é sempre uma decisão humana (Safety Lock).
       </p>
 
       {canAct && (
         <div className="mt-3 flex gap-2">
-          <button
-            type="button"
+          <Button
+            size="sm"
+            className="flex-1"
             onClick={() => confirmMutation.mutate()}
             disabled={isPending}
-            className="flex-1 rounded-lg bg-ink-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-ink-700 disabled:opacity-50"
           >
             {confirmMutation.isPending ? 'Confirmando…' : 'Confirmar e pausar'}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 hover:border-margin-danger hover:text-margin-danger"
             onClick={() => rejectMutation.mutate()}
             disabled={isPending}
-            className="flex-1 rounded-lg border border-ink-300 px-3 py-2 text-xs font-medium text-ink-700 transition hover:border-margin-danger hover:text-margin-danger disabled:opacity-50"
           >
             {rejectMutation.isPending ? 'Rejeitando…' : 'Rejeitar'}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -146,6 +145,6 @@ export default function AdsSuggestionCard({ suggestion, canAct }: Props) {
       {rejectMutation.isError && (
         <p className="mt-2 text-xs text-margin-danger">Não foi possível rejeitar — tente novamente.</p>
       )}
-    </div>
+    </Card>
   );
 }

@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { TAX_REGIME_LABEL, type TaxProfile, type TaxProfileInput, type TaxRegime } from '../api';
+import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
 
 const REGIME_OPTIONS = Object.keys(TAX_REGIME_LABEL) as TaxRegime[];
 
@@ -22,29 +24,29 @@ export default function TaxProfileForm({ initial, onSubmit, onCancel, isSubmitti
   const canSubmit = name.trim().length > 0 && Number(estimatedRatePct) >= 0 && Number(estimatedRatePct) <= 100;
 
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-card">
-      <h3 className="font-serif text-base font-semibold text-ink-900">
+    <Card className="p-5">
+      <h3 className="font-serif text-base font-semibold text-foreground">
         {initial ? 'Editar perfil fiscal' : 'Novo perfil fiscal'}
       </h3>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="text-xs font-medium text-ink-700 sm:col-span-2">
+        <label className="text-xs font-medium text-foreground sm:col-span-2">
           Nome
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Ex.: Simples Nacional — Anexo I"
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
 
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Regime
           <select
             value={regime}
             onChange={(e) => setRegime(e.target.value as TaxRegime)}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {REGIME_OPTIONS.map((r) => (
               <option key={r} value={r}>
@@ -54,7 +56,7 @@ export default function TaxProfileForm({ initial, onSubmit, onCancel, isSubmitti
           </select>
         </label>
 
-        <label className="text-xs font-medium text-ink-700">
+        <label className="text-xs font-medium text-foreground">
           Alíquota estimada (%)
           <input
             type="number"
@@ -63,24 +65,23 @@ export default function TaxProfileForm({ initial, onSubmit, onCancel, isSubmitti
             step="0.01"
             value={estimatedRatePct}
             onChange={(e) => setEstimatedRatePct(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
 
-        <label className="text-xs font-medium text-ink-700 sm:col-span-2">
+        <label className="text-xs font-medium text-foreground sm:col-span-2">
           Notas (opcional)
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
-            className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
       </div>
 
       <div className="mt-4 flex gap-2">
-        <button
-          type="button"
+        <Button
           disabled={!canSubmit || isSubmitting}
           onClick={() =>
             onSubmit({
@@ -90,18 +91,13 @@ export default function TaxProfileForm({ initial, onSubmit, onCancel, isSubmitti
               notes: notes.trim() === '' ? undefined : notes.trim(),
             })
           }
-          className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-ink-700 disabled:opacity-50"
         >
           {isSubmitting ? 'Salvando…' : 'Salvar'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg border border-ink-300 px-4 py-2 text-sm font-medium text-ink-700 transition hover:border-margin-danger hover:text-margin-danger"
-        >
+        </Button>
+        <Button variant="outline" className="hover:border-margin-danger hover:text-margin-danger" onClick={onCancel}>
           Cancelar
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }

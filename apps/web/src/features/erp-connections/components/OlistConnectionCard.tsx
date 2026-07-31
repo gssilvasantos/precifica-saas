@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { connectOlist, disconnectOlist, fetchOlistStatus, syncOlistNow } from '../api';
 import { extractErrorMessage } from '../../../lib/extract-error-message';
 import { ConnectionStatusBadge } from './ConnectionStatusBadge';
+import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
@@ -51,11 +53,11 @@ export function OlistConnectionCard() {
   }
 
   return (
-    <div className="rounded-2xl bg-surface p-6 shadow-card">
+    <Card className="p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-ink-900">Olist (ERP)</h2>
-          <p className="mt-1 text-sm text-ink-500">
+          <h2 className="text-lg font-semibold text-foreground">Olist (ERP)</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
             Fonte única da verdade do catálogo — importa e mantém produtos sincronizados, sem cadastro manual.
           </p>
         </div>
@@ -75,7 +77,7 @@ export function OlistConnectionCard() {
       {!connected && (
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
           <label className="block text-sm sm:max-w-sm">
-            <span className="mb-1 block text-xs uppercase tracking-wide text-ink-500">Token da API (Olist V2)</span>
+            <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">Token da API (Olist V2)</span>
             <input
               value={apiToken}
               onChange={(e) => setApiToken(e.target.value)}
@@ -83,17 +85,13 @@ export function OlistConnectionCard() {
               placeholder="Token gerado no painel do Olist"
               required
               minLength={10}
-              className="w-full rounded-lg border border-ink-300 bg-transparent px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
-          <p className="text-xs text-ink-500">Gere em: Olist Tiny → Configurações → Preferências → Chave da API.</p>
-          <button
-            type="submit"
-            disabled={connectMutation.isPending}
-            className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-ink-700 disabled:opacity-50"
-          >
+          <p className="text-xs text-muted-foreground">Gere em: Olist Tiny → Configurações → Preferências → Chave da API.</p>
+          <Button type="submit" disabled={connectMutation.isPending}>
             {connectMutation.isPending ? 'Validando…' : 'Conectar Olist'}
-          </button>
+          </Button>
           {connectMutation.isError && (
             <p className="text-sm text-margin-danger">{extractErrorMessage(connectMutation.error)}</p>
           )}
@@ -102,20 +100,17 @@ export function OlistConnectionCard() {
 
       {connected && (
         <div className="mt-5 flex flex-wrap gap-2">
-          <button
-            onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending}
-            className="rounded-lg border border-ink-300 px-4 py-2 text-sm font-medium text-ink-700 transition hover:border-gold hover:text-gold disabled:opacity-50"
-          >
+          <Button variant="outline" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
             {syncMutation.isPending ? 'Sincronizando…' : 'Sincronizar agora'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            className="border-margin-danger/40 text-margin-danger hover:bg-margin-danger/10 hover:text-margin-danger"
             onClick={() => disconnectMutation.mutate()}
             disabled={disconnectMutation.isPending}
-            className="rounded-lg border border-margin-danger/40 px-4 py-2 text-sm font-medium text-margin-danger transition hover:bg-margin-danger/10 disabled:opacity-50"
           >
             {disconnectMutation.isPending ? 'Desconectando…' : 'Desconectar'}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -123,15 +118,15 @@ export function OlistConnectionCard() {
       {syncMutation.isError && (
         <p className="mt-3 text-sm text-margin-danger">{extractErrorMessage(syncMutation.error)}</p>
       )}
-    </div>
+    </Card>
   );
 }
 
 function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-ink-500">{label}</dt>
-      <dd className="mt-0.5 font-sans text-ink-900">{value}</dd>
+      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 font-sans text-foreground">{value}</dd>
     </div>
   );
 }

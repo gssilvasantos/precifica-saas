@@ -9,6 +9,10 @@ import ChannelBadge from './ChannelBadge';
 import OrderStatusBadge from './OrderStatusBadge';
 import AIInsightBadge from '../insights/AIInsightBadge';
 import { Pagination } from '../ui/pagination';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Card } from '../ui/card';
+import { cn } from '../../lib/utils';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -99,25 +103,28 @@ export default function OrderTable({ insights = [] }: Props) {
   return (
     <div className="space-y-4">
       {mode === 'DEMO' && (
-        <div className="rounded-lg border border-neon/40 bg-neon/10 px-4 py-2 text-xs font-medium text-ink-700">
+        <Badge variant="accent" className="w-full justify-start gap-2 rounded-lg px-4 py-2 text-xs font-medium normal-case">
           Modo Demonstração ativo — os pedidos abaixo são fictícios (AuditSeederService), nunca dados reais da loja.
-        </div>
+        </Badge>
       )}
 
       {/* Abas de status — contadores de uma única query agregada, nunca uma
-          query por aba (docs/orders-architecture.md, seção 7). */}
+          query por aba (docs/orders-architecture.md, seção 7). Retrofit
+          shadcn/ui: pill com tokens semânticos (primary/muted) em vez de
+          bg-ink-900/bg-canvas hardcoded, mesmo racional do Button ativo da
+          Pagination — resolve Light/Dark sozinho. */}
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => {
             setStatus('');
             setPage(1);
           }}
-          className={[
+          className={cn(
             'rounded-full px-3 py-1.5 text-xs font-medium transition',
-            status === '' ? 'bg-ink-900 text-white' : 'bg-canvas text-ink-700 hover:bg-ink-300/40',
-          ].join(' ')}
+            status === '' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
+          )}
         >
-          Todos <span className={status === '' ? 'text-white/70' : 'text-ink-500'}>({totalCount})</span>
+          Todos <span className={status === '' ? 'text-primary-foreground/70' : 'text-muted-foreground'}>({totalCount})</span>
         </button>
         {ORDER_STATUS_TABS.map((s) => {
           const meta = ORDER_STATUS_META[s];
@@ -129,14 +136,14 @@ export default function OrderTable({ insights = [] }: Props) {
                 setStatus(s);
                 setPage(1);
               }}
-              className={[
+              className={cn(
                 'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition',
-                status === s ? 'bg-ink-900 text-white' : 'bg-canvas text-ink-700 hover:bg-ink-300/40',
-              ].join(' ')}
+                status === s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
+              )}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
               {meta.label}
-              <span className="text-ink-500">({count})</span>
+              <span className={status === s ? 'text-primary-foreground/70' : 'text-muted-foreground'}>({count})</span>
             </button>
           );
         })}
@@ -144,14 +151,14 @@ export default function OrderTable({ insights = [] }: Props) {
 
       {/* Filtro por canal — 7 marketplaces do hub (Etapa 17). */}
       <div className="flex items-center gap-3">
-        <label className="text-xs font-medium uppercase tracking-wide text-ink-500">Canal</label>
+        <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Canal</label>
         <select
           value={channelCode}
           onChange={(e) => {
             setChannelCode(e.target.value);
             setPage(1);
           }}
-          className="rounded-lg border border-ink-300 bg-surface px-3 py-1.5 text-sm text-ink-900 focus:border-neon focus:outline-none focus:ring-1 focus:ring-neon"
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           <option value="">Todos os canais</option>
           {ORDER_CHANNELS.map((c) => (
@@ -167,99 +174,100 @@ export default function OrderTable({ insights = [] }: Props) {
             providers numa única chamada). Genérico por design: funciona
             para qualquer canal com providerCode, não só Mercado Livre. */}
         {canSyncSelectedChannel && (
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => syncMutation.mutate(selectedChannelMeta!.providerCode!)}
             disabled={syncMutation.isPending}
-            className="rounded-lg border border-ink-300 px-3 py-1.5 text-sm font-medium text-ink-700 transition hover:border-neon hover:text-gold disabled:cursor-not-allowed disabled:opacity-50"
           >
             {syncMutation.isPending ? 'Sincronizando… (pode levar minutos)' : 'Sincronizar agora'}
-          </button>
+          </Button>
         )}
       </div>
 
-      {syncMessage && (
-        <p className="text-xs text-ink-500">{syncMessage}</p>
-      )}
+      {syncMessage && <p className="text-xs text-muted-foreground">{syncMessage}</p>}
 
-      <div className="overflow-x-auto rounded-2xl bg-surface shadow-card">
-        <table className="w-full min-w-[960px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-ink-300/60 text-xs uppercase tracking-wide text-ink-500">
-              <th className="px-5 py-3 font-medium">Canal</th>
-              <th className="px-5 py-3 font-medium">Pedido</th>
-              <th className="px-5 py-3 font-medium">Data</th>
-              <th className="px-5 py-3 font-medium">Prazo de despacho</th>
-              <th className="px-5 py-3 font-medium">Valor total</th>
-              <th className="px-5 py-3 font-medium">Valor líquido (margem)</th>
-              <th className="px-5 py-3 font-medium">Status</th>
-              <th className="px-5 py-3 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && (
-              <tr>
-                <td colSpan={8} className="px-5 py-8 text-center text-ink-500">
-                  Carregando pedidos…
-                </td>
+      <Card className="overflow-hidden p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[960px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-5 py-3 font-medium">Canal</th>
+                <th className="px-5 py-3 font-medium">Pedido</th>
+                <th className="px-5 py-3 font-medium">Data</th>
+                <th className="px-5 py-3 font-medium">Prazo de despacho</th>
+                <th className="px-5 py-3 font-medium">Valor total</th>
+                <th className="px-5 py-3 font-medium">Valor líquido (margem)</th>
+                <th className="px-5 py-3 font-medium">Status</th>
+                <th className="px-5 py-3 font-medium"></th>
               </tr>
-            )}
-
-            {!isLoading && orders.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-5 py-8 text-center text-ink-500">
-                  Nenhum pedido encontrado para este filtro.
-                </td>
-              </tr>
-            )}
-
-            {orders.map((order) => {
-              const deadlineAtRisk = isDeadlineAtRisk(order);
-              const marginPct = order.totalAmount > 0 ? (order.netAmount / order.totalAmount) * 100 : null;
-              const rowInsights = insightsFor(order);
-
-              return (
-                <tr key={order.id} className="border-b border-ink-300/30 last:border-0 hover:bg-canvas/60">
-                  <td className="px-5 py-3">
-                    <ChannelBadge channelCode={order.channelCode} size="sm" />
-                  </td>
-                  <td className="px-5 py-3 font-sans text-ink-700">{order.externalOrderId}</td>
-                  <td className="px-5 py-3 font-sans text-ink-700">{dateFormatter.format(new Date(order.orderedAt))}</td>
-                  <td className="px-5 py-3 font-sans">
-                    {order.shippingDeadlineAt ? (
-                      <span className={deadlineAtRisk ? 'font-semibold text-margin-danger' : 'text-ink-700'}>
-                        {dateFormatter.format(new Date(order.shippingDeadlineAt))}
-                        {deadlineAtRisk && ' ⚠'}
-                      </span>
-                    ) : (
-                      <span className="text-ink-500">—</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 font-sans text-ink-700">{currency.format(order.totalAmount)}</td>
-                  <td className="px-5 py-3 font-sans">
-                    <span className="font-semibold text-ink-900">{currency.format(order.netAmount)}</span>
-                    {marginPct !== null && <span className="ml-1.5 text-xs text-ink-500">({marginPct.toFixed(1)}%)</span>}
-                  </td>
-                  <td className="px-5 py-3">
-                    <OrderStatusBadge status={order.status} />
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <AIInsightBadge insights={rowInsights} />
+            </thead>
+            <tbody>
+              {isLoading && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-8 text-center text-muted-foreground">
+                    Carregando pedidos…
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              )}
 
-        {total > PAGE_SIZE && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink-300/60 px-5 py-3 text-xs text-ink-500">
-            <span>
-              Página {page} de {totalPages} — {total} pedido(s)
-            </span>
-            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} className="text-xs" />
-          </div>
-        )}
-      </div>
+              {!isLoading && orders.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-8 text-center text-muted-foreground">
+                    Nenhum pedido encontrado para este filtro.
+                  </td>
+                </tr>
+              )}
+
+              {orders.map((order) => {
+                const deadlineAtRisk = isDeadlineAtRisk(order);
+                const marginPct = order.totalAmount > 0 ? (order.netAmount / order.totalAmount) * 100 : null;
+                const rowInsights = insightsFor(order);
+
+                return (
+                  <tr key={order.id} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
+                    <td className="px-5 py-3">
+                      <ChannelBadge channelCode={order.channelCode} size="sm" />
+                    </td>
+                    <td className="px-5 py-3 font-sans text-foreground">{order.externalOrderId}</td>
+                    <td className="px-5 py-3 font-sans text-foreground">{dateFormatter.format(new Date(order.orderedAt))}</td>
+                    <td className="px-5 py-3 font-sans">
+                      {order.shippingDeadlineAt ? (
+                        <span className={deadlineAtRisk ? 'font-semibold text-margin-danger' : 'text-foreground'}>
+                          {dateFormatter.format(new Date(order.shippingDeadlineAt))}
+                          {deadlineAtRisk && ' ⚠'}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 font-sans text-foreground">{currency.format(order.totalAmount)}</td>
+                    <td className="px-5 py-3 font-sans">
+                      <span className="font-semibold text-foreground">{currency.format(order.netAmount)}</span>
+                      {marginPct !== null && <span className="ml-1.5 text-xs text-muted-foreground">({marginPct.toFixed(1)}%)</span>}
+                    </td>
+                    <td className="px-5 py-3">
+                      <OrderStatusBadge status={order.status} />
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <AIInsightBadge insights={rowInsights} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {total > PAGE_SIZE && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3 text-xs text-muted-foreground">
+              <span>
+                Página {page} de {totalPages} — {total} pedido(s)
+              </span>
+              <Pagination page={page} totalPages={totalPages} onPageChange={setPage} className="text-xs" />
+            </div>
+          )}
+        </div>
+      </Card>
     </div>
   );
 }

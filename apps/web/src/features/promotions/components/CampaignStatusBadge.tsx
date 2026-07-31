@@ -1,9 +1,9 @@
 import type { PromotionCampaignStatus } from '../api';
 
 const STATUS_META: Record<PromotionCampaignStatus, { label: string; className: string }> = {
-  DRAFT: { label: 'Rascunho', className: 'bg-ink-300/40 text-ink-700' },
+  DRAFT: { label: 'Rascunho', className: 'bg-muted text-muted-foreground' },
   ACTIVE: { label: 'Ativa', className: 'bg-margin-good/15 text-margin-good' },
-  ENDED: { label: 'Encerrada', className: 'bg-ink-300/40 text-ink-500' },
+  ENDED: { label: 'Encerrada', className: 'bg-muted text-muted-foreground' },
   CANCELLED: { label: 'Cancelada', className: 'bg-margin-danger/15 text-margin-danger' },
 };
 

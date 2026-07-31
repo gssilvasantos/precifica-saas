@@ -6,6 +6,9 @@ import CircuitBackground from '../components/dashboard/CircuitBackground';
 import AppModeToggle from '../components/dashboard/AppModeToggle';
 import AdsCampaignCard from '../features/ads/components/AdsCampaignCard';
 import AdsSuggestionCard from '../features/ads/components/AdsSuggestionCard';
+import { Badge } from '../components/ui/badge';
+import { Card } from '../components/ui/card';
+import { Skeleton } from '../components/ui/skeleton';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const percent = (value: number | null) => (value !== null ? `${(value * 100).toFixed(1)}%` : '—');
@@ -55,16 +58,16 @@ export default function AdsPage() {
       </div>
 
       {mode === 'DEMO' && (
-        <div className="rounded-lg border border-neon/40 bg-neon/10 px-4 py-2 text-xs font-medium text-ink-700">
+        <Badge variant="accent" className="w-full justify-start gap-2 rounded-lg px-4 py-2 text-xs font-medium normal-case">
           Modo Demonstração ativo — campanhas e sugestões abaixo vêm de dados fictícios (AdsAuditSeederService), nunca
           das campanhas reais do tenant.
-        </div>
+        </Badge>
       )}
 
       {isLoading && (
-        <div className="rounded-2xl bg-surface p-8 text-center text-sm text-ink-500 shadow-card">
-          Carregando dashboard de Ads…
-        </div>
+        <Card className="p-8">
+          <Skeleton className="mx-auto h-4 w-56" />
+        </Card>
       )}
 
       {!isLoading && dashboard && (
@@ -87,7 +90,7 @@ export default function AdsPage() {
 
           {pending.length > 0 && (
             <div>
-              <h2 className="mb-3 font-serif text-lg font-semibold text-ink-900">
+              <h2 className="mb-3 font-serif text-lg font-semibold text-foreground">
                 Sugestões pendentes de confirmação ({pending.length})
               </h2>
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -99,13 +102,13 @@ export default function AdsPage() {
           )}
 
           <div>
-            <h2 className="mb-3 font-serif text-lg font-semibold text-ink-900">Campanhas</h2>
+            <h2 className="mb-3 font-serif text-lg font-semibold text-foreground">Campanhas</h2>
             {dashboard.campaigns.length === 0 ? (
-              <div className="rounded-2xl bg-surface p-8 text-center text-sm text-ink-500 shadow-card">
+              <Card className="p-8 text-center text-sm text-muted-foreground">
                 {mode === 'DEMO'
                   ? 'Nenhuma campanha de demonstração semeada ainda — use o botão de Modo Demonstração para semear os dados fictícios.'
                   : 'Nenhuma campanha sincronizada ainda para este período.'}
-              </div>
+              </Card>
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {dashboard.campaigns.map((campaign) => (
