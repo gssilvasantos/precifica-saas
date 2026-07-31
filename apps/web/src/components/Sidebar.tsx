@@ -11,8 +11,10 @@ import {
   ListChecks,
   Plug,
   Settings,
+  Building2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useAuth } from '../features/auth/auth-context';
 
 // Ícones lucide-react (mesmo pacote já trazido pela fundação shadcn/ui) no
 // lugar dos SVGs desenhados à mão — conjunto abstrato/técnico de propósito
@@ -44,6 +46,11 @@ interface Props {
 // diretamente (bg-surface/border-ink-300) — resolve sozinho para o tema
 // certo (Light/Dark) sem lógica condicional aqui.
 export default function Sidebar({ isOpen, onClose }: Props) {
+  const { user } = useAuth();
+  const navItems = user?.isPlatformAdmin
+    ? [...NAV_ITEMS, { to: '/admin', label: 'Administração', icon: Building2 }]
+    : NAV_ITEMS;
+
   return (
     <>
       {isOpen && <div className="fixed inset-0 z-30 bg-background/70 backdrop-blur-sm md:hidden" onClick={onClose} />}
@@ -61,7 +68,7 @@ export default function Sidebar({ isOpen, onClose }: Props) {
         </div>
 
         <nav className="space-y-1 p-3">
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

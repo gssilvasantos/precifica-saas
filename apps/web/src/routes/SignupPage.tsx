@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../features/auth/auth-context';
 import { extractErrorMessage } from '../lib/extract-error-message';
 
@@ -7,6 +8,11 @@ import { extractErrorMessage } from '../lib/extract-error-message';
 // (usado para criar a conta demo e a conta de revisão), sem nenhuma tela.
 // Cria tenant + usuário ADMIN em uma única chamada (ver AuthService.signup no
 // backend) e já loga automaticamente, igual ao fluxo de login.
+//
+// Confirmação de e-mail e mostrar/ocultar senha existem para evitar o erro
+// mais comum de cadastro (digitar errado e só descobrir depois, sem como
+// corrigir sozinho ainda — não existe tela de "editar minha conta" nem painel
+// de administração de clientes no MVP).
 export default function SignupPage() {
   const { signup } = useAuth();
   const navigate = useNavigate();
@@ -15,15 +21,20 @@ export default function SignupPage() {
   const [tenantDocument, setTenantDocument] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [confirmEmail, setConfirmEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const emailsMatch = email.trim().length > 0 && email.trim().toLowerCase() === confirmEmail.trim().toLowerCase();
 
   const canSubmit =
     tenantName.trim().length > 0 &&
     name.trim().length > 0 &&
-    email.trim().length > 0 &&
+    emailsMatch &&
     password.length >= 8 &&
     password === confirmPassword;
 
@@ -31,6 +42,10 @@ export default function SignupPage() {
     event.preventDefault();
     setError(null);
 
+    if (!emailsMatch) {
+      setError('Os e-mails não conferem — confira se não há erro de digitação.');
+      return;
+    }
     if (password !== confirmPassword) {
       setError('As senhas não conferem.');
       return;
@@ -110,37 +125,78 @@ export default function SignupPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onPaste={(e) => e.preventDefault()}
               className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
               placeholder="voce@empresa.com.br"
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">Senha</label>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+              Confirmar e-mail
+            </label>
             <input
-              type="password"
+              type="email"
               required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              value={confirmEmail}
+              onChange={(e) => setConfirmEmail(e.target.value)}
+              onPaste={(e) => e.preventDefault()}
               className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
-              placeholder="Mínimo 8 caracteres"
+              placeholder="Digite o e-mail de novo"
             />
+            {confirmEmail.length > 0 && !emailsMatch && (
+              <p className="mt-1 text-xs text-margin-danger">Os e-mails não conferem.</p>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">Senha</label>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-lg border border-ink-300 px-3 py-2 pr-10 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+                placeholder="Mínimo 8 caracteres"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-ink-500 hover:text-ink-900"
+                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
               Confirmar senha
             </label>
-            <input
-              type="password"
-              required
-              minLength={8}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
-              placeholder="Repita a senha"
-            />
+            <div className="relative">
+              <input
+                type={showConfirmPassword ? 'text' : 'password'}
+                required
+                minLength={8}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full rounded-lg border border-ink-300 px-3 py-2 pr-10 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+                placeholder="Repita a senha"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword((v) => !v)}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-ink-500 hover:text-ink-900"
+                aria-label={showConfirmPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                tabIndex={-1}
+              >
+                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
 
           {error && <p className="text-sm text-margin-danger">{error}</p>}

@@ -180,6 +180,10 @@ model Tenant {
   id        String   @id @default(uuid())
   name      String
   document  String? // CNPJ, opcional no cadastro inicial
+  // Bloqueio de conta inteira pelo painel de Administração da Plataforma
+  // (30/07/2026) — desativa o acesso de TODOS os usuários da conta de uma
+  // vez, sem precisar desativar um por um. Checado em AuthService.login.
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -198,8 +202,16 @@ model User {
   passwordHash String
   role         UserRole @default(VIEWER)
   isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  // Marca quem enxerga a tela de Administração da Plataforma (cross-tenant:
+  // listar/bloquear/excluir contas de clientes) — não é um UserRole porque
+  // não é um papel dentro de UM tenant, é uma capacidade fora do conceito de
+  // tenant inteiramente. Só setado manualmente no banco (não existe endpoint
+  // de auto-promoção, de propósito). Checado a cada request pelo
+  // PlatformAdminGuard, nunca embutido no JWT (revogar não pode esperar o
+  // usuário deslogar e logar de novo).
+  isPlatformAdmin Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Único por tenant, não globalmente: duas contas diferentes podem ter
   // um usuário com o mesmo e-mail (ex.: um contador que atende várias lojas).

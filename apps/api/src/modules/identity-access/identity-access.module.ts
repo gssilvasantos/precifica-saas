@@ -5,9 +5,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TenantsService } from './application/tenants.service';
 import { UsersService } from './application/users.service';
 import { AuthService } from './application/auth.service';
+import { PlatformAdminService } from './application/platform-admin.service';
 import { AuthController } from './interface/controllers/auth.controller';
+import { PlatformAdminController } from './interface/controllers/platform-admin.controller';
 import { JwtStrategy } from './infrastructure/jwt.strategy';
 import { RolesGuard } from './interface/guards/roles.guard';
+import { PlatformAdminGuard } from './interface/guards/platform-admin.guard';
 import { PrismaTenantRepository } from './infrastructure/prisma-tenant.repository';
 import { PrismaUserRepository } from './infrastructure/prisma-user.repository';
 import { TENANT_REPOSITORY } from './application/ports/tenant-repository.port';
@@ -25,13 +28,15 @@ import { USER_REPOSITORY } from './application/ports/user-repository.port';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, PlatformAdminController],
   providers: [
     TenantsService,
     UsersService,
     AuthService,
+    PlatformAdminService,
     JwtStrategy,
     RolesGuard,
+    PlatformAdminGuard,
     { provide: TENANT_REPOSITORY, useClass: PrismaTenantRepository },
     { provide: USER_REPOSITORY, useClass: PrismaUserRepository },
   ],

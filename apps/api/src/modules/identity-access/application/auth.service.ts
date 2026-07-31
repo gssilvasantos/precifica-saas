@@ -42,7 +42,7 @@ export class AuthService {
       role: UserRole.ADMIN, // primeiro usuário de uma conta nova é sempre admin
     });
 
-    return this.buildAuthResponse(user.id, tenant.id, user.role);
+    return this.buildAuthResponse(user.id, tenant.id, user.role, user.isPlatformAdmin);
   }
 
   async login(input: LoginInput) {
@@ -67,19 +67,26 @@ export class AuthService {
       candidate = found;
     }
 
+    // Conta bloqueada pelo painel de Administração da Plataforma — checado
+    // ANTES da senha de propósito (mensagem específica em vez de "e-mail ou
+    // senha inválidos", já que não é um problema de credencial).
+    if (!candidate.tenant.isActive) {
+      throw new UnauthorizedException('Esta conta foi bloqueada. Entre em contato com o suporte.');
+    }
+
     const passwordMatches = await bcrypt.compare(input.password, candidate.passwordHash);
     if (!passwordMatches || !candidate.isActive) {
       throw new UnauthorizedException('E-mail ou senha inválidos.');
     }
 
-    return this.buildAuthResponse(candidate.id, candidate.tenantId, candidate.role);
+    return this.buildAuthResponse(candidate.id, candidate.tenantId, candidate.role, candidate.isPlatformAdmin);
   }
 
-  private buildAuthResponse(userId: string, tenantId: string, role: UserRole) {
+  private buildAuthResponse(userId: string, tenantId: string, role: UserRole, isPlatformAdmin: boolean) {
     const payload: JwtPayload = { sub: userId, tenantId, role };
     return {
       accessToken: this.jwt.sign(payload),
-      user: { id: userId, tenantId, role },
+      user: { id: userId, tenantId, role, isPlatformAdmin },
     };
   }
 }

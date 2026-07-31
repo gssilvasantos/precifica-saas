@@ -17,6 +17,7 @@ import AdsPage from './routes/AdsPage';
 import MapGovernancePage from './routes/MapGovernancePage';
 import PromotionsPage from './routes/PromotionsPage';
 import PromotionCampaignDetailPage from './routes/PromotionCampaignDetailPage';
+import PlatformAdminPage from './routes/PlatformAdminPage';
 
 export default function App() {
   return (
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/promocoes" element={<PromotionsPage />} />
             <Route path="/promocoes/:campaignId" element={<PromotionCampaignDetailPage />} />
             <Route path="/configuracoes-fiscais" element={<ConfiguracoesFiscaisPage />} />
+            <Route path="/admin" element={<PlatformAdminPage />} />
             <Route path="/" element={<Navigate to="/catalogo" replace />} />
           </Route>
         </Route>

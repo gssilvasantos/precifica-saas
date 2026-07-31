@@ -8,6 +8,7 @@ export interface User {
   passwordHash: string;
   role: UserRole;
   isActive: boolean;
+  isPlatformAdmin: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

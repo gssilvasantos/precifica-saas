@@ -12,7 +12,7 @@ export interface CreateUserData {
 export interface UserRepository {
   create(data: CreateUserData): Promise<User>;
   findByTenantAndEmail(tenantId: string, email: string): Promise<User | null>;
-  findAllByEmail(email: string): Promise<Array<User & { tenant: { id: string; name: string } }>>;
+  findAllByEmail(email: string): Promise<Array<User & { tenant: { id: string; name: string; isActive: boolean } }>>;
   findById(id: string): Promise<User | null>;
 }
 
