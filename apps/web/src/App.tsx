@@ -1,5 +1,6 @@
 import { Navigate, Route, BrowserRouter, Routes } from 'react-router-dom';
 import LoginPage from './routes/LoginPage';
+import SignupPage from './routes/SignupPage';
 import ProtectedRoute from './routes/ProtectedRoute';
 import AppLayout from './routes/AppLayout';
 import DashboardPage from './routes/DashboardPage';
@@ -22,6 +23,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/cadastro" element={<SignupPage />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
