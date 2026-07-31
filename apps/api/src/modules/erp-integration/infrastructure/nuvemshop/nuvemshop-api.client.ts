@@ -5,10 +5,11 @@ import { isRateLimitError, withRetry } from '../../../../shared/rate-limiting/wi
 
 const BASE_URL = 'https://api.nuvemshop.com.br/v1';
 
-// Cliente GET-only para a API da Nuvemshop — este módulo não precisa
-// escrever nada na Nuvemshop ainda (nenhum requisito pediu push de preço
-// para lá nesta etapa); se/quando precisar, é um método novo aqui, não uma
-// mudança de arquitetura.
+// Cliente da API da Nuvemshop — leitura (produtos/pedidos/taxas) e, desde
+// 31/07/2026 (task "Nuvemshop: push de preço"), UMA escrita: atualizar o
+// preço de uma variante (usada por NuvemshopPriceUpdateProvider). Continua
+// nunca escrevendo nada além disso — qualquer outra escrita futura é um
+// método novo aqui, não uma mudança de arquitetura.
 //
 // Autenticação: "app privado" (storeId + access_token gerados no painel,
 // Configurações > Meus Aplicativos) — a API da Nuvemshop historicamente usa
@@ -28,6 +29,7 @@ const BASE_URL = 'https://api.nuvemshop.com.br/v1';
 // POST /marketplace-intelligence/rules/manual (endpoint que já existe desde
 // a Etapa 4 exatamente para esse tipo de situação).
 export interface NuvemshopProductVariant {
+  id: string;
   sku: string;
   price: string;
 }
@@ -85,6 +87,25 @@ export class NuvemshopApiClient {
     );
   }
 
+  // Mesmo pipeline de rate-limit/retry de `request`, mas para verbos com
+  // corpo (PUT/POST) — usado hoje só por updateVariantPrice. fetch() só
+  // rejeita em falha de rede, então o 429 é tratado da mesma forma que no
+  // GET (transformado em Error para o withRetry reconhecer).
+  private async writeRequest(url: string, accessToken: string, method: 'PUT' | 'POST', body: unknown): Promise<Response> {
+    return withRetry(
+      async () => {
+        const response = await this.rateLimiter.schedule(() =>
+          fetch(url, { method, headers: this.headers(accessToken), body: JSON.stringify(body) }),
+        );
+        if (response.status === 429) {
+          throw new Error(`Nuvemshop retornou HTTP 429 (rate limit) para ${method} ${url}`);
+        }
+        return response;
+      },
+      { shouldRetry: isRateLimitError },
+    );
+  }
+
   async healthCheck(storeId: string, accessToken: string): Promise<boolean> {
     try {
       const response = await this.request(`${BASE_URL}/${storeId}/store`, accessToken);
@@ -109,7 +130,7 @@ export class NuvemshopApiClient {
         id: number | string;
         name: { pt?: string } | string;
         permalink?: string;
-        variants?: Array<{ sku?: string; price?: string }>;
+        variants?: Array<{ id?: number | string; sku?: string; price?: string }>;
       }>;
       if (!Array.isArray(batch) || batch.length === 0) break;
 
@@ -117,7 +138,7 @@ export class NuvemshopApiClient {
         const name = typeof item.name === 'string' ? item.name : item.name?.pt ?? '';
         const variants = (item.variants ?? [])
           .filter((v) => typeof v.sku === 'string' && v.sku.trim() !== '')
-          .map((v) => ({ sku: v.sku as string, price: v.price ?? '0' }));
+          .map((v) => ({ id: String(v.id ?? ''), sku: v.sku as string, price: v.price ?? '0' }));
         if (variants.length === 0) continue; // sem SKU não dá para vincular — pulado, não é erro
         products.push({ id: String(item.id), name, variants, permalink: item.permalink });
       }
@@ -127,6 +148,47 @@ export class NuvemshopApiClient {
     }
 
     return products;
+  }
+
+  // Usado por NuvemshopPriceUpdateProvider para resolver, a partir do
+  // `externalId` guardado em ChannelListing (= product.id, ver
+  // NuvemshopChannelListingSyncService), a lista de variantes ATUAL do
+  // produto — inclusive o `id` de cada variante, que fetchAllProducts também
+  // captura mas ChannelListing não persiste (só guarda o preço/SKU). GET de
+  // 1 produto só, nunca a loja inteira.
+  async fetchProduct(storeId: string, accessToken: string, productId: string): Promise<NuvemshopProduct | null> {
+    const url = `${BASE_URL}/${storeId}/products/${productId}`;
+    const response = await this.request(url, accessToken);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`Nuvemshop /products/${productId} retornou HTTP ${response.status}`);
+    }
+    const item = (await response.json()) as {
+      id: number | string;
+      name: { pt?: string } | string;
+      permalink?: string;
+      variants?: Array<{ id?: number | string; sku?: string; price?: string }>;
+    };
+    const name = typeof item.name === 'string' ? item.name : item.name?.pt ?? '';
+    const variants = (item.variants ?? [])
+      .filter((v) => typeof v.sku === 'string' && v.sku.trim() !== '')
+      .map((v) => ({ id: String(v.id ?? ''), sku: v.sku as string, price: v.price ?? '0' }));
+    return { id: String(item.id), name, variants, permalink: item.permalink };
+  }
+
+  // Única escrita deste client (ver comentário no topo do arquivo) — preço é
+  // por VARIANTE, nunca por produto (mesmo produto pode ter N SKUs/variantes
+  // com preços diferentes), por isso exige productId + variantId, não só o
+  // externalId de ChannelListing. Endpoint oficial: PUT
+  // /{store_id}/products/{product_id}/variants/{variant_id}, corpo
+  // `{price: "99.90"}` (string, mesmo formato devolvido pela leitura).
+  async updateVariantPrice(storeId: string, accessToken: string, productId: string, variantId: string, newPrice: number): Promise<void> {
+    const url = `${BASE_URL}/${storeId}/products/${productId}/variants/${variantId}`;
+    const response = await this.writeRequest(url, accessToken, 'PUT', { price: newPrice.toFixed(2) });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Nuvemshop PUT /products/${productId}/variants/${variantId} retornou HTTP ${response.status}${body ? `: ${body}` : ''}`);
+    }
   }
 
   // Pedidos — mesmo estilo de paginação de fetchAllProducts (incrementa

@@ -40,6 +40,7 @@ import { FEE_RULE_RESOLVER, PRICE_UPDATE_DISPATCHER } from '../../shared/contrac
 import { SyncOpsModule } from '../../shared/sync-ops/sync-ops.module';
 import { ErpIntegrationModule } from '../erp-integration/erp-integration.module';
 import { NuvemshopFeeRuleProvider } from '../erp-integration/infrastructure/nuvemshop/nuvemshop-fee-rule.provider';
+import { NuvemshopPriceUpdateProvider } from '../erp-integration/infrastructure/nuvemshop/nuvemshop-price-update.provider';
 import { ObservabilityModule } from '../../shared/observability/observability.module';
 
 @Module({
@@ -131,8 +132,16 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // nunca alterar MarketplaceProviderRegistry/RuleSyncOrchestrator.
     {
       provide: MARKETPLACE_PROVIDERS,
-      useFactory: (ml: MercadoLivreFeeRuleProvider, nuvemshop: NuvemshopFeeRuleProvider) => [ml, nuvemshop],
-      inject: [MercadoLivreFeeRuleProvider, NuvemshopFeeRuleProvider],
+      useFactory: (ml: MercadoLivreFeeRuleProvider, nuvemshop: NuvemshopFeeRuleProvider, nuvemshopPriceUpdate: NuvemshopPriceUpdateProvider) => [
+        ml,
+        nuvemshop,
+        // Push de preço (31/07/2026) — segunda capacidade da Nuvemshop
+        // registrada aqui (a primeira é NuvemshopFeeRuleProvider, FEE_RULES);
+        // classe separada pelo mesmo racional de MercadoLivreOrderProvider
+        // etc.: uma capacidade por classe, mesmo canal.
+        nuvemshopPriceUpdate,
+      ],
+      inject: [MercadoLivreFeeRuleProvider, NuvemshopFeeRuleProvider, NuvemshopPriceUpdateProvider],
     },
 
     { provide: MARKETPLACE_REPOSITORY, useClass: PrismaMarketplaceRepository },

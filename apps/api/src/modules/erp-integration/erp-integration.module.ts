@@ -16,6 +16,7 @@ import { OlistApiClient } from './infrastructure/olist/olist-api.client';
 import { NuvemshopApiClient } from './infrastructure/nuvemshop/nuvemshop-api.client';
 import { NuvemshopFeeRuleProvider } from './infrastructure/nuvemshop/nuvemshop-fee-rule.provider';
 import { NuvemshopOrderProvider } from './infrastructure/nuvemshop/nuvemshop-order.provider';
+import { NuvemshopPriceUpdateProvider } from './infrastructure/nuvemshop/nuvemshop-price-update.provider';
 import { LocalFileStorageService } from './infrastructure/storage/local-file-storage.service';
 import { R2FileStorageService } from './infrastructure/storage/r2-file-storage.service';
 import { resolveStorageDriver } from '../../shared/config/storage-environment';
@@ -63,6 +64,10 @@ import { CatalogModule } from '../catalog/catalog.module';
     // Mesmo racional de NuvemshopFeeRuleProvider: exportado para o módulo
     // Orders registrar em ORDER_CAPABLE_PROVIDERS sem import circular.
     NuvemshopOrderProvider,
+    // Push de preço (31/07/2026) — mesmo racional de NuvemshopFeeRuleProvider:
+    // exportado para o Marketplace Intelligence registrar em
+    // MARKETPLACE_PROVIDERS (capacidade PRICE_UPDATE), sem import circular.
+    NuvemshopPriceUpdateProvider,
     ErpSyncSchedulerJob,
     NuvemshopSyncSchedulerJob,
 
@@ -103,6 +108,14 @@ import { CatalogModule } from '../catalog/catalog.module';
   // repouso — sem exportar aqui, o Nest não consegue resolver essa
   // dependência fora deste módulo, mesmo com a classe registrada em
   // `providers`. Ver docs/auth-security.md.
-  exports: [CHANNEL_LISTING_READER, CHANNEL_LISTING_WRITER, NuvemshopFeeRuleProvider, NuvemshopOrderProvider, FILE_STORAGE, CredentialEncryptionService],
+  exports: [
+    CHANNEL_LISTING_READER,
+    CHANNEL_LISTING_WRITER,
+    NuvemshopFeeRuleProvider,
+    NuvemshopOrderProvider,
+    NuvemshopPriceUpdateProvider,
+    FILE_STORAGE,
+    CredentialEncryptionService,
+  ],
 })
 export class ErpIntegrationModule {}
