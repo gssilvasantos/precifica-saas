@@ -1066,7 +1066,7 @@ O gap mais crítico do benchmark (seção 1.1): `Product.isKit` era só decorati
 
 **Endpoints:** `POST/GET /production/orders` (+ `GET :id`), `PATCH .../iniciar`, `PATCH .../concluir`, `PATCH .../cancelar`.
 
-**Aplicação manual pendente** (schema novo, mesmo racional de `procurement`/`fiscal`): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_grant_app_runtime_production.sql` e `2026-07-29_apply_production_rls_only.sql`.
+**Aplicado e confirmado em produção (31/07/2026)** — `rowsecurity=true`, 1 policy por tabela, verificado via query direta contra o Supabase (`catalog.product_structure_components`, `production.production_orders`, `production.production_order_components`).
 
 **Gaps conhecidos:** sem UI no frontend ainda; BOM multinível não suportado (só bloqueia o kit compor a si mesmo); sem reserva de componente entre ordens concorrentes (validação de saldo suficiente ainda não existe).
 
@@ -1082,7 +1082,7 @@ Gap do benchmark (seção 1.2): sem lote/validade, sellers de perecível (alimen
 
 **Decisão de escopo deliberada:** mesma filosofia "ação explícita, nunca automática" do Projeto Estruturante 1 — esta rodada NÃO altera os fluxos de venda/despacho/compra/produção existentes para debitar lote automaticamente. FEFO é só sugestão de leitura; a movimentação real do lote só acontece via o lançamento manual `LOT_ADJUSTMENT`.
 
-**Aplicação manual pendente** (tabela nova em schema existente, só RLS, sem grant separado): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_apply_product_lots_rls_only.sql` — depois de `npx prisma migrate deploy`.
+**Estava pendente e foi aplicado em 31/07/2026** — auditoria geral encontrou `catalog.product_lots` com `rowsecurity=false` em produção (única das 5 tabelas de 29/07 ainda sem proteção); aplicado via `npx prisma db execute --file prisma/manual-migrations/2026-07-29_apply_product_lots_rls_only.sql --url "$DIRECT_URL"` e confirmado (`rowsecurity=true`, 1 policy).
 
 **Gaps conhecidos:** sem UI no frontend ainda; baixa automática de lote por FEFO nos fluxos de venda/despacho/compra/produção fora do escopo desta rodada; sem reserva de lote entre operações concorrentes.
 
@@ -1098,7 +1098,7 @@ Gap do benchmark (seção 1.3): sem vendedor interno nem comissão, todo pedido 
 
 **Relatório + repasse:** `GET /sellers/vendedores/:vendedorId/comissoes` (filtra por `Order.orderedAt`, inclui pagas). `POST .../comissoes/gerar-conta-a-pagar` (Safety Lock, ADMIN): soma só comissão pendente do período, cria UMA `AccountsPayable` e só DEPOIS marca os itens como pagos — nunca marca pago antes da conta existir, mesmo padrão de `PurchaseOrderService.receive()`.
 
-**Aplicação manual pendente** (schema novo — grant E RLS; colunas novas em `orders.order_items` não precisam de nada, RLS é por linha): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_grant_app_runtime_sellers.sql` e `2026-07-29_apply_sellers_rls_only.sql`, nesta ordem, depois de `npx prisma migrate deploy`.
+**Aplicado e confirmado em produção (31/07/2026)** — `sellers.vendedores` com `rowsecurity=true` e 1 policy, verificado via query direta contra o Supabase.
 
 **Gaps conhecidos:** sem UI no frontend ainda; sem split de comissão entre vendedores no mesmo item; atribuição sempre manual, sem vendedor-padrão automático; `descontoMaximoPct` informativo, sem gate de bloqueio em nenhum fluxo de venda; sem faixas progressivas de comissão.
 
@@ -1114,7 +1114,7 @@ Gap do benchmark (seção 2, `NaturezasOperacoesDadosDTO`): `tax-code-resolver.t
 
 **Decisão de escopo deliberada:** só o CFOP foi generalizado nesta rodada — CST de ICMS/PIS/COFINS e os campos `consumidor_final`/`indicador_inscricao_estadual_destinatario` do payload (hoje fixos, perfil B2C não-contribuinte) continuam como estão; generalizar a tributação inteira exigiria capturar mais dados do destinatário que `EmitInvoiceInput` não coleta hoje.
 
-**Aplicação manual pendente** (tabela nova em schema existente, só RLS, sem grant separado): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_apply_naturezas_operacao_rls_only.sql` — depois de `npx prisma migrate deploy`.
+**Aplicado e confirmado em produção (31/07/2026)** — `fiscal.naturezas_operacao` com `rowsecurity=true` e 1 policy, verificado via query direta contra o Supabase.
 
 **Gaps conhecidos:** sem UI no frontend ainda; CST de ICMS/PIS/COFINS continuam hardcoded; sem endpoint de "tributação calculada" completa (como o Bling expõe); sem fórmula de derivação venda→devolução (CFOP de devolução customizado é sempre explícito).
 
@@ -1130,6 +1130,6 @@ Gap do benchmark: `DispatchBatch.formaEnvio` era (e continua sendo) uma string l
 
 **Integração com DispatchBatch:** `CreateDispatchBatchDto` ganhou `carrierServiceId` opcional (alternativa a `formaEnvio`, resolvido no controller ANTES de chamar `createBatch`); novo `GET /logistics-fulfillment/dispatch-batches/:id/carrier-match` enriquece um lote existente com o transportador/serviço correspondente ao seu `formaEnvio` já gravado.
 
-**Aplicação manual pendente** (tabelas novas em schema existente, só RLS, sem grant separado): `psql "$DIRECT_URL" -f apps/api/prisma/manual-migrations/2026-07-29_apply_carrier_catalog_rls_only.sql` — depois de `npx prisma migrate deploy`.
+**Aplicado e confirmado em produção (31/07/2026)** — `freight_shipping.carriers`/`carrier_services` com `rowsecurity=true` e 1 policy cada, verificado via query direta contra o Supabase.
 
 **Gaps conhecidos:** sem UI no frontend ainda; sem exclusão física (só `setActive`); `matchByFormaEnvio` varre todos os serviços ativos do tenant em memória (aceitável no volume esperado); sem sincronização automática de aliases a partir do canal de origem do pedido.
