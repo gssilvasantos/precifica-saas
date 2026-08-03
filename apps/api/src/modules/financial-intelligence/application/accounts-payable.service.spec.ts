@@ -3,7 +3,6 @@ import { AccountsPayableService } from './accounts-payable.service';
 import { AccountsPayableRepository } from './ports/accounts-payable-repository.port';
 import { SupplierRepository } from '../../catalog/application/ports/supplier-repository.port';
 import { AccountsPayable } from '../domain/accounts-payable.entity';
-import { Supplier } from '../../catalog/domain/supplier.entity';
 import { ACCOUNTS_PAYABLE_EVENTS } from '../domain/accounts-payable-events';
 
 function buildPayable(overrides: Partial<AccountsPayable> = {}): AccountsPayable {
@@ -26,21 +25,6 @@ function buildPayable(overrides: Partial<AccountsPayable> = {}): AccountsPayable
     installmentNumber: null,
     totalInstallments: null,
     notes: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides,
-  };
-}
-
-function buildSupplier(overrides: Partial<Supplier> = {}): Supplier {
-  return {
-    id: 'sup-1',
-    tenantId: 'tenant-1',
-    name: 'Fornecedor X',
-    contact: null,
-    leadTimeDays: null,
-    paymentTerms: null,
-    isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

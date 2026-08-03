@@ -1,1 +1,6 @@
-tsc_out.log 
+tsc_out.log
+
+# Configuração PESSOAL do Claude Code — permissões e atalhos específicos da
+# máquina de cada pessoa. Nunca versionar. O que vale para o time inteiro fica
+# em .claude/settings.json (versionado). Modelo em .claude/settings.local.json.example
+.claude/settings.local.json

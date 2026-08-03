@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Read(./apps/api/.env)",
+      "Read(./apps/web/.env)",
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(npx prisma migrate deploy:*)",
+      "Bash(npm install:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-sensitive-write.mjs\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-destructive-bash.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/scan-secrets.mjs\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/migration-notice.mjs\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint-changed-file.mjs\"",
+            "timeout": 90
+          }
+        ]
+      }
+    ]
+  }
+}

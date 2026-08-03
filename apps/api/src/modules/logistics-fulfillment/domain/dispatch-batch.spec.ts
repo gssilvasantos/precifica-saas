@@ -4,7 +4,6 @@ import {
   canConcludeBatch,
   canGenerateLabelForOrder,
   canIncludeInDispatchBatch,
-  KNOWN_FORMA_ENVIO_CODES,
   resolveLabelStrategy,
 } from './dispatch-batch.entity';
 

@@ -76,7 +76,7 @@ describe('MercadoLivreHandshakeService', () => {
   });
 
   it('falha ao renovar/buscar pedidos: devolve success false, emite alerta ERROR, nunca lança', async () => {
-    const { service, connectionService, client, alerts } = buildService();
+    const { service, connectionService, alerts } = buildService();
     connectionService.getStatus.mockResolvedValue(buildStatus());
     connectionService.getValidAccessToken.mockRejectedValue(new Error('refresh_token revogado'));
 

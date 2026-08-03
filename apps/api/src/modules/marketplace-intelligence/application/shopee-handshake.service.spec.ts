@@ -84,7 +84,7 @@ describe('ShopeeHandshakeService', () => {
   });
 
   it('falha ao renovar/consultar a loja: devolve success false, emite alerta ERROR, nunca lança', async () => {
-    const { service, connectionService, client, alerts } = buildService();
+    const { service, connectionService, alerts } = buildService();
     connectionService.getStatus.mockResolvedValue(buildStatus());
     connectionService.getValidAccessToken.mockRejectedValue(new Error('refresh_token revogado'));
 

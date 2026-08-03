@@ -1,0 +1,32 @@
+{
+  "//": "MODELO de configuração PESSOAL. Copie para .claude/settings.local.json (que está no .gitignore e NUNCA deve ser versionado) e ajuste. Remova as chaves '//' antes de usar — comentários não são JSON válido para todo leitor.",
+
+  "//permissions": "Atalhos pessoais: comandos que VOCÊ confia e não quer aprovar toda vez. Mantenha só leitura e verificação; nunca coloque aqui deploy, migration em ambiente real ou push.",
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(docker compose up -d:*)",
+      "Bash(bash .claude/skills/product-engineering-studio/scripts/validate-project.sh:*)"
+    ]
+  },
+
+  "//env": "Variáveis não sensíveis para a sessão. NUNCA coloque segredo aqui — este arquivo fica em disco, sem criptografia.",
+  "env": {},
+
+  "//hooks": "PROPOSTAS DE HOOK que hoje NÃO funcionam neste repositório, com o motivo. Ative depois de resolver a lacuna correspondente e mova para .claude/settings.json se valer para o time inteiro.",
+
+  "//hook-lint": "JÁ ATIVO em .claude/settings.json desde 03/08/2026 (.claude/hooks/lint-changed-file.mjs, ver ADR 0002). Nada a fazer aqui.",
+
+  "//hook-formatacao": "Formatação automática após edição. BLOQUEADO: o projeto não tem Prettier nem .editorconfig, e adotá-lo reformataria ~770 arquivos de uma vez (destrói git blame) — é decisão do dono, não pendência trivial. Se Prettier for adotado: { \"matcher\": \"Write|Edit\", \"hooks\": [{ \"type\": \"command\", \"command\": \"npx --no-install prettier --write \\\"$CLAUDE_FILE_PATHS\\\"\" }] }",
+
+  "//hook-typecheck": "Typecheck incremental ao terminar uma resposta (evento Stop). NÃO ativado por padrão porque tsc do apps/api leva dezenas de segundos em um projeto com 642 arquivos — pesado demais para rodar a cada edição. Se quiser mesmo: { \"Stop\": [{ \"hooks\": [{ \"type\": \"command\", \"command\": \"cd apps/api && npx --no-install tsc -p tsconfig.json --noEmit\", \"timeout\": 180 }] }] }",
+
+  "//hook-testes-relacionados": "Rodar só os testes relacionados ao arquivo editado. Viável no backend (Jest): { \"matcher\": \"Write|Edit\", \"hooks\": [{ \"type\": \"command\", \"command\": \"cd apps/api && npx --no-install jest --findRelatedTests --passWithNoTests \\\"$CLAUDE_FILE_PATHS\\\"\", \"timeout\": 120 }] }. Não ativado por padrão: exige node_modules instalado e pode atrasar edições em sequência. NUNCA rode a suíte inteira em PostToolUse.",
+
+  "//hook-notificacao": "Aviso sonoro/desktop quando a sessão pedir sua atenção. Puramente pessoal — exemplo em Linux: { \"Notification\": [{ \"hooks\": [{ \"type\": \"command\", \"command\": \"notify-send 'Claude Code' 'Precisa da sua atenção'\" }] }] }"
+}

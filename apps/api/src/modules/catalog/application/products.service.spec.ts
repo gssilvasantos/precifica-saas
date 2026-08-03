@@ -293,7 +293,7 @@ describe('ProductsService (Produto Pai + Variação)', () => {
 
   describe('update', () => {
     it('vincula um produto existente a um pai válido', async () => {
-      const { service, products } = buildService({ 'prod-1': baseProduct, 'parent-1': parentProduct });
+      const { service } = buildService({ 'prod-1': baseProduct, 'parent-1': parentProduct });
 
       const result = await service.update(
         'tenant-1',

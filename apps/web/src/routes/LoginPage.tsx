@@ -32,7 +32,7 @@ export default function LoginPage() {
     try {
       await login({ email: loginEmail, password: loginPassword });
       navigate('/produtos', { replace: true });
-    } catch (err) {
+    } catch {
       setError(
         'Não deu para entrar. Confira se o backend está rodando (npm run start:dev) e, se for usar a conta demo, ' +
           'se rodou "npm run prisma:seed:demo" em apps/api.',

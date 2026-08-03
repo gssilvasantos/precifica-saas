@@ -103,7 +103,7 @@ export async function fetchVideoSession(eventId: string): Promise<VideoCaptureSe
   try {
     const { data } = await apiClient.get<VideoCaptureSession>(`${BASE}/${eventId}/video-sessions`);
     return data;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

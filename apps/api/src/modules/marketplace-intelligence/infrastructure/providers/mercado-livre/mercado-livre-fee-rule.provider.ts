@@ -93,7 +93,7 @@ export class MercadoLivreFeeRuleProvider
     return [];
   }
 
-  async updatePrice(ctx: FetchContext, externalId: string, newPrice: number): Promise<PriceUpdateResult> {
+  async updatePrice(ctx: FetchContext, externalId: string, _newPrice: number): Promise<PriceUpdateResult> {
     await this.ensureValidCredentials(ctx.tenantId); // lança — ver comentário da classe
     return { success: false, externalId, message: 'Não implementado — requer OAuth2 por vendedor.' };
   }
