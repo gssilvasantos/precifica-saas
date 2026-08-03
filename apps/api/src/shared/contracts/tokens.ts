@@ -3,8 +3,34 @@
 // concreta de outro módulo, só o token + a interface.
 export const SHIPPING_WEIGHT_CALCULATOR = Symbol('SHIPPING_WEIGHT_CALCULATOR');
 
-// Exportado pelo Marketplace Intelligence, consumido pelo futuro Pricing Intelligence.
+// Exportado pelo Marketplace Intelligence, consumido pelo Pricing
+// Intelligence (motor de repricing e simulador) e pelo Promotion
+// Intelligence. É por aqui que a comissão IMPORTADA do marketplace chega a
+// quem calcula preço — ver docs/revisao-geral-2026-08.md, §1.
 export const FEE_RULE_RESOLVER = Symbol('FEE_RULE_RESOLVER');
+
+// Exportado pelo Marketplace Intelligence — política de frete do canal
+// (quem paga a entrega e a partir de qual preço). Separado de
+// FEE_RULE_RESOLVER porque comissão e frete variam por limiares que não têm
+// relação entre si — ver shared/contracts/shipping-policy-resolver.port.ts.
+export const SHIPPING_POLICY_RESOLVER = Symbol('SHIPPING_POLICY_RESOLVER');
+
+// Exportado pelo Marketplace Intelligence — o que ESTE vendedor contratou
+// em cada canal (Plano de vendas profissional da Amazon, desconto de frete
+// por reputação no Mercado Livre). Distinto das duas portas acima, que
+// descrevem como o CANAL cobra de todo mundo.
+export const CHANNEL_SELLER_PROFILE_READER = Symbol('CHANNEL_SELLER_PROFILE_READER');
+
+// Exportado pelo Marketplace Ads, consumido pelo Financial Intelligence —
+// gasto com publicidade por canal, para a linha de Ads do DRE. Ver
+// shared/contracts/ads-spend-reader.port.ts.
+export const ADS_SPEND_READER = Symbol('ADS_SPEND_READER');
+
+// Exportado pelo Marketplace Publishing (dono de ChannelCategoryMapping),
+// consumido pelo Pricing Intelligence para traduzir a categoria interna do
+// produto na categoria do canal — que é a chave (scopeKey) sob a qual a
+// MarketplaceRule de comissão foi importada.
+export const CHANNEL_CATEGORY_RESOLVER = Symbol('CHANNEL_CATEGORY_RESOLVER');
 
 // Exportado pelo Catalog (Etapa 5), consumido pelo erp-integration.
 export const PRODUCT_CATALOG_WRITER = Symbol('PRODUCT_CATALOG_WRITER');
@@ -32,6 +58,21 @@ export const COMPETITOR_SNAPSHOT_READER = Symbol('COMPETITOR_SNAPSHOT_READER');
 // tenant (imposto + margem líquida mínima global) consumida pelo
 // PricingDecisionService para calcular o piso financeiro.
 export const FINANCIAL_POLICY_READER = Symbol('FINANCIAL_POLICY_READER');
+
+// Exportado pelo Orders — faturamento agregado POR MÊS, consumido pelo Tax
+// Intelligence para montar o RBT12 do Simples Nacional. Separado de
+// ORDER_FINANCIALS_READER porque somar 12 meses não deve carregar pedido a
+// pedido — ver shared/contracts/monthly-revenue-reader.port.ts.
+export const MONTHLY_REVENUE_READER = Symbol('MONTHLY_REVENUE_READER');
+
+// Exportado pelo Tax Intelligence — a alíquota efetiva por produto, por UF e
+// por data, calculada (não digitada). Consumido pelo Pricing Intelligence,
+// Promotion Intelligence e Financial Intelligence. Sucessor do
+// CatalogSettings.taxRatePct, que é um Float único por tenant e não representa
+// nenhum dos quatro regimes brasileiros corretamente — ver
+// shared/contracts/tax-rate-resolver.port.ts e
+// docs/tributacao-br-regimes-e-reforma.md.
+export const TAX_RATE_RESOLVER = Symbol('TAX_RATE_RESOLVER');
 
 // Exportado pelo Catalog — consumido pelo PackagingCostChangeListener
 // (Pricing Intelligence) para descobrir quais SKUs recalcular quando o

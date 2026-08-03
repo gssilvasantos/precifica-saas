@@ -53,7 +53,18 @@ describe('PromotionIntelligenceService', () => {
     const catalog: jest.Mocked<ProductCatalogReader> = { findBySku: jest.fn().mockResolvedValue(product) };
     const feeRules: jest.Mocked<FeeRuleResolver> = {
       resolveFeeRule: jest.fn().mockResolvedValue(
-        noFeeRule ? null : { commissionPct: 0.12, fixedFeeAmount: 2, ruleId: 'rule-1', ruleVersion: 1 },
+        noFeeRule
+          ? null
+          : {
+              // Formato de tabela (01/08/2026). Faixa única com os mesmos
+              // 12% + R$2 de antes — as asserções de margem deste arquivo
+              // continuam valendo número a número.
+              tiers: [{ minPrice: 0, maxPrice: null, commissionPct: 0.12, fixedFeeAmount: 2 }],
+              commissionBase: 'ITEM_PRICE',
+              commissionCapAmount: null,
+              ruleId: 'rule-1',
+              ruleVersion: 1,
+            },
       ),
     };
     const financialPolicy: jest.Mocked<FinancialPolicyReader> = {
@@ -61,6 +72,9 @@ describe('PromotionIntelligenceService', () => {
     };
     const logistics: jest.Mocked<LogisticsCostReader> = {
       getTotalLogisticsCost: jest.fn().mockResolvedValue(logisticsCost),
+      // Promoções não consome frete estimado (avalia margem a um preço já
+      // dado, não calcula piso) — o mock existe só para satisfazer a porta.
+      getEstimatedFreightCost: jest.fn().mockResolvedValue(0),
       getPackagingCostForOrder: jest.fn(),
     };
     const enrollmentRepo: jest.Mocked<PromotionEnrollmentRepository> = {

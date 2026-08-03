@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PRODUCT_CATALOG_READER, FEE_RULE_RESOLVER, FINANCIAL_POLICY_READER, LOGISTICS_COST_READER } from '../../../shared/contracts/tokens';
 import { ProductCatalogReader } from '../../../shared/contracts/product-catalog-reader.port';
-import { FeeRuleResolver } from '../../../shared/contracts/fee-rule-resolver.port';
+import { FeeRuleResolver, ResolvedFeeRule, resolveFeeAtPrice } from '../../../shared/contracts/fee-rule-resolver.port';
 import { FinancialPolicyReader } from '../../../shared/contracts/financial-policy-reader.port';
 import { LogisticsCostReader } from '../../../shared/contracts/logistics-cost-reader.port';
 import { PROMOTION_ENROLLMENT_REPOSITORY, PromotionEnrollmentRepository } from './ports/promotion-enrollment-repository.port';
@@ -16,6 +16,21 @@ import { PromotionEnrollment } from '../domain/promotion-enrollment.entity';
 // categoria de produto real — aqui, "GLOBAL" é a convenção para regras de
 // taxa que valem para qualquer categoria de um canal.
 const DEFAULT_FEE_CATEGORY = 'GLOBAL';
+
+// Resolve a faixa de comissão que vale para o preço promocional. Devolve
+// zeros quando não há regra — comportamento preservado de propósito: aqui,
+// diferente do motor de preço, uma taxa desconhecida não pode BLOQUEAR o
+// cálculo, porque `feeRuleFound: false` já é devolvido ao chamador e a tela
+// mostra que a margem está incompleta. Bloquear a pré-visualização de
+// margem seria pior que mostrá-la sinalizada.
+function resolveTierAtPromotionalPrice(
+  feeRule: ResolvedFeeRule | null,
+  promotionalPrice: number,
+): { commissionPct: number; fixedFeeAmount: number } {
+  if (!feeRule) return { commissionPct: 0, fixedFeeAmount: 0 };
+  const fee = resolveFeeAtPrice(feeRule, promotionalPrice);
+  return { commissionPct: fee.commissionPct, fixedFeeAmount: fee.fixedFeeAmount };
+}
 
 export interface MarginPreview {
   skuCode: string;
@@ -71,8 +86,11 @@ export class PromotionIntelligenceService {
       const result = calculateNetMargin({
         promotionalPrice,
         costPrice: product.productCostPrice, // SEM embalagem — já está em logisticsCost
-        commissionPct: feeRule?.commissionPct ?? 0,
-        fixedFeeAmount: feeRule?.fixedFeeAmount ?? 0,
+        // Resolve a faixa do preço promocional (01/08/2026). Antes lia um
+        // escalar do topo da regra — o que dava a taxa errada em canal com
+        // faixa por preço, justamente o caso de uma PROMOÇÃO, que por
+        // definição derruba o preço e pode mudar de faixa.
+        ...resolveTierAtPromotionalPrice(feeRule, promotionalPrice),
         taxRate: policy.taxRate,
         logisticsCost,
       });

@@ -5,8 +5,11 @@ import {
   PricingDecision,
   PricingContext,
   InvalidPricingContextError,
-  calculateFinancialFloorPrice,
-  marginPctOf,
+  UnreachableMarginError,
+  calculateTieredNetMarginFloorPrice,
+  mergeFeeAndShippingBands,
+  channelCostsOf,
+  netMarginPctOf,
   validatePriceAgainstMap,
   MapPriceViolationError,
 } from '../domain/pricing-strategist';
@@ -16,15 +19,39 @@ import {
   CHANNEL_LISTING_READER,
   PRICE_UPDATE_DISPATCHER,
   FINANCIAL_POLICY_READER,
+  FEE_RULE_RESOLVER,
+  LOGISTICS_COST_READER,
+  CHANNEL_CATEGORY_RESOLVER,
+  SHIPPING_POLICY_RESOLVER,
+  CHANNEL_SELLER_PROFILE_READER,
 } from '../../../shared/contracts/tokens';
+import { ChannelSellerProfileReader } from '../../../shared/contracts/channel-seller-profile-reader.port';
 import { ProductCatalogReader } from '../../../shared/contracts/product-catalog-reader.port';
 import { CompetitorSnapshotReader } from '../../../shared/contracts/competitor-snapshot-reader.port';
 import { ChannelListingReader } from '../../../shared/contracts/channel-listing-reader.port';
 import { PriceUpdateDispatcher, PriceUpdateOutcome } from '../../../shared/contracts/price-update-dispatcher.port';
 import { FinancialPolicyReader } from '../../../shared/contracts/financial-policy-reader.port';
+import {
+  FeeRuleResolver,
+  ResolvedFeeRule,
+  applySellerProfileToTier,
+} from '../../../shared/contracts/fee-rule-resolver.port';
+import { LogisticsCostReader } from '../../../shared/contracts/logistics-cost-reader.port';
+import { ChannelCategoryResolver } from '../../../shared/contracts/channel-category-resolver.port';
+import {
+  ShippingPolicyResolver,
+  resolveSellerFreightCost,
+} from '../../../shared/contracts/shipping-policy-resolver.port';
 
 const FINANCIAL_FLOOR_NOTE = 'Preço ajustado para o piso financeiro por proteção de margem.';
 const MAP_FLOOR_NOTE = 'Preço ajustado para respeitar a política de MAP (Preço Mínimo Anunciado) do fornecedor.';
+
+// Escopo de fallback quando o produto não tem categoria mapeada para o
+// canal: uma MarketplaceRule cadastrada manualmente com scopeKey 'GLOBAL'
+// (mesma convenção que o PromotionIntelligenceService já usa desde a
+// Sprint 26). É um fallback LEGÍTIMO — alguém cadastrou e validou essa
+// regra —, diferente de assumir comissão zero, que seria inventar dado.
+const GLOBAL_FEE_SCOPE = 'GLOBAL';
 
 // Resultado de aplicar (ou tentar aplicar) uma PricingDecision — vive na
 // camada de aplicação, não no domínio puro (domain/pricing-strategist.ts):
@@ -56,6 +83,19 @@ export class PricingDecisionService {
     @Inject(CHANNEL_LISTING_READER) private readonly channelListings: ChannelListingReader,
     @Inject(PRICE_UPDATE_DISPATCHER) private readonly priceUpdateDispatcher: PriceUpdateDispatcher,
     @Inject(FINANCIAL_POLICY_READER) private readonly financialPolicy: FinancialPolicyReader,
+    // Três portas adicionadas em 01/08/2026 (docs/revisao-geral-2026-08.md,
+    // §1): sem elas o motor calculava piso ignorando a comissão do canal e
+    // podia recomendar preço deficitário achando que era seguro.
+    @Inject(FEE_RULE_RESOLVER) private readonly feeRules: FeeRuleResolver,
+    @Inject(LOGISTICS_COST_READER) private readonly logistics: LogisticsCostReader,
+    @Inject(CHANNEL_CATEGORY_RESOLVER) private readonly channelCategories: ChannelCategoryResolver,
+    // Política de frete do canal — quem paga a entrega a partir de qual
+    // preço (ML: R$79). Sem ela, o piso ignorava o degrau em que o frete
+    // vira custo do vendedor.
+    @Inject(SHIPPING_POLICY_RESOLVER) private readonly shippingPolicies: ShippingPolicyResolver,
+    // O que ESTE vendedor contratou no canal (plano da Amazon, reputação do
+    // ML) — muda o custo real sem mudar a regra do canal.
+    @Inject(CHANNEL_SELLER_PROFILE_READER) private readonly sellerProfiles: ChannelSellerProfileReader,
   ) {}
 
   // Só calcula e devolve — nunca dispara PRICE_UPDATE_DISPATCHER. Usado pelo
@@ -128,14 +168,94 @@ export class PricingDecisionService {
       return null;
     }
 
+    // Sem canal não há como saber comissão nem custo logístico — e sem
+    // isso qualquer piso calculado seria uma adivinhação. Bloqueia igual
+    // aos casos acima, em vez de cair num "canal genérico".
+    if (!opportunity.channelCode) {
+      this.logger.warn(
+        `SKU ${skuCode} (tenant ${tenantId}): monitoramento sem canal definido — não é possível resolver a comissão do marketplace, decisão não calculada.`,
+      );
+      return null;
+    }
+    const channelCode = opportunity.channelCode;
+
+    const [feeRule, logisticsCost, shippingPolicy, estimatedFreightCost, sellerProfile] = await Promise.all([
+      this.resolveFeeRule(tenantId, product.categoryId, channelCode),
+      this.logistics.getTotalLogisticsCost(tenantId, skuCode, channelCode),
+      this.shippingPolicies.resolveShippingPolicy({ marketplaceCode: channelCode, tenantId }),
+      this.logistics.getEstimatedFreightCost(tenantId, channelCode),
+      this.sellerProfiles.getProfile(tenantId, channelCode),
+    ]);
+
+    // REGRA DE OURO desta correção (princípio de produto definido pelo
+    // usuário em 01/08/2026): o Kyneti NUNCA inventa uma taxa de
+    // marketplace. Se a comissão daquele canal/categoria ainda não foi
+    // importada e validada, não existe piso confiável — então não se
+    // decide preço nenhum. Assumir zero aqui seria reintroduzir
+    // exatamente o bug que esta mudança corrige, e de forma silenciosa.
+    if (!feeRule) {
+      this.logger.warn(
+        `SKU ${skuCode} (tenant ${tenantId}): nenhuma regra de comissão VALIDADA para o canal ${channelCode} ` +
+          `(categoria interna: ${product.categoryId ?? 'não definida'}) — decisão NÃO calculada. ` +
+          'Importe/valide a taxa do marketplace em Marketplace Intelligence antes de precificar neste canal.',
+      );
+      return null;
+    }
+
+    // Une as faixas de comissão com as de frete em segmentos onde os dois
+    // são constantes. Sem política de frete cadastrada, o resultado é
+    // idêntico às faixas de comissão com frete zero — comportamento igual
+    // ao de antes desta mudança, nunca um custo inventado.
+    // O perfil do vendedor decide se a tarifa por item do canal se aplica —
+    // na Amazon, quem assina o Plano de vendas profissional não paga os
+    // R$2/item. Resolvido ANTES de montar os segmentos para que a tarifa já
+    // entre correta no piso.
+    const tiersForSeller = feeRule.tiers.map((tier) =>
+      applySellerProfileToTier(tier, sellerProfile.professionalPlanActive),
+    );
+
+    const feeTiers = shippingPolicy
+      ? mergeFeeAndShippingBands(
+          tiersForSeller,
+          shippingPolicy.bands.map((b) => b.minPrice),
+          (priceInSegment) =>
+            // O desconto por reputação entra aqui: no Mercado Livre, uma
+            // conta verde-escuro paga até 70% menos frete que uma conta
+            // nova, no mesmo produto e no mesmo preço.
+            resolveSellerFreightCost(
+              shippingPolicy,
+              priceInSegment,
+              estimatedFreightCost,
+              sellerProfile.freightDiscountPct,
+            ),
+        )
+      : tiersForSeller.map((tier) => ({ ...tier, sellerFreightCost: 0 }));
+
+    // Menor preço a partir do qual o frete grátis vira obrigatório — só
+    // para a decisão conseguir explicar o degrau ao usuário.
+    const freeShippingThreshold =
+      shippingPolicy?.bands.find((b) => b.freeShippingRequired)?.minPrice ?? null;
+
     const context: PricingContext = {
       skuCode,
-      costPrice: product.costPrice,
+      // productCostPrice (SEM embalagem), não costPrice — a embalagem já
+      // vem dentro de logisticsCost; usar o custo efetivo aqui contaria a
+      // embalagem duas vezes. Mesma disciplina de
+      // promotion-intelligence.service.ts.
+      costPrice: product.productCostPrice,
       currentPrice: opportunity.ourPrice,
       desiredMarginPct: product.desiredMarginPct,
       minimumMarginPct: product.minimumMarginPct,
       taxRate: policy.taxRate,
       minProfitMargin: policy.minProfitMargin,
+      channelCode,
+      feeTiers,
+      commissionCapAmount: feeRule.commissionCapAmount,
+      freeShippingThreshold,
+      logisticsCost,
+      feeRuleId: feeRule.ruleId,
+      feeRuleVersion: feeRule.ruleVersion,
+      effectiveCostPriceLegacy: product.costPrice,
       competitorBestPrice: opportunity.bestCompetitorPrice,
       buyBoxStatus: opportunity.buyBoxStatus,
       mapPrice: product.mapPrice,
@@ -149,6 +269,13 @@ export class PricingDecisionService {
         this.logger.warn(`Contexto de precificação inválido para SKU ${skuCode} (tenant ${tenantId}): ${error.message} — decisão não calculada.`);
         return null;
       }
+      // Margem inalcançável não é bug: é o produto não fechar naquele
+      // canal com a margem configurada. Vira log explicativo e nenhuma
+      // decisão — nunca um preço "melhor esforço" que fura a política.
+      if (error instanceof UnreachableMarginError) {
+        this.logger.warn(`${error.message} (tenant ${tenantId}) — decisão não calculada.`);
+        return null;
+      }
       throw error;
     }
 
@@ -160,13 +287,20 @@ export class PricingDecisionService {
     // implementação da estratégia, para que um Strategist futuro/customizado
     // que não implemente o piso financeiro corretamente não consiga
     // contornar a governança do tenant.
-    const financialFloorPrice = calculateFinancialFloorPrice(product.costPrice, policy.taxRate, policy.minProfitMargin);
+    const { floorPrice: financialFloorPrice } = calculateTieredNetMarginFloorPrice(
+      context.costPrice,
+      policy.minProfitMargin * 100,
+      context.feeTiers,
+      { taxRate: context.taxRate, logisticsCost: context.logisticsCost },
+      skuCode,
+      channelCode,
+    );
     if (decision.recommendedPrice < financialFloorPrice) {
       this.logger.warn(`SKU ${skuCode} (tenant ${tenantId}): ${FINANCIAL_FLOOR_NOTE} (${decision.recommendedPrice} -> ${financialFloorPrice})`);
       decision = {
         ...decision,
         recommendedPrice: financialFloorPrice,
-        resultingMarginPct: marginPctOf(financialFloorPrice, product.costPrice),
+        resultingMarginPct: netMarginPctOf(financialFloorPrice, context.costPrice, channelCostsOf(context, financialFloorPrice)),
         financialFloorPrice,
         action: 'FINANCIAL_FLOOR_APPLIED',
         hitFinancialFloor: true,
@@ -188,7 +322,7 @@ export class PricingDecisionService {
       decision = {
         ...decision,
         recommendedPrice: product.mapPrice,
-        resultingMarginPct: marginPctOf(product.mapPrice, product.costPrice),
+        resultingMarginPct: netMarginPctOf(product.mapPrice, context.costPrice, channelCostsOf(context, product.mapPrice)),
         mapPrice: product.mapPrice,
         action: 'MAP_FLOOR_APPLIED',
         hitMapFloor: true,
@@ -202,6 +336,54 @@ export class PricingDecisionService {
       autoRepricingEnabled: product.autoRepricingEnabled,
       mapPrice: product.mapPrice,
     };
+  }
+
+  // Resolve a comissão do canal na granularidade mais específica possível,
+  // porque é assim que os marketplaces realmente cobram: o Mercado Livre
+  // tem percentual diferente por categoria, e o MercadoLivreFeeRuleProvider
+  // importa exatamente nesse formato (uma MarketplaceRule por categoria,
+  // scopeKey = id externo da categoria).
+  //
+  // Ordem de tentativa:
+  //   1. Categoria do produto traduzida para a categoria do canal
+  //      (ChannelCategoryMapping) — o caminho fiel, taxa real daquele nicho.
+  //   2. Escopo 'GLOBAL' — regra única cadastrada manualmente para o canal,
+  //      mesma convenção do Promotion Intelligence. Menos preciso, mas é
+  //      dado que alguém cadastrou e validou de propósito.
+  //
+  // Não existe passo 3. Se nenhum dos dois responder, devolve null e quem
+  // chama aborta a decisão — nunca "estima" uma comissão.
+  private async resolveFeeRule(
+    tenantId: string,
+    internalCategoryId: string | null,
+    channelCode: string,
+  ): Promise<ResolvedFeeRule | null> {
+    if (internalCategoryId) {
+      const externalCategoryId = await this.channelCategories.resolveExternalCategoryId(
+        tenantId,
+        internalCategoryId,
+        channelCode,
+      );
+
+      if (externalCategoryId) {
+        const byCategory = await this.feeRules.resolveFeeRule({
+          marketplaceCode: channelCode,
+          categoryCode: externalCategoryId,
+          tenantId,
+        });
+        if (byCategory) return byCategory;
+
+        this.logger.debug(
+          `Canal ${channelCode}: sem regra de comissão validada para a categoria ${externalCategoryId} — tentando escopo ${GLOBAL_FEE_SCOPE}.`,
+        );
+      }
+    }
+
+    return this.feeRules.resolveFeeRule({
+      marketplaceCode: channelCode,
+      categoryCode: GLOBAL_FEE_SCOPE,
+      tenantId,
+    });
   }
 
   // Único ponto que efetivamente chama PRICE_UPDATE_DISPATCHER — reusado

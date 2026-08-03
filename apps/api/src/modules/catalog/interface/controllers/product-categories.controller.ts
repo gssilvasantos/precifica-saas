@@ -11,6 +11,7 @@ import {
   ModuleCode,
 } from '../../../identity-access/public-api';
 import { ProductCategoryService } from '../../application/product-category.service';
+import { ErpCategoryImportService } from '../../application/erp-category-import.service';
 import { CreateProductCategoryDto } from '../dto/create-product-category.dto';
 import { UpdateProductCategoryDto } from '../dto/update-product-category.dto';
 import { SetCategoryAttributeDto } from '../dto/set-category-attribute.dto';
@@ -22,7 +23,27 @@ import { SetCategoryAttributeDto } from '../dto/set-category-attribute.dto';
 @RequireModule(ModuleCode.CATALOG)
 @Controller('product-categories')
 export class ProductCategoriesController {
-  constructor(private readonly categories: ProductCategoryService) {}
+  constructor(
+    private readonly categories: ProductCategoryService,
+    private readonly erpImport: ErpCategoryImportService,
+  ) {}
+
+  // Importação da árvore de categorias do ERP — conveniência de MIGRAÇÃO,
+  // nunca parte do sync: a categoria do Kyneti é organizada pelo usuário e não
+  // precisa espelhar a do ERP.
+  //
+  // Dois endpoints em vez de um, na disciplina do Safety Lock: a prévia não
+  // escreve nada e diz exatamente o que aconteceria; só o POST aplica.
+  @Get('erp-import/preview')
+  previewErpImport(@CurrentUser() user: AuthenticatedUser) {
+    return this.erpImport.preview(user.tenantId);
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.PRICING_EDITOR)
+  @Post('erp-import')
+  applyErpImport(@CurrentUser() user: AuthenticatedUser) {
+    return this.erpImport.apply(user.tenantId);
+  }
 
   @Roles(UserRole.ADMIN, UserRole.PRICING_EDITOR)
   @Post()

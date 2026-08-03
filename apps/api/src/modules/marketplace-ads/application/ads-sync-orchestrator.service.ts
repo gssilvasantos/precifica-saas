@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { AdsProviderRegistry } from './ads-provider-registry.service';
 import { ADS_CAMPAIGN_REPOSITORY, AdsCampaignRepository } from './ports/ads-campaign-repository.port';
 import { AdsAlertingService } from './ads-alerting.service';
-import { AdsCapableProvider } from '../../../shared/contracts/marketplace-provider.contract';
+import { AdsCapableProvider, isAdsItemMetricsCapable } from '../../../shared/contracts/marketplace-provider.contract';
 import {
   PROVIDER_SYNC_LOG_REPOSITORY,
   ProviderSyncLogRepository,
@@ -113,6 +113,49 @@ export class AdsSyncOrchestrator {
             tenantId,
             `métrica ${raw.externalCampaignId}/${raw.periodDate.toISOString().slice(0, 10)}`,
             error as Error,
+          );
+        }
+      }
+
+      // Métricas por ANÚNCIO (01/08/2026) — capacidade opcional: canal que
+      // não expõe custo por item simplesmente não entra aqui, e o DRE
+      // continua com o total por canal. É o dado que faz a publicidade
+      // chegar ao SKU sem estimativa.
+      //
+      // try/catch PRÓPRIO, separado do fluxo de campanhas: falhar a captura
+      // por item não pode invalidar as métricas de campanha que já foram
+      // persistidas com sucesso neste mesmo ciclo.
+      if (isAdsItemMetricsCapable(provider)) {
+        try {
+          const rawItemMetrics = await provider.fetchAdsItemMetrics(ctx, dateFrom, dateTo);
+          candidatesFound += rawItemMetrics.length;
+
+          for (const raw of rawItemMetrics) {
+            try {
+              await this.campaigns.upsertItemMetric({
+                tenantId,
+                channelCode: provider.marketplaceCode,
+                externalItemId: raw.externalItemId,
+                periodDate: raw.periodDate,
+                spend: raw.spend,
+                attributedUnits: raw.attributedUnits,
+                clicks: raw.clicks,
+                impressions: raw.impressions,
+              });
+              candidatesApplied++;
+            } catch (error) {
+              this.logAndAlertItemFailure(
+                provider.code,
+                tenantId,
+                `métrica do anúncio ${raw.externalItemId}/${raw.periodDate.toISOString().slice(0, 10)}`,
+                error as Error,
+              );
+            }
+          }
+        } catch (error) {
+          this.logger.error(
+            `Falha ao capturar métricas por anúncio de ${provider.code} (tenant ${tenantId}): ` +
+              `${(error as Error).message} — métricas por campanha deste ciclo foram preservadas.`,
           );
         }
       }

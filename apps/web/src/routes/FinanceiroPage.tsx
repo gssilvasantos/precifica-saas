@@ -96,7 +96,7 @@ function DreTab() {
       )}
 
       {report && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <SummaryCard label="Receita bruta" value={currency.format(report.receitaBruta)} />
           <SummaryCard label="Deduções" value={currency.format(report.deducoes)} />
           <SummaryCard label="Custos variáveis" value={currency.format(report.custosVariaveis)} />
@@ -104,8 +104,56 @@ function DreTab() {
             label="Margem de contribuição"
             value={currency.format(report.margemContribuicao)}
             caption={report.margemContribuicaoPct !== null ? `${report.margemContribuicaoPct.toFixed(1)}%` : undefined}
+          />
+          {/* Publicidade (01/08/2026) — linha própria depois da margem de
+              contribuição, porque Ads é custo de período e não de pedido. */}
+          <SummaryCard label="Publicidade (Ads)" value={currency.format(report.custoAds)} />
+          <SummaryCard
+            label="Margem após Ads"
+            value={currency.format(report.margemAposAds)}
+            caption={report.margemAposAdsPct !== null ? `${report.margemAposAdsPct.toFixed(1)}%` : undefined}
+          />
+          {/* Despesas fixas e resultado operacional (01/08/2026) — é aqui
+              que o relatório finalmente responde "a operação fechou no
+              azul?", que é a pergunta que um DRE existe para responder. */}
+          <SummaryCard
+            label="Despesas fixas"
+            value={report.despesasFixasApuradas ? currency.format(report.despesasFixas) : '—'}
+            caption={report.despesasFixasApuradas ? undefined : 'exige período fechado'}
+          />
+          <SummaryCard
+            label="Resultado operacional"
+            value={currency.format(report.resultadoOperacional)}
+            caption={
+              report.resultadoOperacionalPct !== null
+                ? `${report.resultadoOperacionalPct.toFixed(1)}%`
+                : undefined
+            }
             highlight
           />
+        </div>
+      )}
+
+      {report && !report.despesasFixasApuradas && (
+        <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+          Período aberto: despesas fixas não foram rateadas, então o resultado operacional acima ainda não desconta
+          aluguel, folha e demais custos recorrentes. Escolha um período com data inicial e final para fechar a conta.
+        </div>
+      )}
+
+      {/* Só aparece quando existe canal com venda mas SEM nenhum dado de
+          Ads no período — o caso em que a "Margem após Ads" pode estar
+          otimista sem o usuário perceber. Canal que anunciou e gastou R$0
+          não dispara o aviso. */}
+      {report && report.channels.some((c) => !c.adSpendDataAvailable) && (
+        <div className="rounded-lg border border-margin-warning/40 bg-margin-warning/10 px-4 py-2 text-xs font-medium text-foreground">
+          Sem dado de publicidade para{' '}
+          {report.channels
+            .filter((c) => !c.adSpendDataAvailable)
+            .map((c) => c.channelCode)
+            .join(', ')}{' '}
+          no período — a margem após Ads desses canais não desconta mídia. Sincronize o módulo de Ads para fechar a
+          conta.
         </div>
       )}
 
@@ -128,6 +176,10 @@ function DreTab() {
                 <th className="px-5 py-3 font-medium text-right">Taxas</th>
                 <th className="px-5 py-3 font-medium text-right">CMV</th>
                 <th className="px-5 py-3 font-medium text-right">Margem Líquida</th>
+                {/* Ads por pedido (01/08/2026) — gasto real por SKU vindo do
+                    canal, dividido entre os pedidos daquele SKU no período. */}
+                <th className="px-5 py-3 font-medium text-right">Ads</th>
+                <th className="px-5 py-3 font-medium text-right">Margem s/ Ads</th>
                 <th className="px-5 py-3 font-medium">Qualidade</th>
               </tr>
             </thead>
@@ -184,6 +236,7 @@ function SummaryCard({
 
 function OrderLineRow({ line }: { line: DreOrderLine }) {
   const marginClass = line.margemLiquida < 0 ? 'text-margin-danger' : 'text-margin-good';
+  const afterAdsClass = line.margemLiquidaAposAds < 0 ? 'text-margin-danger' : 'text-margin-good';
 
   return (
     <tr className="border-b border-border/60 last:border-0 hover:bg-muted/40">
@@ -195,8 +248,15 @@ function OrderLineRow({ line }: { line: DreOrderLine }) {
       <td className="px-5 py-3 text-right font-sans text-foreground">{currency.format(line.totalAmount)}</td>
       <td className="px-5 py-3 text-right font-sans text-foreground">{currency.format(line.feeAmount)}</td>
       <td className="px-5 py-3 text-right font-sans text-foreground">{currency.format(line.cmv)}</td>
-      <td className={`px-5 py-3 text-right font-sans font-semibold ${marginClass}`}>
-        {currency.format(line.margemLiquida)}
+      <td className={`px-5 py-3 text-right font-sans ${marginClass}`}>{currency.format(line.margemLiquida)}</td>
+      <td className="px-5 py-3 text-right font-sans text-muted-foreground">
+        {line.custoAdsRateado > 0 ? currency.format(line.custoAdsRateado) : '—'}
+      </td>
+      {/* A margem em NEGRITO passou a ser a "após Ads": é ela que responde
+          se o pedido deu lucro de verdade. A anterior fica ao lado, sem
+          destaque, para comparação. */}
+      <td className={`px-5 py-3 text-right font-sans font-semibold ${afterAdsClass}`}>
+        {currency.format(line.margemLiquidaAposAds)}
       </td>
       <td className="px-5 py-3">
         {line.dataQuality === 'INCOMPLETE' ? (

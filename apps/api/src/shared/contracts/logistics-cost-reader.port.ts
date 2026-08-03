@@ -14,6 +14,17 @@
 export interface LogisticsCostReader {
   getTotalLogisticsCost(tenantId: string, skuCode: string, channelCode: string): Promise<number>;
 
+  // Frete médio estimado por unidade neste canal
+  // (Warehouse.estimatedFreightCost). DELIBERADAMENTE separado de
+  // getTotalLogisticsCost: aquele é custo interno que o vendedor paga
+  // sempre (embalagem + operação); este só vira custo quando a política do
+  // canal transfere o frete ao vendedor — no Mercado Livre, acima de R$79.
+  // Somar os dois num número só apagaria esse degrau, que é justamente o
+  // que o motor de preço precisa enxergar.
+  //
+  // Devolve 0 quando não configurado — nunca um valor arbitrário.
+  getEstimatedFreightCost(tenantId: string, channelCode: string): Promise<number>;
+
   // Hierarquia completa (Prioridades 1/2/3) para um PEDIDO real com vários
   // itens — não usado pelo PromotionIntelligenceService (que avalia 1 SKU
   // isolado, antes de qualquer pedido existir), pronto para o CMV de

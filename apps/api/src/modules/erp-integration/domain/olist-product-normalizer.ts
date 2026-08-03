@@ -24,6 +24,47 @@ export interface NormalizedOlistProduct {
   widthCm: number;
   heightCm: number;
   photoUrls: string[]; // URLs ORIGINAIS do Olist — ainda não espelhadas (isso é papel do ProductPhotoMirrorService)
+
+  // Campos fiscais (02/08/2026). Ausentes até aqui, o que deixava o catálogo
+  // importado sem NCM — e sem NCM não há como classificar o produto para fins
+  // tributários (substituição tributária e monofásico são definidos pelo NCM,
+  // não pelo SKU), nem emitir NF-e, nem publicar anúncio.
+  //
+  // null é resultado LEGÍTIMO: cadastro incompleto no Olist é comum, e um
+  // produto sem NCM lá não deve ser rejeitado por isso — diferente de peso e
+  // dimensões, que quebram o cálculo de frete e por isso rejeitam. O produto
+  // entra sem NCM e aparece marcado na tela do catálogo.
+  ncm: string | null;
+  cest: string | null;
+  gtin: string | null;
+  fiscalOriginCode: number | null;
+
+  // Caminho da categoria no ERP, já quebrado em níveis:
+  // `ROSTO > BASE > BASE LÍQUIDA` vira `['ROSTO', 'BASE', 'BASE LÍQUIDA']`.
+  //
+  // A categoria do Kyneti é do USUÁRIO — ele organiza como quiser, e essa
+  // estrutura não tem por que espelhar a do ERP. Por isso o sync apenas
+  // REGISTRA o caminho de origem (em Product.internalCategory, texto livre);
+  // transformar isso na árvore estruturada de ProductCategory é uma ação
+  // separada e explícita, oferecida como conveniência de migração.
+  // Ver OlistCategoryImportService.
+  categoryPath: string[];
+}
+
+// Referência a uma variação, extraída do detalhe do produto PAI.
+//
+// No Olist a variação não aparece em produtos.pesquisa.php — só o pai aparece,
+// com a lista de variações dentro do próprio detalhe. Cada variação tem id
+// próprio e é buscável por produto.obter.php como qualquer produto.
+//
+// Isto é o que explica os "340 produtos" da tela do ERP contra as ~937 SKUs
+// reais: a contagem "variações 135" conta PAIS que têm variação, não as
+// variações. Ver docs/olist-import-design.md, seção 5.1.
+export interface OlistVariationRef {
+  externalId: string;
+  skuCode: string;
+  // Atributos que distinguem esta variação (Cor, Tamanho, Volume...).
+  variantAttributes: Record<string, string>;
 }
 
 export class InvalidOlistProductError extends Error {
@@ -37,6 +78,15 @@ function toNumber(value: unknown, fallback: number | null = null): number | null
   if (value === undefined || value === null || value === '') return fallback;
   const n = Number(String(value).replace(',', '.'));
   return Number.isFinite(n) ? n : fallback;
+}
+
+// Texto opcional vindo do ERP: string vazia e espaço em branco viram null.
+// Guardar "" como se fosse um NCM preenchido esconderia o produto do filtro de
+// "sem NCM", que é justamente onde o usuário vai procurar o que falta.
+function toOptionalText(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const texto = String(value).trim();
+  return texto === '' ? null : texto;
 }
 
 function extractPhotoUrls(raw: Record<string, unknown>): string[] {
@@ -59,6 +109,74 @@ function extractPhotoUrls(raw: Record<string, unknown>): string[] {
     .filter((url): url is string => typeof url === 'string' && /^https?:\/\//.test(url));
 
   return Array.from(new Set(urls));
+}
+
+// A `grade` de uma variação chega em duas formas conhecidas na V2: objeto
+// simples (`{"Cor": "Vermelho"}`) ou lista de pares
+// (`[{"chave": "Cor", "valor": "Vermelho"}]`). Aceita as duas — errar a forma
+// aqui produziria variações sem atributo nenhum, indistinguíveis entre si na
+// tela.
+function normalizeGrade(grade: unknown): Record<string, string> {
+  const atributos: Record<string, string> = {};
+
+  if (Array.isArray(grade)) {
+    for (const item of grade) {
+      const par = (item as { variacao?: Record<string, unknown> })?.variacao ?? (item as Record<string, unknown>);
+      const chave = toOptionalText(par?.chave ?? par?.tipo);
+      const valor = toOptionalText(par?.valor);
+      if (chave && valor) atributos[chave] = valor;
+    }
+    return atributos;
+  }
+
+  if (grade && typeof grade === 'object') {
+    for (const [chave, valor] of Object.entries(grade as Record<string, unknown>)) {
+      const texto = toOptionalText(valor);
+      if (texto) atributos[chave] = texto;
+    }
+  }
+
+  return atributos;
+}
+
+// A categoria chega como texto (`"ROSTO > BASE > BASE LÍQUIDA"`) na maioria
+// das contas, e como objeto com `caminhoCompleto`/`descricao` em outras.
+// Separadores observados: ` > ` e ` >> `.
+//
+// Nível vazio é descartado: `"ROSTO >  > BASE"` vira dois níveis, não três com
+// um buraco no meio — um nó sem nome quebraria a árvore de ProductCategory.
+export function parseCategoryPath(categoria: unknown): string[] {
+  const bruto =
+    typeof categoria === 'object' && categoria !== null
+      ? ((categoria as Record<string, unknown>).caminhoCompleto ??
+        (categoria as Record<string, unknown>).descricao ??
+        (categoria as Record<string, unknown>).nome)
+      : categoria;
+
+  const texto = toOptionalText(bruto);
+  if (!texto) return [];
+
+  return texto
+    .split(/\s*>+\s*/)
+    .map((nivel) => nivel.trim())
+    .filter((nivel) => nivel !== '');
+}
+
+export function extractVariationRefs(rawEnvelope: unknown): OlistVariationRef[] {
+  const raw = (rawEnvelope as { produto?: Record<string, unknown> })?.produto ?? (rawEnvelope as Record<string, unknown>);
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.variacoes)) return [];
+
+  return raw.variacoes
+    .map((item) => {
+      // Envelope `{ variacao: {...} }` é a forma documentada; alguns retornos
+      // trazem o objeto direto.
+      const v = ((item as { variacao?: Record<string, unknown> })?.variacao ?? item) as Record<string, unknown>;
+      const externalId = toOptionalText(v?.id);
+      const skuCode = toOptionalText(v?.codigo);
+      if (!externalId || !skuCode) return null;
+      return { externalId, skuCode, variantAttributes: normalizeGrade(v.grade ?? v.variacoes) };
+    })
+    .filter((v): v is OlistVariationRef => v !== null);
 }
 
 export function normalizeOlistProduct(rawEnvelope: unknown, stockOverride?: number): NormalizedOlistProduct {
@@ -110,5 +228,16 @@ export function normalizeOlistProduct(rawEnvelope: unknown, stockOverride?: numb
     widthCm,
     heightCm,
     photoUrls: extractPhotoUrls(raw),
+    // Nomes conforme produto.obter.php da API V2 do Olist/Tiny. Vale aqui o
+    // mesmo aviso de honestidade do topo do arquivo: se algum vier com nome
+    // diferente numa conta real, o efeito é o campo ficar null e o produto
+    // aparecer marcado como "sem NCM" no catálogo — nunca um valor errado
+    // gravado silenciosamente.
+    ncm: toOptionalText(raw.ncm),
+    cest: toOptionalText(raw.cest),
+    // A V2 usa `gtin` na maioria das contas; algumas respostas trazem `ean`.
+    gtin: toOptionalText(raw.gtin ?? raw.ean),
+    fiscalOriginCode: toNumber(raw.origem),
+    categoryPath: parseCategoryPath(raw.categoria),
   };
 }

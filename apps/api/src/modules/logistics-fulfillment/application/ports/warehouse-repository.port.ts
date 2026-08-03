@@ -14,6 +14,7 @@ export interface WarehouseRepository {
   // Sprint 26 — mesmo racional isolado de updateLeadTimeDays: nunca passa
   // pelo upsert genérico.
   updateLogisticsCostPerUnit(tenantId: string, warehouseId: string, logisticsCostPerUnit: number): Promise<Warehouse>;
+  updateEstimatedFreightCost(tenantId: string, warehouseId: string, estimatedFreightCost: number): Promise<Warehouse>;
 }
 
 export const WAREHOUSE_REPOSITORY = Symbol('WAREHOUSE_REPOSITORY');

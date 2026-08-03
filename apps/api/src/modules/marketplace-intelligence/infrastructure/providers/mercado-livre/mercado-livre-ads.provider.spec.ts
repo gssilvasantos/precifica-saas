@@ -1,4 +1,4 @@
-import { MercadoLivreAdsProvider } from './mercado-livre-ads.provider';
+import { MercadoLivreAdsProvider, normalizeMlAdsItemMetric } from './mercado-livre-ads.provider';
 import { MercadoLivreApiClient } from './mercado-livre-api.client';
 import { MercadoLivreConnectionService } from '../../../application/mercado-livre-connection.service';
 
@@ -8,6 +8,7 @@ describe('MercadoLivreAdsProvider (Módulo de Ads, Fases 1-3)', () => {
       fetchAdvertiserId: jest.fn(),
       fetchAdsCampaigns: jest.fn(),
       fetchAdsCampaignMetrics: jest.fn(),
+      fetchAdsItemMetrics: jest.fn().mockResolvedValue([]),
       pauseCampaign: jest.fn(),
     } as unknown as jest.Mocked<MercadoLivreApiClient>;
     const connection = {
@@ -149,6 +150,114 @@ describe('MercadoLivreAdsProvider (Módulo de Ads, Fases 1-3)', () => {
       const result = await provider.pauseCampaign({ marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1' }, 'ext-1');
 
       expect(result).toEqual({ success: false, message: 'Mercado Livre retornou HTTP 500' });
+    });
+  });
+
+  // Métricas por ANÚNCIO (01/08/2026) — confirmado na documentação oficial
+  // que o ML entrega `cost` no nível do item. É o dado que faz a
+  // publicidade chegar ao SKU no DRE sem estimativa.
+  describe('normalizeMlAdsItemMetric', () => {
+    it('normaliza a resposta esperada da API', () => {
+      const result = normalizeMlAdsItemMetric({
+        item_id: 'MLB3456789012',
+        date: '2026-07-15',
+        cost: 42.5,
+        units_quantity: 3,
+        clicks: 120,
+        prints: 4500,
+      });
+
+      expect(result).toEqual({
+        externalItemId: 'MLB3456789012',
+        periodDate: new Date('2026-07-15'),
+        spend: 42.5,
+        attributedUnits: 3,
+        clicks: 120,
+        impressions: 4500,
+      });
+    });
+
+    it('aceita nomes alternativos de campo documentados', () => {
+      const result = normalizeMlAdsItemMetric({
+        id: 'MLB1',
+        date: '2026-07-15',
+        spend: 10,
+        direct_units_quantity: 2,
+        impressions: 100,
+      });
+
+      expect(result?.externalItemId).toBe('MLB1');
+      expect(result?.spend).toBe(10);
+      expect(result?.attributedUnits).toBe(2);
+      expect(result?.impressions).toBe(100);
+    });
+
+    it('métrica sem custo vira zero, não some — anúncio sem gasto no dia é dado válido', () => {
+      const result = normalizeMlAdsItemMetric({ item_id: 'MLB1', date: '2026-07-15' });
+      expect(result?.spend).toBe(0);
+    });
+
+    // Devolver null (em vez de lançar) é o que permite um anúncio em
+    // formato inesperado ser descartado sem derrubar a captura dos outros.
+    it('devolve null quando falta o id do anúncio', () => {
+      expect(normalizeMlAdsItemMetric({ date: '2026-07-15', cost: 10 })).toBeNull();
+    });
+
+    it('devolve null quando falta a data', () => {
+      expect(normalizeMlAdsItemMetric({ item_id: 'MLB1', cost: 10 })).toBeNull();
+    });
+
+    it('devolve null quando a data é inválida — nunca grava Invalid Date', () => {
+      expect(normalizeMlAdsItemMetric({ item_id: 'MLB1', date: 'nao-e-data', cost: 10 })).toBeNull();
+    });
+
+    it('devolve null para payload que não é objeto', () => {
+      expect(normalizeMlAdsItemMetric('texto solto')).toBeNull();
+      expect(normalizeMlAdsItemMetric(null)).toBeNull();
+    });
+  });
+
+  describe('fetchAdsItemMetrics', () => {
+    it('respeita o limite de 90 dias da API, igual às métricas por campanha', async () => {
+      const { provider } = buildProvider();
+      const dateTo = new Date('2026-07-31');
+      const dateFrom = new Date('2026-01-01'); // muito além de 90 dias
+
+      await expect(
+        provider.fetchAdsItemMetrics({ marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1' }, dateFrom, dateTo),
+      ).rejects.toThrow(/excede o limite de 90 dias/);
+    });
+
+    it('sem tenantId devolve vazio — métrica de ads é sempre por vendedor', async () => {
+      const { provider } = buildProvider();
+
+      const result = await provider.fetchAdsItemMetrics(
+        { marketplaceCode: 'MERCADO_LIVRE' },
+        new Date('2026-07-01'),
+        new Date('2026-07-31'),
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it('descarta linha em formato inesperado sem perder as válidas', async () => {
+      const { provider, client, connection } = buildProvider();
+      connection.getValidAccessToken.mockResolvedValue('token');
+      client.fetchAdvertiserId.mockResolvedValue('adv-1');
+      client.fetchAdsItemMetrics.mockResolvedValue([
+        { item_id: 'MLB1', date: '2026-07-15', cost: 10 },
+        { sem_id: true }, // inválida
+        { item_id: 'MLB2', date: '2026-07-15', cost: 20 },
+      ]);
+
+      const result = await provider.fetchAdsItemMetrics(
+        { marketplaceCode: 'MERCADO_LIVRE', tenantId: 'tenant-1' },
+        new Date('2026-07-01'),
+        new Date('2026-07-31'),
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result.map((r) => r.externalItemId)).toEqual(['MLB1', 'MLB2']);
     });
   });
 

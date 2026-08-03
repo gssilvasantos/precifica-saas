@@ -22,7 +22,12 @@ import { computeContentHash } from '../../../shared/domain/content-hash';
 import { CredentialEncryptionService } from '../../../shared/security/credential-encryption.service';
 import { OlistApiClient } from '../infrastructure/olist/olist-api.client';
 import { ProductPhotoMirrorService } from './product-photo-mirror.service';
-import { InvalidOlistProductError, normalizeOlistProduct } from '../domain/olist-product-normalizer';
+import {
+  InvalidOlistProductError,
+  OlistVariationRef,
+  extractVariationRefs,
+  normalizeOlistProduct,
+} from '../domain/olist-product-normalizer';
 
 export const PROVIDER_CODE = 'OLIST_TINY_API_V2';
 const MAX_ATTEMPTS = 3;
@@ -93,25 +98,86 @@ export class ErpSyncOrchestrator {
       if (!record || !record.isActive) throw new Error('Conexão com o Olist inativa ou não encontrada.');
       const apiToken = this.credentials.decrypt(record.apiTokenEnc);
 
-      const rawProducts = await this.withRetry(() => this.client.fetchAllActiveProductDetails(apiToken));
-      candidatesFound = rawProducts.length;
+      const { details: rawProducts, failedCount } = await this.withRetry(() =>
+        this.client.fetchAllActiveProductDetails(apiToken),
+      );
+      candidatesFound = rawProducts.length + failedCount;
       await this.health.recordSuccess(PROVIDER_CODE);
 
+      // Produto REJEITADO pelo normalizador (cadastro incompleto no Olist)
+      // é coletado, não só logado — antes disso o usuário via "sincronizou"
+      // sem nenhuma pista de que N SKUs ficaram de fora nem quais. Ver
+      // docs/olist-import-design.md.
+      const rejected: string[] = [];
+
+      // Variações (02/08/2026): o Olist só devolve os PAIS em
+      // produtos.pesquisa.php — as variações vêm dentro do detalhe de cada
+      // pai, e precisam de uma chamada própria para trazer custo, estoque,
+      // peso e dimensões. Era por isso que o catálogo importado ficava em
+      // ~340 itens contra as ~937 SKUs reais da conta.
+      //
+      // A ordem importa: o PAI é processado primeiro, para que a variação
+      // encontre o parentProductId já criado. Fora isso, uma variação que
+      // falhe não derruba nem o pai nem as irmãs.
       for (const raw of rawProducts) {
+        // O pai é processado à parte das variações de propósito. Cadastro
+        // incompleto do PAI no Olist (peso/dimensão faltando) é comum, já que
+        // ele costuma ser só uma casca — e não pode levar junto 20 variações
+        // que estão perfeitamente cadastradas. Antes, com tudo num try só,
+        // uma casca mal preenchida apagava toda a linha do catálogo.
+        let paiImportado = false;
         try {
-          const applied = await this.processProduct(tenantId, raw);
-          if (applied) candidatesApplied++;
+          if (await this.processProduct(tenantId, raw)) candidatesApplied++;
+          paiImportado = true;
         } catch (error) {
-          if (error instanceof InvalidOlistProductError) {
-            this.logger.warn(error.message);
-          } else {
-            this.logger.error(`Falha ao processar produto do tenant ${tenantId}: ${(error as Error).message}`);
-          }
+          const motivo = error instanceof InvalidOlistProductError ? error.message : (error as Error).message;
+          this.logger.warn(motivo);
+          rejected.push(motivo);
+        }
+
+        const variacoes = extractVariationRefs(raw);
+        if (variacoes.length === 0) continue;
+
+        try {
+          const parentExternalId = String((raw as { produto?: { id?: unknown } })?.produto?.id ?? '');
+          const resultado = await this.processVariations(
+            tenantId,
+            apiToken,
+            parentExternalId,
+            variacoes,
+            paiImportado,
+          );
+          candidatesFound += variacoes.length;
+          candidatesApplied += resultado.applied;
+          rejected.push(...resultado.rejected);
+        } catch (error) {
+          this.logger.error(`Falha ao processar variações do tenant ${tenantId}: ${(error as Error).message}`);
+          rejected.push((error as Error).message);
         }
       }
 
-      await this.connections.markSynced(tenantId, new Date());
-      await this.syncLogs.finish(logId, { status: 'SUCCESS', candidatesFound, candidatesApplied });
+      // Sync com rejeição é SUCESSO PARCIAL, não falha: os produtos bons
+      // foram importados e o usuário precisa saber dos dois fatos. FAILED
+      // esconderia o que funcionou (e sugeriria que nada entrou); SUCCESS
+      // silencioso esconderia o que não funcionou.
+      const warning =
+        rejected.length > 0 || failedCount > 0
+          ? buildPartialSyncWarning(rejected, failedCount, candidatesApplied, candidatesFound)
+          : null;
+
+      const syncedAt = new Date();
+      if (warning) {
+        await this.connections.markSyncedWithWarning(tenantId, syncedAt, warning);
+      } else {
+        await this.connections.markSynced(tenantId, syncedAt);
+      }
+
+      await this.syncLogs.finish(logId, {
+        status: 'SUCCESS',
+        candidatesFound,
+        candidatesApplied,
+        errorDetails: warning ?? undefined,
+      });
       return { success: true };
     } catch (error) {
       const message = (error as Error).message;
@@ -130,14 +196,66 @@ export class ErpSyncOrchestrator {
     }
   }
 
-  private async processProduct(tenantId: string, raw: unknown): Promise<boolean> {
+  // Busca o detalhe de cada variação e a grava vinculada ao pai.
+  //
+  // Uma chamada por variação é inevitável: o bloco `variacoes` do pai traz só
+  // id, código e grade — custo, estoque, peso e dimensões (tudo que o motor de
+  // preço usa) só existem no detalhe individual. Com ~600 variações a 1 req/s
+  // do RateLimiter, isso alonga o sync; é o preço de ter o catálogo real em vez
+  // de um terço dele.
+  private async processVariations(
+    tenantId: string,
+    apiToken: string,
+    parentExternalId: string,
+    variacoes: OlistVariationRef[],
+    paiImportado: boolean,
+  ): Promise<{ applied: number; rejected: string[] }> {
+    let applied = 0;
+    const rejected: string[] = [];
+
+    for (const variacao of variacoes) {
+      try {
+        const detalhe = await this.withRetry(() => this.client.obterProduto(apiToken, variacao.externalId));
+        const changed = await this.processProduct(tenantId, detalhe, {
+          parentExternalId,
+          variantAttributes: variacao.variantAttributes,
+          paiImportado,
+        });
+        if (changed) applied++;
+      } catch (error) {
+        const motivo =
+          error instanceof InvalidOlistProductError
+            ? error.message
+            : `Variação ${variacao.skuCode} (id ${variacao.externalId}): ${(error as Error).message}`;
+        this.logger.warn(motivo);
+        rejected.push(motivo);
+      }
+    }
+
+    return { applied, rejected };
+  }
+
+  private async processProduct(
+    tenantId: string,
+    raw: unknown,
+    variacao?: { parentExternalId: string; variantAttributes: Record<string, string>; paiImportado: boolean },
+  ): Promise<boolean> {
     const normalized = normalizeOlistProduct(raw);
 
     // Hash sobre os dados ORIGINAIS do Olist (antes de espelhar fotos) —
     // assim uma foto que só trocou de URL no Olist mas é visualmente igual
     // não dispara re-download; e mudanças reais (preço, estoque, etc.)
     // sempre disparam, mesmo que as fotos não tenham mudado.
-    const contentHash = computeContentHash(normalized);
+    // `paiImportado` entra no hash, e não o `parentExternalId`.
+    //
+    // O externalId do pai é o mesmo esteja o pai importado ou não, então ele
+    // não distinguiria nada. Já o FATO de o pai ter entrado neste sync muda:
+    // uma variação gravada órfã (porque o pai falhou a normalização) tem hash
+    // diferente da mesma variação com o pai já existente. Quando o cadastro do
+    // pai é corrigido no Olist, o hash muda, a variação é reprocessada e o
+    // writer a adota — sem isso o atalho abaixo a pularia para sempre, já que
+    // os dados dela no ERP nunca mudaram.
+    const contentHash = computeContentHash({ ...normalized, paiImportado: variacao?.paiImportado ?? null });
     const previous = await this.changeEvents.findByExternalId(tenantId, normalized.externalId);
 
     if (previous && previous.contentHash === contentHash) {
@@ -161,6 +279,13 @@ export class ErpSyncOrchestrator {
       erpSalePrice: normalized.erpSalePrice,
       sourceSystem: 'ERP_OLIST',
       externalId: normalized.externalId,
+      ncm: normalized.ncm,
+      cest: normalized.cest,
+      gtin: normalized.gtin,
+      fiscalOriginCode: normalized.fiscalOriginCode,
+      parentExternalId: variacao?.parentExternalId ?? null,
+      variantAttributes: variacao?.variantAttributes ?? null,
+      erpCategoryPath: normalized.categoryPath.length > 0 ? normalized.categoryPath.join(' > ') : null,
     });
 
     await this.changeEvents.upsert({
@@ -189,4 +314,39 @@ export class ErpSyncOrchestrator {
     }
     throw lastError;
   }
+}
+
+// Mensagem que o usuário lê no card de Integrações quando parte do catálogo
+// não entrou. Precisa responder três coisas de uma vez: quantos entraram,
+// quantos ficaram de fora e POR QUE — sem isso o lojista vê "340 produtos no
+// Olist, 205 no Kyneti" e não tem como agir.
+//
+// Mostra só os primeiros motivos para caber na tela; o log completo do
+// servidor continua tendo todos.
+const MAX_REASONS_SHOWN = 3;
+
+export function buildPartialSyncWarning(
+  rejected: string[],
+  failedCount: number,
+  applied: number,
+  found: number,
+): string {
+  const parts = [`Importados ${applied} de ${found} produtos do Olist.`];
+
+  if (rejected.length > 0) {
+    parts.push(
+      `${rejected.length} rejeitado(s) por cadastro incompleto no Olist ` +
+        '(peso ou dimensões faltando — o Kyneti não grava produto pela metade).',
+    );
+    parts.push(...rejected.slice(0, MAX_REASONS_SHOWN).map((r) => `• ${r}`));
+    if (rejected.length > MAX_REASONS_SHOWN) {
+      parts.push(`• ...e mais ${rejected.length - MAX_REASONS_SHOWN}. Ver log completo do servidor.`);
+    }
+  }
+
+  if (failedCount > 0) {
+    parts.push(`${failedCount} produto(s) não puderam ser lidos da API do Olist nesta tentativa.`);
+  }
+
+  return parts.join(' ');
 }

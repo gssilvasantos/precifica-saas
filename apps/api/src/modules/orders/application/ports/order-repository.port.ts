@@ -105,6 +105,19 @@ export interface OrderRepository {
   // com sucesso (mesmo racional de nunca marcar PurchaseOrder.ATENDIDO antes
   // de confirmar as duas pontas). Devolve a contagem de itens atualizados.
   markCommissionsPaid(tenantId: string, orderItemIds: string[], paidAt: Date): Promise<number>;
+
+  // Faturamento agregado por mês (Tax Intelligence, 02/08/2026) — entrada do
+  // RBT12 do Simples Nacional. Agrega no banco de propósito: somar 12 meses
+  // via findAllForPeriod carregaria todo pedido com todos os itens só para
+  // descartá-los depois.
+  //
+  // Exclui CANCELADO e só considera dados REAIS — ver a implementação Prisma
+  // para o porquê de cada exclusão.
+  sumRevenueByMonth(tenantId: string, from: Date, to: Date): Promise<{ competencia: Date; receita: number }[]>;
+
+  // Pedido mais antigo do tenant — separa "mês sem venda" de "mês anterior à
+  // nossa cobertura". null = nenhum pedido ainda.
+  findFirstOrderDate(tenantId: string): Promise<Date | null>;
 }
 
 export const ORDER_REPOSITORY = Symbol('ORDER_REPOSITORY');

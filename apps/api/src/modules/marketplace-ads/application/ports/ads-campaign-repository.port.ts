@@ -71,6 +71,45 @@ export interface AdsCampaignRepository {
   // para o TACOS agregado do tenant).
   sumMetricsByCampaign(tenantId: string, dateFrom: Date, dateTo: Date, dataMode?: AppDataMode): Promise<AdsCampaignMetricTotals[]>;
 
+  // Gasto agregado por CANAL — alimenta a linha de Ads do DRE (01/08/2026).
+  // Separado de sumMetricsByCampaign porque a agregação é por outra chave
+  // (channelCode, que mora na campanha, não no snapshot) e porque o
+  // consumidor financeiro não precisa de clicks/impressões.
+  //
+  // dateFrom/dateTo opcionais: o DRE aceita período aberto, e forçar datas
+  // aqui obrigaria o chamador a inventar limites arbitrários.
+  sumSpendByChannel(
+    tenantId: string,
+    dateFrom?: Date,
+    dateTo?: Date,
+    dataMode?: AppDataMode,
+  ): Promise<{ channelCode: string; spend: number }[]>;
+
+  // Gasto por ANÚNCIO no período (01/08/2026) — base do custo de Ads por
+  // SKU. Devolve o id externo do anúncio; a tradução para SKU acontece na
+  // camada de aplicação, via ChannelListing, porque o vínculo pertence ao
+  // erp-integration e não a este módulo.
+  sumSpendByItem(
+    tenantId: string,
+    dateFrom?: Date,
+    dateTo?: Date,
+    dataMode?: AppDataMode,
+  ): Promise<{ channelCode: string; externalItemId: string; spend: number; attributedUnits: number }[]>;
+
+  // Grava a métrica capturada por anúncio. Idempotente por
+  // (tenant, canal, anúncio, dia) — resync do mesmo período sobrescreve em
+  // vez de duplicar, mesmo racional do upsert de AdsMetricSnapshot.
+  upsertItemMetric(data: {
+    tenantId: string;
+    channelCode: string;
+    externalItemId: string;
+    periodDate: Date;
+    spend: number;
+    attributedUnits: number;
+    clicks: number;
+    impressions: number;
+  }): Promise<void>;
+
   // Persiste o resultado de determineAlertAction (Fase 2) — tier=null,
   // alertedAt=null representa "nunca alertado ou já recuperado" (RESET);
   // tier preenchido representa "alertado por último neste tier" (ALERT).

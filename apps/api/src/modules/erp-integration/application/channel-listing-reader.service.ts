@@ -26,6 +26,18 @@ export class ChannelListingReaderService implements ChannelListingReader, Channe
     };
   }
 
+  // Direção inversa (01/08/2026) — anúncio do canal -> SKU. Ver comentário
+  // do contrato: é o vínculo que traduz o gasto de Ads por item (dado que a
+  // API do Mercado Livre entrega no nível do anúncio) para o produto.
+  async findSkusByExternalIds(
+    tenantId: string,
+    channelCode: string,
+    externalIds: string[],
+  ): Promise<{ externalId: string; skuCode: string }[]> {
+    if (externalIds.length === 0) return [];
+    return this.listings.findSkusByExternalIds(tenantId, channelCode, externalIds);
+  }
+
   async upsert(input: ChannelListingWriterInput): Promise<void> {
     await this.listings.upsert(input);
   }

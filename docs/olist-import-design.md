@@ -69,6 +69,59 @@ Diferente do que o pedido original presumia, o pipeline não precisa ser desenha
 
 Nenhuma dessas cinco lacunas impede o uso do que já existe. Ficam registradas aqui para quando o backlog de infraestrutura for retomado — a essa altura, a pergunta certa não é "como importar o catálogo Olist" (já resolvida), e sim qual dessas cinco lacunas (provavelmente a 3 ou a 4, pelo menor esforço/maior valor) vale a pena fechar primeiro.
 
+## 5.1 Estrutura REAL do catálogo — verificada na conta do cliente (02/08/2026)
+
+As cinco lacunas acima foram escritas a partir da documentação pública. Em 02/08/2026 a estrutura foi verificada **na conta real**, navegando o ERP do Olist. O que se descobriu muda o dimensionamento do problema.
+
+### O número de SKUs não é 340
+
+A tela de produtos mostra `todos 340 · simples 201 · kits 04 · variações 135`. A leitura intuitiva — e a que estávamos usando — é "340 SKUs, dos quais 135 são variações". **Está errada.**
+
+`variações 135` conta **produtos-PAI que possuem variações**, não as variações em si. A lista exibe o pai com um rótulo `(N variações)` ao lado. Exemplos reais da conta:
+
+- `BASE ALTA COBERTURA ANGEL WINGS ... CATHARINE HILL` — **21 variações**
+- `BATOM LÍQUIDO CREAMY MATTE MARI MARIA` — **15 variações**
+- `BATOM LIQUIDO MATTE 24 HORAS/CREMOSO MAX LOVE` — **14 variações**
+
+Somando os rótulos só da **primeira das três páginas** (50 pais) já dá **~327 variações**. Extrapolando para os 135 pais, o catálogo real tem na ordem de **800 a 1.000 SKUs vendáveis**, não 340.
+
+**Consequências diretas:**
+- O volume de importação é ~3× maior que o estimado. A 1 req/s (limite do plano base do Tiny), um sync completo leva na casa dos **15–20 minutos** — o que torna o rate limiting corrigido em 02/08/2026 não uma otimização, mas um pré-requisito.
+- O `Product` do Kyneti vai ter ~1.000 linhas para este tenant, não 340.
+
+### A variação é um produto completo — o pai é uma casca
+
+Verificado abrindo a variação `RM0298-1` (BASE E CORRETIVO VELVET SKIN 2.0 — CACAU):
+
+| Campo | Onde vive | Valor observado |
+|---|---|---|
+| Código (SKU) | **Variação** | `RM0298-1` — derivado do pai por sufixo `-N` |
+| GTIN/EAN | **Variação** | `7898767912789` — único por variação |
+| Preço de venda | **Variação** | R$ 89,90 |
+| Estoque | **Variação** | 12 / 12 / 12 / 13 / 14 — **diferente entre variações** |
+| Peso líquido / bruto | **Variação** | 0,076 kg / 0,086 kg |
+| Largura × Altura × Comprimento | **Variação** | 12,0 × 3,0 × 18,0 cm |
+| NCM / CEST | **Variação** | 3304.99.90 / 20.015.00 |
+| **Custo** | **Variação** | R$ 70,38 (aba `custos`, série histórica com `Preço custo` e `Custo médio`) |
+| Categoria | **Variação** | `ROSTO > BASE > BASE LÍQUIDA` |
+| Tipo do Produto | **Variação** | "Simples" — a variação se declara como produto simples |
+
+E no **pai**: `Custo: -` (vazio). O pai carrega nome, marca, NCM e o estoque **agregado** — mas o custo, que é o insumo mais importante do motor de preço, só existe na variação.
+
+**Isso resolve a decisão de modelagem sem ambiguidade:** cada variação vira um `Product` próprio (opção A), porque ela tem tudo que um produto precisa ter. Importar só o pai perderia custo, estoque e preço por cor — exatamente os três dados que o Kyneti usa para precificar.
+
+Também remove o risco que motivou a pergunta: como a variação tem peso e dimensões próprios, ela **não** é rejeitada pelo normalizador por cadastro incompleto.
+
+### Categoria é uma árvore com separador ` > `
+
+Formato observado: `ROSTO > BASE > BASE LÍQUIDA` — três níveis, separados por ` > `. Casa diretamente com `catalog.ProductCategory`, que já é árvore de profundidade arbitrária no Kyneti. A categoria fica na aba **dados complementares** da variação (não do pai).
+
+### Kits
+
+Os 4 kits têm SKU e preço próprios (`RM0017`, `RM0139`, `RM0136`, `RM0225`), com preço promocional separado do preço cheio. Um deles se identifica como "(4 PRODUTOS)" no próprio nome.
+
+---
+
 ## 6. Referências
 
 - `docs/erp-integration-architecture.md` — arquitetura completa da Etapa 5 (mais detalhada que este documento).

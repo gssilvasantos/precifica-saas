@@ -6,6 +6,8 @@ import { AdsAlertingService } from './application/ads-alerting.service';
 import { AdsActionDispatcherService } from './application/ads-action-dispatcher.service';
 import { AdsAiOptimizationService } from './application/ads-ai-optimization.service';
 import { AdsAuditSeederService } from './application/ads-audit-seeder.service';
+import { AdsSpendReaderService } from './application/ads-spend-reader.service';
+import { ADS_SPEND_READER } from '../../shared/contracts/tokens';
 import { ADS_CAMPAIGN_REPOSITORY } from './application/ports/ads-campaign-repository.port';
 import { ADS_ACTION_SUGGESTION_REPOSITORY } from './application/ports/ads-action-suggestion-repository.port';
 import { PrismaAdsCampaignRepository } from './infrastructure/prisma-ads-campaign.repository';
@@ -21,6 +23,7 @@ import { SyncOpsModule } from '../../shared/sync-ops/sync-ops.module';
 import { ObservabilityModule } from '../../shared/observability/observability.module';
 import { OrdersModule } from '../orders/orders.module';
 import { CatalogModule } from '../catalog/catalog.module';
+import { ErpIntegrationModule } from '../erp-integration/erp-integration.module';
 import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marketplace-intelligence.module';
 import { MercadoLivreAdsProvider } from '../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-ads.provider';
 import { CAMPAIGN_OPTIMIZATION_ADVISOR } from '../../shared/contracts/campaign-optimization-advisor.port';
@@ -53,12 +56,27 @@ import { CAMPAIGN_OPTIMIZATION_ADVISOR } from '../../shared/contracts/campaign-o
 // Nenhum import circular: nem MarketplaceIntelligenceModule, nem OrdersModule,
 // nem CatalogModule importa MarketplaceAdsModule de volta.
 @Module({
-  imports: [SyncOpsModule, ObservabilityModule, MarketplaceIntelligenceModule, OrdersModule, CatalogModule],
+  // ErpIntegrationModule entrou em 01/08/2026 só para consumir
+  // CHANNEL_LISTING_READER — é o vínculo anúncio↔SKU que traduz o gasto de
+  // Ads por item (dado real do canal) para o produto. Sem ciclo:
+  // erp-integration não importa este módulo de volta.
+  imports: [
+    SyncOpsModule,
+    ObservabilityModule,
+    MarketplaceIntelligenceModule,
+    OrdersModule,
+    CatalogModule,
+    ErpIntegrationModule,
+  ],
   controllers: [AdsInsightsController, AdsSyncController, AdsActionsController, AdsAuditModeController],
   providers: [
     AdsProviderRegistry,
     AdsSyncOrchestrator,
     AdsInsightsService,
+    // Linha de Ads do DRE (01/08/2026) — ver
+    // shared/contracts/ads-spend-reader.port.ts.
+    AdsSpendReaderService,
+    { provide: ADS_SPEND_READER, useExisting: AdsSpendReaderService },
     // Fase 2 — alertas inteligentes, consumido por AdsSyncOrchestrator logo
     // após persistir campanhas/métricas de cada tenant. Ver domain/ads-metrics.ts
     // (determineAlertAction) e docs/marketplace-ads-architecture.md, seção 11.
@@ -92,6 +110,9 @@ import { CAMPAIGN_OPTIMIZATION_ADVISOR } from '../../shared/contracts/campaign-o
       inject: [MercadoLivreAdsProvider],
     },
   ],
-  exports: [],
+  // Exporta a PORTA (token), nunca a classe — o Financial Intelligence só
+  // conhece ADS_SPEND_READER + a interface AdsSpendReader, nada do módulo
+  // de Ads em si.
+  exports: [ADS_SPEND_READER],
 })
 export class MarketplaceAdsModule {}

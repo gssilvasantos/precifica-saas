@@ -24,6 +24,7 @@ import { MarketplacePublishingModule } from './modules/marketplace-publishing/ma
 import { ProductionModule } from './modules/production/production.module';
 import { FreightShippingModule } from './modules/freight-shipping/freight-shipping.module';
 import { SellersModule } from './modules/sellers/sellers.module';
+import { TaxIntelligenceModule } from './modules/tax-intelligence/tax-intelligence.module';
 import { AppController } from './app.controller';
 import { resolveStorageDriver } from './shared/config/storage-environment';
 
@@ -69,6 +70,7 @@ const STORAGE_ROOT = process.env.ERP_STORAGE_ROOT ?? join(process.cwd(), 'storag
     ProductionModule,
     FreightShippingModule,
     SellersModule,
+    TaxIntelligenceModule,
   ],
   controllers: [AppController],
 })

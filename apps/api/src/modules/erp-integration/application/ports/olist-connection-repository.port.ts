@@ -15,6 +15,11 @@ export interface OlistConnectionRepository {
   markSynced(tenantId: string, syncedAt: Date): Promise<void>;
   // Contraparte de markSynced no caminho de erro — ErpSyncOrchestrator chama
   // uma OU outra ao final de cada tentativa, nunca as duas.
+  // Sucesso PARCIAL (02/08/2026): sincronizou e importou, mas parte do
+  // catálogo ficou de fora (cadastro incompleto no Olist, ou produto que a
+  // API não devolveu). Estado próprio porque nem SUCCESS nem FAILED contam
+  // a verdade — ver comentário na implementação Prisma.
+  markSyncedWithWarning(tenantId: string, syncedAt: Date, warning: string): Promise<void>;
   markSyncFailed(tenantId: string, error: string): Promise<void>;
 }
 

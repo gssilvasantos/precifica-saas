@@ -12,15 +12,34 @@ import {
   RawRuleCandidate,
 } from '../../../../../shared/contracts/marketplace-provider.contract';
 import { MercadoLivreApiClient } from './mercado-livre-api.client';
+import { buildFeeScopeKey } from '../../../domain/marketplace-rule.entity';
 
-// Preço de referência usado para consultar a comissão por categoria. A
-// comissão do Mercado Livre pode variar por faixa de preço (ver PRD,
-// pesquisa de mercado) — esta primeira versão do provider captura a taxa no
-// ponto de referência R$100, que cobre a maioria dos SKUs do catálogo atual.
-// Granularidade completa (múltiplas faixas de preço por categoria) fica
-// para uma iteração futura — não bloqueia a arquitetura, que já suporta
-// scopeKey mais granular quando isso for necessário.
-const REFERENCE_PRICE = 100;
+// Grade de preços sondada para descobrir as FAIXAS de comissão
+// (01/08/2026 — ver docs/marketplace-fee-model-architecture.md, §4.1).
+//
+// Antes, o provider capturava a taxa num único ponto (R$100) e assumia que
+// ela valia para todo preço. Não vale: o Mercado Livre tem limiar em R$79
+// (abaixo dele há custo por unidade; acima, frete grátis obrigatório), e a
+// comissão pode variar por faixa. Aplicar a taxa de R$100 a um produto de
+// R$40 erra a conta.
+//
+// O `listing_prices` responde para UM preço por vez, então a única forma de
+// descobrir a tabela é sondar e agrupar preços consecutivos com a mesma
+// comissão numa faixa só. É engenharia reversa, mas determinística: a API é
+// pública e responde sempre igual para o mesmo par (categoria, preço).
+//
+// Os pontos foram escolhidos em torno dos limiares conhecidos (19 e 79) e
+// espaçados o bastante para cobrir o catálogo típico sem explodir o número
+// de chamadas. Sondar mais pontos aumenta a resolução da tabela ao custo
+// de mais chamadas — é o trade-off a mexer se aparecer um canal com faixas
+// mais finas.
+const PROBE_PRICES = [15, 25, 50, 78, 100, 200, 500, 1000];
+
+// Tipos de anúncio capturados. A diferença entre Clássico (10-14%) e
+// Premium (15-19%) chega a 5 pontos percentuais — maior que a variação
+// entre muitas categorias. Capturar só um dos dois e aplicar ao outro é um
+// erro maior do que ignorar a categoria.
+const LISTING_TYPES = ['gold_special', 'gold_pro'] as const;
 
 // Um provider, três capacidades (Interface Segregation: cada uma é uma
 // interface própria — FeeRuleCapableProvider, ListingCapableProvider,
@@ -85,37 +104,104 @@ export class MercadoLivreFeeRuleProvider
     const candidates: RawRuleCandidate[] = [];
 
     for (const category of categories) {
-      try {
-        const prices = await this.client.fetchListingPrices(category.id, REFERENCE_PRICE);
-        // Prioriza o tipo de anúncio "Clássico" (gold_special); cai para o
-        // primeiro item retornado se esse tipo específico não vier na resposta.
-        const listing =
-          prices.find((p) => p.listing_type_id === 'gold_special') ?? prices[0];
-
-        if (!listing?.sale_fee_details) {
-          this.logger.warn(
-            `Categoria ${category.id} sem sale_fee_details na resposta — pulando (payload inválido será rejeitado pelo validator de qualquer forma).`,
+      for (const listingTypeId of LISTING_TYPES) {
+        try {
+          const candidate = await this.buildCandidateForListingType(category.id, listingTypeId, fetchedAt);
+          if (candidate) candidates.push(candidate);
+        } catch (error) {
+          // Resiliência parcial: uma categoria/tipo com erro não derruba o
+          // lote inteiro — o mesmo critério de antes, agora por par
+          // (categoria, tipo de anúncio).
+          this.logger.error(
+            `Falha ao montar tabela de taxas de ${category.id}/${listingTypeId}: ${(error as Error).message}`,
           );
-          continue;
         }
-
-        candidates.push({
-          scopeKey: category.id,
-          payload: {
-            commissionPct: listing.sale_fee_details.percentage_fee ?? 0,
-            fixedFeeAmount: listing.sale_fee_details.fixed_fee ?? 0,
-            referencePrice: REFERENCE_PRICE,
-            listingTypeId: listing.listing_type_id,
-          },
-          sourceEvidenceRef: `https://api.mercadolibre.com/sites/MLB/listing_prices?price=${REFERENCE_PRICE}&category_id=${category.id}`,
-          fetchedAt,
-        });
-      } catch (error) {
-        // Resiliência parcial: uma categoria com erro não derruba o lote inteiro.
-        this.logger.error(`Falha ao buscar listing_prices de ${category.id}: ${(error as Error).message}`);
       }
     }
 
     return candidates;
   }
+
+  // Sonda a grade de preços para UM par (categoria, tipo de anúncio) e
+  // devolve a tabela de faixas já agrupada.
+  private async buildCandidateForListingType(
+    categoryId: string,
+    listingTypeId: string,
+    fetchedAt: Date,
+  ): Promise<RawRuleCandidate | null> {
+    const probes: { price: number; commissionPct: number; fixedFeeAmount: number }[] = [];
+
+    for (const price of PROBE_PRICES) {
+      const prices = await this.client.fetchListingPrices(categoryId, price);
+      const listing = prices.find((p) => p.listing_type_id === listingTypeId);
+
+      // Tipo de anúncio indisponível naquela categoria é situação normal
+      // (nem toda categoria oferece Premium) — não é erro, só não há o que
+      // capturar.
+      if (!listing?.sale_fee_details) continue;
+
+      probes.push({
+        price,
+        // CONVERSÃO DE UNIDADE NA BORDA: a API devolve percentual (11.5), o
+        // sistema inteiro trabalha em fração (0.115). Ver
+        // docs/marketplace-fee-model-architecture.md, §3.2 — a ausência
+        // desta divisão era um bug latente que teria quebrado o motor de
+        // preço e o de promoções na primeira regra real importada.
+        commissionPct: (listing.sale_fee_details.percentage_fee ?? 0) / 100,
+        fixedFeeAmount: listing.sale_fee_details.fixed_fee ?? 0,
+      });
+    }
+
+    if (probes.length === 0) {
+      this.logger.debug(`Categoria ${categoryId} não expõe o tipo de anúncio ${listingTypeId} — nada a capturar.`);
+      return null;
+    }
+
+    return {
+      scopeKey: buildFeeScopeKey(categoryId, listingTypeId),
+      payload: {
+        tiers: groupProbesIntoTiers(probes),
+        commissionBase: 'ITEM_PRICE',
+        listingTypeId,
+      },
+      sourceEvidenceRef:
+        `https://api.mercadolibre.com/sites/MLB/listing_prices?category_id=${categoryId}` +
+        ` (sondado em ${PROBE_PRICES.join(', ')} para listing_type_id=${listingTypeId})`,
+      fetchedAt,
+    };
+  }
+}
+
+// Agrupa sondagens consecutivas com a MESMA taxa numa única faixa. Função
+// pura e exportada para ser testável sem rede — é a peça que transforma
+// pontos amostrados numa tabela contínua.
+//
+// A primeira faixa sempre começa em 0 (mesmo que a menor sondagem tenha
+// sido a R$15): abaixo do primeiro ponto sondado, a suposição mais segura é
+// que vale a mesma taxa do ponto mais baixo observado. A última sempre
+// termina em null (sem teto), pelo mesmo motivo, do outro lado. O validador
+// exige exatamente isso — cobertura de 0 ao infinito, sem buraco.
+export function groupProbesIntoTiers(
+  probes: { price: number; commissionPct: number; fixedFeeAmount: number }[],
+): { minPrice: number; maxPrice: number | null; commissionPct: number; fixedFeeAmount: number }[] {
+  const sorted = [...probes].sort((a, b) => a.price - b.price);
+  const tiers: { minPrice: number; maxPrice: number | null; commissionPct: number; fixedFeeAmount: number }[] = [];
+
+  for (const probe of sorted) {
+    const last = tiers[tiers.length - 1];
+    const sameAsLast =
+      last && last.commissionPct === probe.commissionPct && last.fixedFeeAmount === probe.fixedFeeAmount;
+
+    if (sameAsLast) continue; // estende a faixa atual — nada a fazer até a taxa mudar
+
+    if (last) last.maxPrice = probe.price;
+    tiers.push({
+      minPrice: tiers.length === 0 ? 0 : probe.price,
+      maxPrice: null,
+      commissionPct: probe.commissionPct,
+      fixedFeeAmount: probe.fixedFeeAmount,
+    });
+  }
+
+  return tiers;
 }

@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import {
-  calculateSafetyFloorPrice,
-  calculateFinancialFloorPrice,
-  marginPctOf,
+  calculateTieredNetMarginFloorPrice,
+  channelCostsOf,
+  netMarginPctOf,
+  tierAtPrice,
   validatePricingContext,
   PricingContext,
   PricingDecision,
@@ -39,8 +40,31 @@ export class DefaultPricingStrategist implements PricingStrategist {
   calculateOptimalPrice(context: PricingContext): PricingDecision {
     validatePricingContext(context);
 
-    const safetyFloorPrice = calculateSafetyFloorPrice(context.costPrice, context.minimumMarginPct);
-    const financialFloorPrice = calculateFinancialFloorPrice(context.costPrice, context.taxRate, context.minProfitMargin);
+    const { skuCode, channelCode } = context;
+    const flatCosts = { taxRate: context.taxRate, logisticsCost: context.logisticsCost };
+
+    // Os dois pisos agora resolvem a tabela de faixas inteira (problema
+    // circular — ver docs/marketplace-fee-model-architecture.md, §6), em vez
+    // de receber uma comissão escalar já escolhida por fora.
+    const safety = calculateTieredNetMarginFloorPrice(
+      context.costPrice,
+      context.minimumMarginPct,
+      context.feeTiers,
+      flatCosts,
+      skuCode,
+      channelCode,
+    );
+    const financial = calculateTieredNetMarginFloorPrice(
+      context.costPrice,
+      context.minProfitMargin * 100,
+      context.feeTiers,
+      flatCosts,
+      skuCode,
+      channelCode,
+    );
+
+    const safetyFloorPrice = safety.floorPrice;
+    const financialFloorPrice = financial.floorPrice;
     const mapPrice = context.mapPrice;
     const effectiveFloorPrice = Math.max(safetyFloorPrice, financialFloorPrice, mapPrice ?? -Infinity);
 
@@ -68,26 +92,54 @@ export class DefaultPricingStrategist implements PricingStrategist {
         action = 'FINANCIAL_FLOOR_APPLIED';
         hitFinancialFloor = true;
         reason =
-          `${rawReason} Isso furaria o piso financeiro do tenant (imposto ${(context.taxRate * 100).toFixed(1)}% + ` +
-          `margem líquida mínima ${(context.minProfitMargin * 100).toFixed(1)}%) — preço ajustado para o piso ` +
-          `financeiro por proteção de margem (${recommendedPrice.toFixed(2)}) em vez de ${rawPrice.toFixed(2)}.`;
+          `${rawReason} Isso furaria o piso financeiro do tenant (comissão ${(financial.appliedTier.commissionPct * 100).toFixed(1)}% + ` +
+          `imposto ${(context.taxRate * 100).toFixed(1)}% + margem líquida mínima ${(context.minProfitMargin * 100).toFixed(1)}%) — ` +
+          `preço ajustado para o piso financeiro por proteção de margem (${recommendedPrice.toFixed(2)}) em vez de ${rawPrice.toFixed(2)}.`;
       } else {
         action = 'SAFETY_FLOOR_APPLIED';
         hitSafetyFloor = true;
-        reason = `${rawReason} Isso furaria a margem mínima do produto (${context.minimumMarginPct}%) — preço de segurança aplicado (${recommendedPrice.toFixed(2)}) em vez de ${rawPrice.toFixed(2)}.`;
+        reason =
+          `${rawReason} Isso furaria a margem LÍQUIDA mínima do produto (${context.minimumMarginPct}%, já descontando ` +
+          `comissão de ${(safety.appliedTier.commissionPct * 100).toFixed(1)}% do canal ${channelCode} e ${context.logisticsCost.toFixed(2)} de logística) — ` +
+          `preço de segurança aplicado (${recommendedPrice.toFixed(2)}) em vez de ${rawPrice.toFixed(2)}.`;
       }
     }
+
+    // A comissão a reportar é a da faixa em que o preço FINAL caiu — pode
+    // ser diferente da faixa que gerou o piso (ex.: piso calculado na faixa
+    // barata, mas o preço final subiu para a faixa seguinte).
+    const finalTier = tierAtPrice(context.feeTiers, recommendedPrice);
+    const finalCosts = channelCostsOf(context, recommendedPrice);
 
     return {
       skuCode: context.skuCode,
       action,
       recommendedPrice: round2(recommendedPrice),
       currentPrice: context.currentPrice,
-      resultingMarginPct: round2(marginPctOf(recommendedPrice, context.costPrice)),
+      resultingMarginPct: round2(netMarginPctOf(recommendedPrice, context.costPrice, finalCosts)),
       safetyFloorPrice: round2(safetyFloorPrice),
       financialFloorPrice: round2(financialFloorPrice),
       hitSafetyFloor,
       hitFinancialFloor,
+      costs: {
+        channelCode,
+        commissionPct: finalTier.commissionPct,
+        fixedFeeAmount: finalTier.fixedFeeAmount,
+        logisticsCost: context.logisticsCost,
+        taxRate: context.taxRate,
+        sellerFreightCost: finalTier.sellerFreightCost,
+        freeShippingRequired:
+          context.freeShippingThreshold !== null && recommendedPrice >= context.freeShippingThreshold,
+        feeRuleId: context.feeRuleId,
+        feeRuleVersion: context.feeRuleVersion,
+        freeShippingThreshold: context.freeShippingThreshold,
+        // Fórmula ANTIGA, reproduzida exatamente como era (custo efetivo =
+        // produto + embalagem, dividido por (1 - margem)), só para o "antes
+        // x depois" da UI — nunca entra em nenhuma decisão.
+        legacyFloorPriceForComparison: round2(
+          context.effectiveCostPriceLegacy / (1 - context.minimumMarginPct / 100),
+        ),
+      },
       mapPrice,
       hitMapFloor,
       reason,

@@ -25,6 +25,54 @@ export interface Product {
   // de categoria do canal). null = produto ainda sem categoria definida.
   categoryId: string | null;
   weightKg: number;
+  packagingWeightKg: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+
+  // Campos fiscais (NCM, GTIN, origem, CEST) — pré-requisito da emissão de
+  // NF-e e da publicação de anúncio, e chave da classificação tributária por
+  // produto (substituição tributária e monofásico são definidos pelo NCM, não
+  // pelo SKU).
+  //
+  // O backend guarda e devolve estes campos desde o benchmark Tiny/Bling, e já
+  // os replica do produto pai para as variações geradas
+  // (catalog/application/products.service.ts). Até 02/08/2026 o frontend não
+  // os declarava nem exibia — existiam e eram invisíveis.
+  ncm: string | null;
+  gtin: string | null;
+  fiscalOriginCode: number | null;
+  cest: string | null;
+}
+
+export interface ProductWriteInput {
+  skuCode: string;
+  name: string;
+  internalCategory?: string | null;
+  costPrice: number;
+  desiredMarginPct: number;
+  minimumMarginPct: number;
+  weightKg: number;
+  packagingWeightKg?: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+  ncm?: string | null;
+  gtin?: string | null;
+  fiscalOriginCode?: number | null;
+  cest?: string | null;
+}
+
+export async function createProduct(input: ProductWriteInput): Promise<Product> {
+  const { data } = await apiClient.post<Product>('/products', input);
+  return data;
+}
+
+// PATCH parcial: manda só o que mudou. Enviar o objeto inteiro sobrescreveria
+// campos que o ERP é dono (ver product-ownership-rules.ts no backend).
+export async function updateProduct(id: string, input: Partial<ProductWriteInput>): Promise<Product> {
+  const { data } = await apiClient.patch<Product>(`/products/${id}`, input);
+  return data;
 }
 
 export async function fetchProducts(): Promise<Product[]> {

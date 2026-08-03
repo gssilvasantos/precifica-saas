@@ -17,6 +17,7 @@ import {
   type ExternalCategoryCandidate,
   type ProductCategory,
 } from '../features/marketplace-publishing/api';
+import ErpCategoryImportPanel from '../features/marketplace-publishing/components/ErpCategoryImportPanel';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { extractErrorMessage } from '../lib/extract-error-message';
@@ -373,6 +374,12 @@ export default function CategoriesPage() {
         </div>
         {canEdit && !showForm && <Button onClick={() => setShowForm(true)}>Nova categoria</Button>}
       </div>
+
+      {/* Migração: recria aqui a árvore que os produtos já trazem do ERP.
+          Fica no topo porque é a primeira coisa a fazer numa conta nova, e
+          some de utilidade depois — mas continua disponível, já que produto
+          novo pode chegar do ERP com categoria ainda não criada aqui. */}
+      {canEdit && <ErpCategoryImportPanel />}
 
       {showForm && <CategoryForm categories={categories} onDone={() => setShowForm(false)} />}
 

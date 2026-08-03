@@ -13,6 +13,8 @@ import {
   unpinRule,
   type RuleType,
 } from '../features/marketplace-governance/api';
+import { fetchSellerProfiles, updateSellerProfile } from '../features/marketplace-governance/seller-profiles-api';
+import { fetchWarehouses, updateWarehouseEstimatedFreight } from '../features/logistics-fulfillment/api';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -262,6 +264,171 @@ function ChangeEventsSection() {
   );
 }
 
+// Canais cujos custos alimentam o motor de preço. Lista fixa de propósito
+// (e não derivada dos providers): um canal aparece aqui assim que o lojista
+// PODE vender nele, mesmo antes de existir provider de taxa — é justamente
+// nesses que a configuração manual mais importa.
+const CHANNELS_WITH_COSTS = [
+  { code: 'MERCADO_LIVRE', label: 'Mercado Livre' },
+  { code: 'SHOPEE', label: 'Shopee' },
+  { code: 'AMAZON', label: 'Amazon' },
+  { code: 'MAGALU', label: 'Magalu' },
+  { code: 'TIKTOK_SHOP', label: 'TikTok Shop' },
+  { code: 'SHEIN', label: 'Shein' },
+  { code: 'NUVEMSHOP', label: 'Nuvemshop' },
+];
+
+// Canais que cobram tarifa por item dispensada por plano — hoje só a
+// Amazon ("Plano de vendas profissional", R$19/mês: quem assina não paga
+// os R$2 por item vendido).
+const CHANNELS_WITH_PLAN = new Set(['AMAZON']);
+
+// Canais que dão desconto de frete por reputação do vendedor — hoje só o
+// Mercado Livre (até 70% para reputação verde-escuro).
+const CHANNELS_WITH_REPUTATION = new Set(['MERCADO_LIVRE']);
+
+function ChannelCostsSection({ isEditor }: { isEditor: boolean }) {
+  const queryClient = useQueryClient();
+  const profilesQuery = useQuery({ queryKey: ['seller-profiles'], queryFn: fetchSellerProfiles });
+  const warehousesQuery = useQuery({ queryKey: ['warehouses'], queryFn: fetchWarehouses });
+
+  const profileMutation = useMutation({
+    mutationFn: ({ channelCode, input }: { channelCode: string; input: Parameters<typeof updateSellerProfile>[1] }) =>
+      updateSellerProfile(channelCode, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['seller-profiles'] }),
+  });
+
+  const freightMutation = useMutation({
+    mutationFn: ({ warehouseId, value }: { warehouseId: string; value: number }) =>
+      updateWarehouseEstimatedFreight(warehouseId, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['warehouses'] }),
+  });
+
+  const profileOf = (channelCode: string) =>
+    profilesQuery.data?.find((p) => p.channelCode === channelCode) ?? {
+      channelCode,
+      professionalPlanActive: false,
+      freightDiscountPct: 0,
+    };
+
+  const warehouseOf = (channelCode: string) =>
+    warehousesQuery.data?.find((w) => w.type === 'VIRTUAL_FULL' && w.channelCode === channelCode);
+
+  return (
+    <Card className="p-5">
+      <h2 className="font-serif text-lg font-semibold text-foreground">Custos do canal</h2>
+      <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+        O que <strong>você</strong> contratou em cada canal — diferente da tabela de taxas, que é importada do
+        marketplace e vale para todo vendedor. Estes campos entram direto no cálculo do preço mínimo. Enquanto não
+        forem preenchidos, o sistema assume o cenário mais conservador: paga tarifa por item e paga o frete cheio.
+      </p>
+
+      {(profilesQuery.isLoading || warehousesQuery.isLoading) && (
+        <p className="mt-3 text-sm text-muted-foreground">Carregando…</p>
+      )}
+
+      <div className="mt-4 space-y-3">
+        {CHANNELS_WITH_COSTS.map((channel) => {
+          const profile = profileOf(channel.code);
+          const warehouse = warehouseOf(channel.code);
+          const hasPlan = CHANNELS_WITH_PLAN.has(channel.code);
+          const hasReputation = CHANNELS_WITH_REPUTATION.has(channel.code);
+
+          return (
+            <div key={channel.code} className="rounded-md border border-border/60 p-3">
+              <div className="flex items-center justify-between">
+                <span className="font-sans text-sm font-medium text-foreground">{channel.label}</span>
+                {profile.professionalPlanActive && <Badge>Plano profissional</Badge>}
+              </div>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                {hasPlan && (
+                  <label className="flex items-start gap-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      disabled={!isEditor || profileMutation.isPending}
+                      checked={profile.professionalPlanActive}
+                      onChange={(e) =>
+                        profileMutation.mutate({
+                          channelCode: channel.code,
+                          input: { professionalPlanActive: e.target.checked },
+                        })
+                      }
+                    />
+                    <span>
+                      Plano de vendas profissional
+                      <span className="mt-0.5 block text-muted-foreground">
+                        Assinando (R$19/mês), a tarifa de R$2 por item deixa de entrar no preço.
+                      </span>
+                    </span>
+                  </label>
+                )}
+
+                {hasReputation && (
+                  <label className="text-xs text-foreground">
+                    Desconto de frete por reputação (%)
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      className={inputClass}
+                      disabled={!isEditor}
+                      defaultValue={Math.round(profile.freightDiscountPct * 100)}
+                      onBlur={(e) => {
+                        const pct = Number(e.target.value);
+                        if (Number.isFinite(pct) && pct >= 0 && pct <= 100) {
+                          // O backend trabalha em fração (0.7 = 70%) — a
+                          // conversão vive só aqui, na borda da UI.
+                          profileMutation.mutate({
+                            channelCode: channel.code,
+                            input: { freightDiscountPct: pct / 100 },
+                          });
+                        }
+                      }}
+                    />
+                    <span className="mt-0.5 block text-muted-foreground">Até 70% para reputação verde-escuro.</span>
+                  </label>
+                )}
+
+                <label className="text-xs text-foreground">
+                  Frete médio estimado (R$)
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className={inputClass}
+                    disabled={!isEditor || !warehouse}
+                    defaultValue={warehouse?.estimatedFreightCost ?? 0}
+                    onBlur={(e) => {
+                      const value = Number(e.target.value);
+                      if (warehouse && Number.isFinite(value) && value >= 0) {
+                        freightMutation.mutate({ warehouseId: warehouse.id, value });
+                      }
+                    }}
+                  />
+                  <span className="mt-0.5 block text-muted-foreground">
+                    {warehouse
+                      ? 'Só vira custo seu quando o canal transfere o frete (no ML, acima de R$79).'
+                      : 'Disponível após a primeira sincronização deste canal.'}
+                  </span>
+                </label>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {(profileMutation.isError || freightMutation.isError) && (
+        <p className="mt-3 text-xs text-destructive">
+          {extractErrorMessage(profileMutation.error ?? freightMutation.error)}
+        </p>
+      )}
+    </Card>
+  );
+}
+
 export default function MarketplaceGovernancePage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
@@ -275,6 +442,7 @@ export default function MarketplaceGovernancePage() {
         </p>
       </div>
 
+      <ChannelCostsSection isEditor={isAdmin || user?.role === 'PRICING_EDITOR'} />
       <ProvidersSection isAdmin={isAdmin} />
       <PendingRulesSection isAdmin={isAdmin} />
       <ChangeEventsSection />

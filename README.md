@@ -1,4 +1,6 @@
-# Precifica SaaS — Plataforma de Inteligência para Marketplaces
+# Kyneti — Plataforma de Inteligência para Marketplaces
+
+> **Nota de nome (01/08/2026):** este README chamava o produto de "Precifica SaaS" até esta data, enquanto toda a documentação recente já usava **Kyneti**. Renomeado por dois motivos: consistência interna e, principalmente, porque **"Precifica" é uma empresa brasileira real e concorrente direta** (precifica.com.br — repricing e monitoramento de concorrência em marketplace). Ver `docs/market-landscape-analysis.md`, §0. O diretório do repositório (`precifica-saas/`) e o nome dos pacotes npm seguem inalterados por ora — renomeá-los quebraria caminhos de deploy sem ganho proporcional; a decisão fica registrada aqui para quando houver uma janela boa.
 
 Base de código do produto descrito em `PRD-Arquitetura-Precificacao-Inteligente.md`. Este README é atualizado a cada etapa da implementação.
 

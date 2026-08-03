@@ -12,6 +12,7 @@ import { ProductAuditLogService } from './application/product-audit-log.service'
 import { BulkMapPriceImportService } from './application/bulk-map-price-import.service';
 import { PriceListService } from './application/price-list.service';
 import { ProductCategoryService } from './application/product-category.service';
+import { ErpCategoryImportService } from './application/erp-category-import.service';
 import { ProductStructureService } from './application/product-structure.service';
 import { ProductLotService } from './application/product-lot.service';
 import { ProductsController } from './interface/controllers/products.controller';
@@ -95,6 +96,7 @@ import { PRODUCT_LOT_READER } from '../../shared/contracts/product-lot-reader.po
     // ERP) — modelo espelha o Tiny/Olist: atributos na categoria (não no
     // produto), com herança opcional para categorias-filhas.
     ProductCategoryService,
+    ErpCategoryImportService,
     // BOM real — Produtos-Estrutura (Projeto Estruturante 1, benchmark Bling
     // ERP, 29/07/2026) — cadastro de componentes de um produto kit.
     ProductStructureService,

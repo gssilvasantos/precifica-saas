@@ -3,6 +3,8 @@ import {
   AdsActionCapableProvider,
   AdsActionResult,
   AdsCapableProvider,
+  AdsItemMetricsCapableProvider,
+  RawAdsItemMetricCandidate,
   AuthenticatedProvider,
   FetchContext,
   ProviderCapability,
@@ -37,11 +39,17 @@ const MAX_METRICS_WINDOW_DAYS = 90;
 // tenta os candidatos mais prováveis (baseados na documentação pública) e
 // lança erro explícito se nenhum bater, nunca inventa um valor.
 @Injectable()
-export class MercadoLivreAdsProvider implements AdsCapableProvider, AdsActionCapableProvider, AuthenticatedProvider {
+export class MercadoLivreAdsProvider
+  implements AdsCapableProvider, AdsActionCapableProvider, AdsItemMetricsCapableProvider, AuthenticatedProvider
+{
   readonly code = 'MERCADO_LIVRE_ADS';
   readonly marketplaceCode = 'MERCADO_LIVRE';
   readonly sourceType = 'OFFICIAL_API' as const;
-  readonly capabilities = [ProviderCapability.ADS, ProviderCapability.ADS_ACTIONS];
+  readonly capabilities = [
+    ProviderCapability.ADS,
+    ProviderCapability.ADS_ACTIONS,
+    ProviderCapability.ADS_ITEM_METRICS,
+  ];
   readonly authScope = 'TENANT' as const;
 
   private readonly logger = new Logger(MercadoLivreAdsProvider.name);
@@ -92,6 +100,40 @@ export class MercadoLivreAdsProvider implements AdsCapableProvider, AdsActionCap
 
     const raw = await this.client.fetchAdsCampaignMetrics(advertiserId, accessToken, dateFrom, dateTo);
     return raw.map((m) => normalizeMlAdsMetric(m));
+  }
+
+  // Métricas por ANÚNCIO (01/08/2026) — mesma janela e mesma validação de
+  // 90 dias das métricas por campanha. É este dado que faz o custo de
+  // publicidade chegar ao SKU no DRE sem estimativa.
+  async fetchAdsItemMetrics(ctx: FetchContext, dateFrom: Date, dateTo: Date): Promise<RawAdsItemMetricCandidate[]> {
+    if (!ctx.tenantId) {
+      this.logger.warn('MercadoLivreAdsProvider chamado sem tenantId — métrica por anúncio é sempre por vendedor.');
+      return [];
+    }
+    const windowDays = Math.ceil((dateTo.getTime() - dateFrom.getTime()) / (24 * 60 * 60 * 1000));
+    if (windowDays > MAX_METRICS_WINDOW_DAYS) {
+      throw new Error(
+        `Janela de métricas de ${windowDays} dias excede o limite de ${MAX_METRICS_WINDOW_DAYS} dias da API de Ads do Mercado Livre.`,
+      );
+    }
+
+    const { accessToken, advertiserId } = await this.resolveAdvertiser(ctx.tenantId);
+    if (!advertiserId) return [];
+
+    const raw = await this.client.fetchAdsItemMetrics(advertiserId, accessToken, dateFrom, dateTo);
+
+    // Linha sem item/data reconhecíveis é DESCARTADA com log, não derruba o
+    // lote: uma resposta parcialmente fora do formato não deve impedir a
+    // captura das outras. Diferente de normalizeMlAdsMetric (por campanha),
+    // que lança — ali a chave é obrigatória para o dado ter sentido; aqui,
+    // perder um anúncio é degradação aceitável.
+    const candidates: RawAdsItemMetricCandidate[] = [];
+    for (const item of raw) {
+      const normalized = normalizeMlAdsItemMetric(item);
+      if (normalized) candidates.push(normalized);
+      else this.logger.warn(`Métrica de anúncio do Mercado Livre em formato inesperado — ignorada: ${JSON.stringify(item)}`);
+    }
+    return candidates;
   }
 
   // Fase 3 — Safety Lock. Nunca chamado automaticamente: só
@@ -166,6 +208,35 @@ function mapMlCampaignStatus(raw: string): RawAdsCampaignCandidate['status'] {
   if (raw === 'paused') return 'PAUSED';
   if (raw === 'ended' || raw === 'finished') return 'ENDED';
   return 'UNKNOWN';
+}
+
+// Métrica por anúncio (01/08/2026). Devolve null em vez de lançar — ver o
+// comentário em fetchAdsItemMetrics sobre por que aqui a degradação é
+// aceitável e na métrica por campanha não é.
+//
+// `units_quantity` é o campo que o ML usa para unidades atribuídas ao
+// anúncio; os alternativos cobrem variações de nome documentadas
+// (direct/indirect), mesma estratégia defensiva de pickString/pickNumber do
+// resto do arquivo.
+export function normalizeMlAdsItemMetric(raw: unknown): RawAdsItemMetricCandidate | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const record = raw as Record<string, unknown>;
+
+  const externalItemId = pickString(record, ['item_id', 'id']);
+  const periodDateRaw = pickString(record, ['date']);
+  if (!externalItemId || !periodDateRaw) return null;
+
+  const periodDate = new Date(periodDateRaw);
+  if (Number.isNaN(periodDate.getTime())) return null;
+
+  return {
+    externalItemId,
+    periodDate,
+    spend: pickNumber(record, ['cost', 'spend']) ?? 0,
+    attributedUnits: pickNumber(record, ['units_quantity', 'direct_units_quantity', 'advertising_items_quantity']) ?? 0,
+    clicks: pickNumber(record, ['clicks']) ?? 0,
+    impressions: pickNumber(record, ['prints', 'impressions']) ?? 0,
+  };
 }
 
 function normalizeMlAdsMetric(raw: unknown): RawAdsMetricCandidate {

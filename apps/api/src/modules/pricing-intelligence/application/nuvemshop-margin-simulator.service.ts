@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { PRODUCT_CATALOG_READER, CHANNEL_LISTING_READER, FEE_RULE_RESOLVER } from '../../../shared/contracts/tokens';
 import { ProductCatalogReader } from '../../../shared/contracts/product-catalog-reader.port';
 import { ChannelListingReader } from '../../../shared/contracts/channel-listing-reader.port';
-import { FeeRuleResolver } from '../../../shared/contracts/fee-rule-resolver.port';
+import { FeeRuleResolver, resolveFeeAtPrice } from '../../../shared/contracts/fee-rule-resolver.port';
 import {
   calculateNuvemshopMarginScenario,
   InvalidMarginScenarioError,
@@ -58,11 +58,20 @@ export class NuvemshopMarginSimulatorService {
       tenantId,
     });
 
+    // A taxa do gateway também virou tabela de faixas (01/08/2026) —
+    // resolvida no preço real do anúncio. E a conversão de unidade aqui é
+    // OBRIGATÓRIA: o contrato agora é fração (0.0099 = 0,99% do Pix), mas
+    // calculateNuvemshopMarginScenario recebe PERCENTUAL (gatewayFeePct,
+    // dividido por 100 lá dentro). Eram três convenções diferentes de
+    // unidade no mesmo repositório antes desta padronização — ver
+    // docs/marketplace-fee-model-architecture.md, §3.2.
+    const gatewayFee = resolvedFee ? resolveFeeAtPrice(resolvedFee, listing.currentPrice) : null;
+
     try {
       const result = calculateNuvemshopMarginScenario({
         grossPrice: listing.currentPrice,
         costPrice: product.costPrice,
-        gatewayFeePct: resolvedFee?.commissionPct ?? 0,
+        gatewayFeePct: (gatewayFee?.commissionPct ?? 0) * 100,
         estimatedShippingCost: input.freeShipping ? input.estimatedShippingCost ?? 0 : 0,
         couponCost: input.couponCost,
       });

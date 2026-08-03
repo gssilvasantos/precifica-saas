@@ -14,6 +14,7 @@ import { WarehouseService } from '../../application/warehouse.service';
 import { ProductWarehouseLocationService } from '../../application/product-warehouse-location.service';
 import { UpdateLeadTimeDto } from '../dto/update-lead-time.dto';
 import { UpdateLogisticsCostDto } from '../dto/update-logistics-cost.dto';
+import { UpdateEstimatedFreightDto } from '../dto/update-estimated-freight.dto';
 import { SetProductLocationDto } from '../dto/set-product-location.dto';
 
 // Leitura — qualquer papel autenticado pode consultar depósitos e saldo
@@ -66,6 +67,20 @@ export class WarehousesController {
     @Body() dto: UpdateLogisticsCostDto,
   ) {
     return this.warehouses.updateLogisticsCostPerUnit(user.tenantId, id, dto.logisticsCostPerUnit);
+  }
+
+  // Frete médio estimado deste canal (01/08/2026) — usado pelo motor de
+  // preço quando a política do canal transfere o frete ao vendedor (no
+  // Mercado Livre, acima de R$79). Deixado em 0, o motor simplesmente não
+  // soma frete nenhum ao piso, nunca um valor arbitrário.
+  @Roles(UserRole.ADMIN, UserRole.PRICING_EDITOR)
+  @Patch(':id/estimated-freight')
+  updateEstimatedFreight(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateEstimatedFreightDto,
+  ) {
+    return this.warehouses.updateEstimatedFreightCost(user.tenantId, id, dto.estimatedFreightCost);
   }
 
   // Benchmark Tiny ERP (28/07/2026, docs/tiny-erp-benchmark-analysis.md,

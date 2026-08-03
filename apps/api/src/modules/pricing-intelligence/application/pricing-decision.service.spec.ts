@@ -7,7 +7,17 @@ import {
   CHANNEL_LISTING_READER,
   PRICE_UPDATE_DISPATCHER,
   FINANCIAL_POLICY_READER,
+  FEE_RULE_RESOLVER,
+  LOGISTICS_COST_READER,
+  CHANNEL_CATEGORY_RESOLVER,
+  SHIPPING_POLICY_RESOLVER,
+  CHANNEL_SELLER_PROFILE_READER,
 } from '../../../shared/contracts/tokens';
+import { ShippingPolicyResolver } from '../../../shared/contracts/shipping-policy-resolver.port';
+import { ChannelSellerProfileReader } from '../../../shared/contracts/channel-seller-profile-reader.port';
+import { FeeRuleResolver, ResolvedFeeRule } from '../../../shared/contracts/fee-rule-resolver.port';
+import { LogisticsCostReader } from '../../../shared/contracts/logistics-cost-reader.port';
+import { ChannelCategoryResolver } from '../../../shared/contracts/channel-category-resolver.port';
 import { ProductCatalogReader, ProductCatalogSummary } from '../../../shared/contracts/product-catalog-reader.port';
 import {
   CompetitiveOpportunitySummary,
@@ -65,9 +75,33 @@ describe('PricingDecisionService (modo operação)', () => {
     financialFloorPrice: 60,
     hitSafetyFloor: false,
     hitFinancialFloor: false,
+    costs: {
+      channelCode: 'NUVEMSHOP',
+      commissionPct: 0.05,
+      fixedFeeAmount: 0,
+      logisticsCost: 0,
+      taxRate: 0,
+      sellerFreightCost: 0,
+      freeShippingRequired: false,
+      feeRuleId: 'rule-1',
+      feeRuleVersion: 1,
+      freeShippingThreshold: null,
+      legacyFloorPriceForComparison: 75,
+    },
     mapPrice: null,
     hitMapFloor: false,
     reason: 'teste',
+  };
+
+  // Comissão IMPORTADA do marketplace (01/08/2026) — o service passou a
+  // exigir uma regra validada antes de decidir qualquer preço; sem este
+  // mock, todo cenário abaixo seria (corretamente) bloqueado.
+  const feeRule: ResolvedFeeRule = {
+    tiers: [{ minPrice: 0, maxPrice: null, commissionPct: 0.05, fixedFeeAmount: 0 }],
+    commissionBase: 'ITEM_PRICE',
+    commissionCapAmount: null,
+    ruleId: 'rule-1',
+    ruleVersion: 1,
   };
 
   const listing: ChannelListingSummary = {
@@ -87,17 +121,45 @@ describe('PricingDecisionService (modo operação)', () => {
   let channelListings: jest.Mocked<ChannelListingReader>;
   let dispatcher: jest.Mocked<PriceUpdateDispatcher>;
   let financialPolicy: jest.Mocked<FinancialPolicyReader>;
+  let feeRules: jest.Mocked<FeeRuleResolver>;
+  let logistics: jest.Mocked<LogisticsCostReader>;
+  let channelCategories: jest.Mocked<ChannelCategoryResolver>;
+  let shippingPolicies: jest.Mocked<ShippingPolicyResolver>;
+  let sellerProfiles: jest.Mocked<ChannelSellerProfileReader>;
   let service: PricingDecisionService;
 
   async function buildService(): Promise<PricingDecisionService> {
     strategist = { calculateOptimalPrice: jest.fn().mockReturnValue(decision) };
     catalog = { findBySku: jest.fn().mockResolvedValue(product) };
     competitorSnapshots = { findOpportunity: jest.fn().mockResolvedValue(opportunity) };
-    channelListings = { findBySku: jest.fn().mockResolvedValue(listing) };
+    channelListings = {
+      findBySku: jest.fn().mockResolvedValue(listing),
+      findSkusByExternalIds: jest.fn().mockResolvedValue([]),
+    };
     dispatcher = {
       dispatch: jest.fn().mockResolvedValue({ success: true, externalId: 'ext-123', appliedPrice: 90 } as PriceUpdateOutcome),
     };
     financialPolicy = { getPolicy: jest.fn().mockResolvedValue(noFinancialPolicy) };
+    feeRules = { resolveFeeRule: jest.fn().mockResolvedValue(feeRule) };
+    logistics = {
+      getTotalLogisticsCost: jest.fn().mockResolvedValue(0),
+      getEstimatedFreightCost: jest.fn().mockResolvedValue(0),
+      getPackagingCostForOrder: jest.fn().mockResolvedValue(0),
+    };
+    channelCategories = { resolveExternalCategoryId: jest.fn().mockResolvedValue(null) };
+    // Sem política de frete cadastrada: o motor se comporta exatamente como
+    // antes desta feature (frete zero no piso), nunca inventando custo.
+    shippingPolicies = { resolveShippingPolicy: jest.fn().mockResolvedValue(null) };
+    // Perfil neutro por padrão: nada contratado, nenhum desconto — o lado
+    // conservador, igual ao que o service assume quando o vendedor não
+    // configurou o canal.
+    sellerProfiles = {
+      getProfile: jest.fn().mockResolvedValue({
+        channelCode: 'NUVEMSHOP',
+        professionalPlanActive: false,
+        freightDiscountPct: 0,
+      }),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -108,6 +170,11 @@ describe('PricingDecisionService (modo operação)', () => {
         { provide: CHANNEL_LISTING_READER, useValue: channelListings },
         { provide: PRICE_UPDATE_DISPATCHER, useValue: dispatcher },
         { provide: FINANCIAL_POLICY_READER, useValue: financialPolicy },
+        { provide: FEE_RULE_RESOLVER, useValue: feeRules },
+        { provide: LOGISTICS_COST_READER, useValue: logistics },
+        { provide: CHANNEL_CATEGORY_RESOLVER, useValue: channelCategories },
+        { provide: SHIPPING_POLICY_RESOLVER, useValue: shippingPolicies },
+        { provide: CHANNEL_SELLER_PROFILE_READER, useValue: sellerProfiles },
       ],
     }).compile();
 
@@ -169,14 +236,20 @@ describe('PricingDecisionService (modo operação)', () => {
     expect(result?.reason).toMatch(/nada para aplicar/i);
   });
 
-  it('applyDecision(): sem channelCode na oportunidade — não aplica, não chama o dispatcher', async () => {
+  // MUDANÇA DE COMPORTAMENTO (01/08/2026): antes, sem canal, o motor ainda
+  // CALCULAVA uma decisão e só deixava de aplicá-la. Isso deixou de fazer
+  // sentido quando o piso passou a depender da comissão do canal: sem saber
+  // o canal, não há comissão, e sem comissão não existe piso confiável para
+  // calcular. Agora bloqueia antes, devolvendo null — a resposta honesta é
+  // "não sei", não um número que parece uma recomendação.
+  it('applyDecision(): sem channelCode na oportunidade — não decide nada, não chama o dispatcher', async () => {
     competitorSnapshots.findOpportunity.mockResolvedValue({ ...opportunity, channelCode: null });
 
     const result = await service.applyDecision('tenant-1', 'SKU-001');
 
     expect(dispatcher.dispatch).not.toHaveBeenCalled();
-    expect(result?.applied).toBe(false);
-    expect(result?.reason).toMatch(/Nenhum canal vinculado/);
+    expect(result).toBeNull();
+    expect(strategist.calculateOptimalPrice).not.toHaveBeenCalled();
   });
 
   it('applyDecision(): sem anúncio encontrado no canal — não aplica, não chama o dispatcher', async () => {
@@ -198,8 +271,14 @@ describe('PricingDecisionService (modo operação)', () => {
   });
 
   describe('piso financeiro (defesa em profundidade)', () => {
-    // costPrice 60, taxRate 6% + minProfitMargin 30% => financialFloorPrice = 60 / 0.64 = 93.75,
+    // costPrice 60, comissão 5% (regra importada do canal, ver `feeRule`),
+    // taxRate 6% + minProfitMargin 30%
+    // => financialFloorPrice = 60 / (1 - 0.05 - 0.06 - 0.30) = 60 / 0.59 = 101.69,
     // maior que os 90 que o strategist (mockado) recomendou — deve vencer.
+    //
+    // Antes de 01/08/2026 este número era 93.75, porque a comissão do canal
+    // ficava de fora da conta — os 7,94 de diferença são exatamente a
+    // comissão que o vendedor pagava sem que o piso soubesse.
     beforeEach(() => {
       financialPolicy.getPolicy.mockResolvedValue({ taxRate: 0.06, minProfitMargin: 0.3, targetRoas: 3 });
     });
@@ -208,7 +287,7 @@ describe('PricingDecisionService (modo operação)', () => {
       const result = await service.decide('tenant-1', 'SKU-001');
 
       expect(result?.action).toBe('FINANCIAL_FLOOR_APPLIED');
-      expect(result?.recommendedPrice).toBeCloseTo(93.75, 2);
+      expect(result?.recommendedPrice).toBeCloseTo(101.69, 2);
       expect(result?.hitFinancialFloor).toBe(true);
       expect(result?.reason).toMatch(/piso financeiro por proteção de margem/i);
     });
@@ -217,7 +296,7 @@ describe('PricingDecisionService (modo operação)', () => {
       const result = await service.applyDecision('tenant-1', 'SKU-001');
 
       const dispatchedCommand = dispatcher.dispatch.mock.calls[0][0];
-      expect(dispatchedCommand.newPrice).toBeCloseTo(93.75, 2);
+      expect(dispatchedCommand.newPrice).toBeCloseTo(101.69, 2);
       expect(result?.decision.action).toBe('FINANCIAL_FLOOR_APPLIED');
     });
 
@@ -291,6 +370,188 @@ describe('PricingDecisionService (modo operação)', () => {
 
       expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
       expect(result.applied).toBe(true);
+    });
+  });
+
+  // Bloco novo (01/08/2026) — princípio de produto definido pelo usuário: o
+  // único custo digitado no sistema é o do produto (mais imposto e
+  // embalagem); TODA taxa de marketplace é importada do próprio canal. A
+  // consequência de projeto é esta: sem taxa importada, não se precifica.
+  describe('taxa do marketplace é sempre importada, nunca presumida', () => {
+    beforeEach(async () => {
+      service = await buildService();
+    });
+
+    it('bloqueia a decisão quando não há regra de comissão validada para o canal', async () => {
+      feeRules.resolveFeeRule.mockResolvedValue(null);
+
+      const result = await service.decide('tenant-1', 'SKU-001');
+
+      expect(result).toBeNull();
+      // O ponto central: não chegou nem a calcular. Assumir comissão zero
+      // aqui seria reintroduzir silenciosamente o bug de margem bruta.
+      expect(strategist.calculateOptimalPrice).not.toHaveBeenCalled();
+    });
+
+    it('nunca aplica preço no marketplace quando a taxa é desconhecida', async () => {
+      feeRules.resolveFeeRule.mockResolvedValue(null);
+
+      const result = await service.applyDecision('tenant-1', 'SKU-001');
+
+      expect(result).toBeNull();
+      expect(dispatcher.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('usa a categoria do canal para achar a taxa específica daquele nicho', async () => {
+      channelCategories.resolveExternalCategoryId.mockResolvedValue('MLB1234');
+      catalog.findBySku.mockResolvedValue({ ...product, categoryId: 'cat-interna-1' });
+
+      await service.decide('tenant-1', 'SKU-001');
+
+      expect(feeRules.resolveFeeRule).toHaveBeenCalledWith(
+        expect.objectContaining({ categoryCode: 'MLB1234', marketplaceCode: 'NUVEMSHOP' }),
+      );
+    });
+
+    it('cai para o escopo GLOBAL quando o produto não tem categoria mapeada no canal', async () => {
+      channelCategories.resolveExternalCategoryId.mockResolvedValue(null);
+
+      await service.decide('tenant-1', 'SKU-001');
+
+      expect(feeRules.resolveFeeRule).toHaveBeenCalledWith(
+        expect.objectContaining({ categoryCode: 'GLOBAL' }),
+      );
+    });
+
+    // Cenário Amazon (01/08/2026): a mesma tabela de taxas do canal produz
+    // custo por item diferente conforme o vendedor assine ou não o "Plano
+    // de vendas profissional" (R$19/mês). Assinando, os R$2/item somem.
+    it('Plano de vendas profissional ATIVO: a tarifa de R$2/item não entra no cálculo', async () => {
+      feeRules.resolveFeeRule.mockResolvedValue({
+        tiers: [
+          { minPrice: 0, maxPrice: null, commissionPct: 0.12, fixedFeeAmount: 0, planWaivablePerItemFee: 2 },
+        ],
+        commissionBase: 'ITEM_PRICE',
+        commissionCapAmount: null,
+        ruleId: 'rule-amazon',
+        ruleVersion: 1,
+      });
+      sellerProfiles.getProfile.mockResolvedValue({
+        channelCode: 'AMAZON',
+        professionalPlanActive: true,
+        freightDiscountPct: 0,
+      });
+
+      await service.decide('tenant-1', 'SKU-001');
+
+      const context = strategist.calculateOptimalPrice.mock.calls[0][0];
+      expect(context.feeTiers[0].fixedFeeAmount).toBe(0);
+    });
+
+    it('Plano de vendas profissional INATIVO: os R$2/item entram no cálculo', async () => {
+      feeRules.resolveFeeRule.mockResolvedValue({
+        tiers: [
+          { minPrice: 0, maxPrice: null, commissionPct: 0.12, fixedFeeAmount: 0, planWaivablePerItemFee: 2 },
+        ],
+        commissionBase: 'ITEM_PRICE',
+        commissionCapAmount: null,
+        ruleId: 'rule-amazon',
+        ruleVersion: 1,
+      });
+      sellerProfiles.getProfile.mockResolvedValue({
+        channelCode: 'AMAZON',
+        professionalPlanActive: false,
+        freightDiscountPct: 0,
+      });
+
+      await service.decide('tenant-1', 'SKU-001');
+
+      const context = strategist.calculateOptimalPrice.mock.calls[0][0];
+      expect(context.feeTiers[0].fixedFeeAmount).toBe(2);
+    });
+
+    it('sem perfil configurado, assume o lado conservador (paga a tarifa por item)', async () => {
+      // getProfile nunca devolve null — o service recebe o perfil NEUTRO.
+      // Assumir o plano por omissão calcularia preço a menor e viraria
+      // prejuízo silencioso.
+      feeRules.resolveFeeRule.mockResolvedValue({
+        tiers: [
+          { minPrice: 0, maxPrice: null, commissionPct: 0.12, fixedFeeAmount: 0, planWaivablePerItemFee: 2 },
+        ],
+        commissionBase: 'ITEM_PRICE',
+        commissionCapAmount: null,
+        ruleId: 'rule-amazon',
+        ruleVersion: 1,
+      });
+
+      await service.decide('tenant-1', 'SKU-001');
+
+      const context = strategist.calculateOptimalPrice.mock.calls[0][0];
+      expect(context.feeTiers[0].fixedFeeAmount).toBe(2);
+    });
+
+    it('política de frete: o vendedor só paga frete acima do limiar do canal', async () => {
+      // Política do Mercado Livre: até R$79 o canal cobre 100%; a partir
+      // daí o frete grátis é obrigatório e o vendedor arca.
+      shippingPolicies.resolveShippingPolicy.mockResolvedValue({
+        bands: [
+          { minPrice: 0, maxPrice: 79, freeShippingRequired: false, channelSubsidyPct: 1, channelSubsidyCapAmount: null },
+          { minPrice: 79, maxPrice: null, freeShippingRequired: true, channelSubsidyPct: 0, channelSubsidyCapAmount: null },
+        ],
+        ruleId: 'ship-ml',
+        ruleVersion: 1,
+      });
+      logistics.getEstimatedFreightCost.mockResolvedValue(20);
+
+      await service.decide('tenant-1', 'SKU-001');
+
+      const context = strategist.calculateOptimalPrice.mock.calls[0][0];
+      const below = context.feeTiers.find((t) => t.minPrice === 0);
+      const above = context.feeTiers.find((t) => t.minPrice === 79);
+
+      expect(below?.sellerFreightCost).toBe(0); // canal cobre
+      expect(above?.sellerFreightCost).toBe(20); // vendedor arca
+      expect(context.freeShippingThreshold).toBe(79);
+    });
+
+    it('desconto de frete por reputação reduz o que o vendedor paga', async () => {
+      shippingPolicies.resolveShippingPolicy.mockResolvedValue({
+        bands: [
+          { minPrice: 0, maxPrice: null, freeShippingRequired: true, channelSubsidyPct: 0, channelSubsidyCapAmount: null },
+        ],
+        ruleId: 'ship-ml',
+        ruleVersion: 1,
+      });
+      logistics.getEstimatedFreightCost.mockResolvedValue(20);
+      sellerProfiles.getProfile.mockResolvedValue({
+        channelCode: 'MERCADO_LIVRE',
+        professionalPlanActive: false,
+        freightDiscountPct: 0.7, // reputação verde-escuro
+      });
+
+      await service.decide('tenant-1', 'SKU-001');
+
+      const context = strategist.calculateOptimalPrice.mock.calls[0][0];
+      expect(context.feeTiers[0].sellerFreightCost).toBeCloseTo(6, 2); // 20 * (1 - 0.7)
+    });
+
+    it('monta o contexto com o custo SEM embalagem, para não contar embalagem duas vezes', async () => {
+      // costPrice (efetivo) = 75, productCostPrice = 60, embalagem = 15.
+      // A embalagem já vem dentro de logisticsCost — usar 75 aqui somaria
+      // os 15 duas vezes.
+      catalog.findBySku.mockResolvedValue({
+        ...product,
+        costPrice: 75,
+        productCostPrice: 60,
+        packagingCostPrice: 15,
+      });
+      logistics.getTotalLogisticsCost.mockResolvedValue(15);
+
+      await service.decide('tenant-1', 'SKU-001');
+
+      expect(strategist.calculateOptimalPrice).toHaveBeenCalledWith(
+        expect.objectContaining({ costPrice: 60, logisticsCost: 15, effectiveCostPriceLegacy: 75 }),
+      );
     });
   });
 });

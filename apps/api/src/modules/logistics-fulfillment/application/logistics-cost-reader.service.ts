@@ -37,6 +37,14 @@ export class LogisticsCostReaderService implements LogisticsCostReader {
     return packagingCost + fullWarehouse.logisticsCostPerUnit;
   }
 
+  // Frete estimado do canal — ver comentário do contrato sobre por que não
+  // entra em getTotalLogisticsCost. Number(...) porque Prisma devolve
+  // Decimal e o domínio de preço trabalha com number puro.
+  async getEstimatedFreightCost(tenantId: string, channelCode: string): Promise<number> {
+    const fullWarehouse = await this.warehouses.ensureFullWarehouse(tenantId, channelCode);
+    return Number(fullWarehouse.estimatedFreightCost ?? 0);
+  }
+
   // Hierarquia de resolução de custo de embalagem por SKU (Prioridades 1/3
   // — a 2 não se aplica a um SKU isolado, ver comentário da classe):
   //   1. Kit: se o SKU é um kit (Product.isKit), packagingId aponta para a

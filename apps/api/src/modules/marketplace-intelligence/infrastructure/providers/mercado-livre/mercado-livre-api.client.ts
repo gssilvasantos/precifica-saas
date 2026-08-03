@@ -67,6 +67,35 @@ export interface MlListingPrice {
   currency_id?: string;
 }
 
+// Catálogo / Buy Box — campos usados pelo radar de concorrência
+// (01/08/2026). Só o subconjunto que o radar realmente lê: a resposta real
+// do ML tem dezenas de campos, e declarar todos criaria acoplamento a
+// dados que não usamos.
+export interface MlCatalogItem {
+  item_id: string;
+  seller_id?: number;
+  price?: number;
+  // Vem em algumas respostas; quando ausente, o radar cai para comparar o
+  // item_id com o buy_box_winner do produto.
+  winner?: boolean;
+  shipping?: { free_shipping?: boolean };
+}
+
+export interface MlCatalogProduct {
+  id: string;
+  name?: string;
+  buy_box_winner?: { item_id?: string; seller_id?: number; price?: number } | null;
+}
+
+export interface MlItem {
+  id: string;
+  price?: number;
+  // null quando o anúncio não pertence a nenhum produto de catálogo — nesse
+  // caso não existe Buy Box para disputar, e o radar informa isso em vez de
+  // devolver lista vazia sem explicação.
+  catalog_product_id?: string | null;
+}
+
 // Resposta de POST /oauth/token — mesmo formato para authorization_code e
 // refresh_token (RFC 6749 + extensões do Mercado Livre: user_id/refresh_token
 // sempre presentes quando o app tem o escopo offline_access).
@@ -182,6 +211,46 @@ export class MercadoLivreApiClient {
       throw new Error(`Resposta inesperada de listing_prices para ${categoryId}: ${JSON.stringify(data)}`);
     }
     return data;
+  }
+
+  // --- Catálogo / Buy Box (01/08/2026, radar de concorrência real) ---
+  //
+  // Endpoints PÚBLICOS, sem OAuth — é o que torna o radar de concorrência
+  // implementável hoje, sem depender do fluxo de autorização por vendedor.
+  // Documentação: https://developers.mercadolivre.com.br/pt_br/catalogo-competicao
+  //
+  // `/products/{id}` traz `buy_box_winner` (quem está ganhando a página do
+  // produto); `/products/{id}/items` traz TODAS as ofertas que competem por
+  // aquele produto — é a fonte do preço de concorrente que o
+  // PricingStrategist precisa e que, até agora, só existia se alguém
+  // preenchesse uma planilha à mão.
+
+  async fetchCatalogProduct(productId: string): Promise<MlCatalogProduct> {
+    const response = await this.request(`${BASE_URL}/products/${productId}`);
+    if (!response.ok) {
+      throw new Error(`Mercado Livre products API retornou ${response.status} para ${productId}`);
+    }
+    return (await response.json()) as MlCatalogProduct;
+  }
+
+  async fetchCatalogProductItems(productId: string): Promise<MlCatalogItem[]> {
+    const response = await this.request(`${BASE_URL}/products/${productId}/items`);
+    if (!response.ok) {
+      throw new Error(`Mercado Livre products/items API retornou ${response.status} para ${productId}`);
+    }
+    const data = (await response.json()) as { results?: MlCatalogItem[] };
+    return data.results ?? [];
+  }
+
+  // Usado quando o alvo monitorado é um ANÚNCIO (MLB de item) em vez de um
+  // produto de catálogo: aqui se descobre a qual produto ele pertence para
+  // então listar os concorrentes.
+  async fetchItem(itemId: string): Promise<MlItem> {
+    const response = await this.request(`${BASE_URL}/items/${itemId}`);
+    if (!response.ok) {
+      throw new Error(`Mercado Livre items API retornou ${response.status} para ${itemId}`);
+    }
+    return (await response.json()) as MlItem;
   }
 
   // Troca do `code` de autorização por access_token/refresh_token — passo 2
@@ -418,6 +487,63 @@ export class MercadoLivreApiClient {
     }
 
     return campaigns;
+  }
+
+  // Métricas por ANÚNCIO (01/08/2026) — confirmado na documentação oficial
+  // que a API entrega `cost` no nível do item, não só por campanha:
+  // https://developers.mercadolivre.com.br/pt_br/product-ads-leitura
+  //
+  // Usa o endpoint de busca PAGINADO (`/product_ads/ads/search`) em vez de
+  // consultar `/product_ads/ads/{ITEM_ID}` um a um: com dezenas de anúncios
+  // ativos, item a item seriam dezenas de round-trips por sync. Mesma
+  // estratégia de paginação de fetchAdsCampaigns acima.
+  //
+  // `aggregation_type=daily` para o snapshot casar com a granularidade de
+  // AdsItemMetricSnapshot.periodDate — o DRE precisa somar por janela
+  // arbitrária, e só o diário permite isso sem reconsultar a API.
+  //
+  // Mesma honestidade do resto deste arquivo: o path segue a convenção que
+  // já funciona para campanhas neste projeto (`/marketplace/advertising/...`);
+  // a documentação pública mostra variações com e sem o prefixo
+  // `/marketplace`. Se a primeira chamada real retornar 404, é aqui que se
+  // ajusta — o normalizador do provider rejeita resposta fora do formato
+  // esperado em vez de gravar lixo.
+  async fetchAdsItemMetrics(
+    advertiserId: string,
+    accessToken: string,
+    dateFrom: Date,
+    dateTo: Date,
+  ): Promise<unknown[]> {
+    const from = dateFrom.toISOString().slice(0, 10);
+    const to = dateTo.toISOString().slice(0, 10);
+    const metrics = 'cost,units_quantity,clicks,prints';
+
+    const ads: unknown[] = [];
+    let offset = 0;
+    const limit = 50;
+
+    while (true) {
+      const url =
+        `${BASE_URL}/marketplace/advertising/${SITE_ID}/advertisers/${advertiserId}/product_ads/ads/search` +
+        `?offset=${offset}&limit=${limit}&date_from=${from}&date_to=${to}` +
+        `&metrics=${metrics}&aggregation_type=daily`;
+      const response = await this.request(url, {
+        headers: { Authorization: `Bearer ${accessToken}`, 'Api-Version': '2' },
+      });
+      if (!response.ok) {
+        throw new Error(`Mercado Livre /product_ads/ads/search retornou HTTP ${response.status} (offset ${offset})`);
+      }
+      const data = (await response.json()) as { results?: unknown[]; paging?: { total?: number } };
+      const batch = Array.isArray(data.results) ? data.results : [];
+      if (batch.length === 0) break;
+
+      ads.push(...batch);
+      offset += batch.length;
+      const total = data.paging?.total ?? ads.length;
+      if (offset >= total) break;
+    }
+
+    return ads;
   }
 
   // Métricas por campanha, agregadas por dia — a API do Mercado Livre limita

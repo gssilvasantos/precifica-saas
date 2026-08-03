@@ -15,6 +15,7 @@ function buildWarehouse(overrides: Partial<Warehouse> = {}): Warehouse {
     isActive: true,
     leadTimeDays: 15,
     logisticsCostPerUnit: 0,
+  estimatedFreightCost: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -51,6 +52,7 @@ describe('ReplenishmentAdvisorService', () => {
       upsert: jest.fn(),
       updateLeadTimeDays: jest.fn(),
       updateLogisticsCostPerUnit: jest.fn(),
+    updateEstimatedFreightCost: jest.fn(),
     };
     const ledger: jest.Mocked<StockLedgerRepository> = {
       getBalance: jest.fn(),

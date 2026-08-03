@@ -82,6 +82,7 @@ describe('ProductionOrderService', () => {
       upsert: jest.fn(),
       updateLeadTimeDays: jest.fn(),
       updateLogisticsCostPerUnit: jest.fn(),
+    updateEstimatedFreightCost: jest.fn(),
     };
     const stockWriter: jest.Mocked<ProductionStockWriter> = {
       produceOutput: jest.fn().mockResolvedValue({ auditEventId: 'audit-1' }),

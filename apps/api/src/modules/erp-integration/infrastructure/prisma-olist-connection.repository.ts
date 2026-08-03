@@ -46,6 +46,18 @@ export class PrismaOlistConnectionRepository implements OlistConnectionRepositor
     });
   }
 
+  // Terceiro estado (02/08/2026): o sync rodou e importou, mas parte do
+  // catálogo ficou de fora. Nem SUCCESS (esconderia o que falhou) nem
+  // FAILED (esconderia o que funcionou, e faria o usuário achar que nada
+  // entrou). `lastSyncedAt` é atualizado porque a sincronização de fato
+  // aconteceu.
+  async markSyncedWithWarning(tenantId: string, syncedAt: Date, warning: string): Promise<void> {
+    await this.prisma.olistConnection.update({
+      where: { tenantId },
+      data: { lastSyncedAt: syncedAt, lastSyncStatus: 'PARTIAL', lastSyncError: warning },
+    });
+  }
+
   async markSyncFailed(tenantId: string, error: string): Promise<void> {
     await this.prisma.olistConnection.update({
       where: { tenantId },

@@ -162,7 +162,7 @@ datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
-  schemas   = ["identity", "catalog", "logistics_intelligence", "marketplace_intelligence", "integration_ops", "erp_integration", "channel_integration", "competition_intelligence", "financial_intelligence", "orders", "logistics_fulfillment", "promotion_intelligence", "marketplace_ads", "tagging", "procurement", "fiscal", "marketplace_publishing", "freight_shipping", "production", "sellers"]
+  schemas   = ["identity", "catalog", "logistics_intelligence", "marketplace_intelligence", "integration_ops", "erp_integration", "channel_integration", "competition_intelligence", "financial_intelligence", "orders", "logistics_fulfillment", "promotion_intelligence", "marketplace_ads", "tagging", "procurement", "fiscal", "marketplace_publishing", "freight_shipping", "production", "sellers", "tax_intelligence"]
 }
 
 enum UserRole {
@@ -873,6 +873,45 @@ enum RuleStatus {
 // Tabela única e versionada para qualquer tipo de regra de marketplace — a
 // mecânica de versionamento/status/auditoria é idêntica independente do
 // conteúdo; só o payload muda (seção 2.2 do documento de arquitetura do módulo).
+// O que ESTE vendedor contratou/é neste canal — distinto da MarketplaceRule,
+// que descreve como o CANAL cobra de todo mundo. A separação importa: a
+// tabela de comissão da Amazon é a mesma para todos, mas quem assina o
+// Plano de vendas profissional não paga a tarifa por item; a política de
+// frete do Mercado Livre é uma só, mas o desconto varia por reputação.
+//
+// Sem isso, a única saída seria criar uma MarketplaceRule por tenant só
+// para refletir uma configuração de conta — poluindo o versionamento de
+// regras (que existe para rastrear mudanças do CANAL) com dado de cadastro.
+//
+// Ver docs/marketplace-fee-model-architecture.md, §2.0, itens 3 e 4.
+model ChannelSellerProfile {
+  id       String @id @default(uuid())
+  tenantId String
+  // "AMAZON" | "MERCADO_LIVRE" | "SHOPEE" — string, não enum, mesmo
+  // racional de Marketplace.code: canal novo é dado, nunca migration.
+  channelCode String
+
+  // Amazon — "Plano de vendas profissional" (R$19/mês). Quando ativo, a
+  // tarifa por item do plano Individual (R$2) deixa de ser cobrada; quando
+  // inativo, ela entra no cálculo de preço. O R$19/mês NÃO entra aqui: é
+  // despesa fixa mensal, não custo por venda.
+  professionalPlanActive Boolean @default(false)
+
+  // Mercado Livre — desconto no frete por reputação do vendedor, fração
+  // (0 a 1). Chega a 0.7 (70%) para reputação verde-escuro. Default 0:
+  // enquanto ninguém informar, o motor assume que o vendedor paga o frete
+  // cheio — o lado conservador, nunca o otimista.
+  freightDiscountPct Float @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, channelCode])
+  @@index([tenantId])
+  @@map("channel_seller_profiles")
+  @@schema("marketplace_intelligence")
+}
+
 model MarketplaceRule {
   id            String      @id @default(uuid())
   marketplaceId String
@@ -1777,6 +1816,20 @@ model Warehouse {
   // (nunca assume um valor arbitrário). Editável via PATCH
   // /logistics-fulfillment/warehouses/:id/logistics-cost.
   logisticsCostPerUnit Decimal @default(0) @db.Decimal(12, 2)
+  // Frete médio estimado por unidade neste canal (01/08/2026, política de
+  // frete — ver docs/marketplace-fee-model-architecture.md, §2.0).
+  //
+  // POR QUE É CONFIGURADO E NÃO IMPORTADO: o frete de uma venda FUTURA
+  // depende do endereço do comprador, que por definição ainda não existe
+  // quando se está calculando um preço. Não há o que importar. Cai na
+  // mesma categoria do custo unitário de embalagem — um valor que o
+  // lojista conhece da própria operação. Toda taxa que o marketplace
+  // DIVULGA continua sendo importada, nunca digitada.
+  //
+  // Default 0 pelo mesmo motivo de logisticsCostPerUnit: enquanto ninguém
+  // preencher, o motor de preço simplesmente não soma frete nenhum, nunca
+  // assume um valor arbitrário.
+  estimatedFreightCost Decimal @default(0) @db.Decimal(12, 2)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -2443,6 +2496,47 @@ model AdsCampaign {
 // propósito (mesmo padrão de MarketplaceChangeEvent/ErpSyncChangeEvent):
 // toda tabela de negócio é filtrada por tenant direto, nunca via join
 // implícito.
+// Métrica de Ads por ANÚNCIO (01/08/2026) — irmã de AdsMetricSnapshot, que
+// agrega por campanha. Existe porque a API do Mercado Livre entrega custo no
+// nível do item:
+//   GET /advertising/{SITE}/product_ads/ads/{ITEM_ID}?metrics=cost,units_quantity
+//
+// Isso muda a natureza do dado no DRE: com gasto por campanha, atribuir
+// publicidade a um pedido seria chute. Com gasto por ANÚNCIO, o custo chega
+// até o SKU como dado REAL importado do canal — o rateio que sobra
+// (distribuir o gasto do SKU entre os pedidos daquele SKU no período) é uma
+// divisão explícita e defensável, não uma invenção.
+//
+// Tabela separada em vez de coluna nova em AdsMetricSnapshot: a chave é
+// outra (anúncio, não campanha), um anúncio pode aparecer em mais de uma
+// campanha, e nem todo canal expõe métrica por item — forçar as duas no
+// mesmo model criaria linhas com metade dos campos nulos.
+model AdsItemMetricSnapshot {
+  id          String   @id @default(uuid())
+  tenantId    String
+  channelCode String
+  // Id do anúncio no canal (ex.: MLB3456789012). É por ele que se chega ao
+  // SKU, via channel_integration.ChannelListing.externalId.
+  externalItemId String
+  periodDate  DateTime @db.Date
+  spend       Decimal  @db.Decimal(12, 2)
+  // Unidades que o canal ATRIBUIU à publicidade no período
+  // (units_quantity da API do ML). Não é o total vendido do SKU — é quanto
+  // o próprio marketplace credita ao anúncio patrocinado.
+  attributedUnits Int @default(0)
+  clicks      Int      @default(0)
+  prints      Int      @default(0)
+  // Mesmo racional de AdsCampaign.isDemo — dado fictício do Modo
+  // Demonstração nunca se mistura com o real.
+  isDemo   Boolean  @default(false)
+  syncedAt DateTime @default(now())
+
+  @@unique([tenantId, channelCode, externalItemId, periodDate])
+  @@index([tenantId, periodDate])
+  @@map("ads_item_metric_snapshots")
+  @@schema("marketplace_ads")
+}
+
 model AdsMetricSnapshot {
   id          String      @id @default(uuid())
   campaignId  String
@@ -3189,4 +3283,184 @@ model Vendedor {
   @@index([tenantId, isActive])
   @@map("vendedores")
   @@schema("sellers")
+}
+
+// ============================================================================
+// TAX INTELLIGENCE (02/08/2026) — ver docs/tributacao-br-regimes-e-reforma.md
+//
+// Bounded context PRÓPRIO, distinto de `fiscal` (que emite NF-e via Focus NFe)
+// e de `catalog`: aqui se RESOLVE a alíquota que entra no piso de preço e nas
+// deduções do DRE. Consumidores falam só com TAX_RATE_RESOLVER
+// (shared/contracts/tax-rate-resolver.port.ts), nunca com estas tabelas.
+//
+// SUBSTITUI dois modelos anteriores, que ficam para migração posterior:
+//   - CatalogSettings.taxRatePct  — UM Float por tenant, digitado à mão
+//   - catalog.TaxProfile.estimatedRatePct — "simplificação consciente" do PRD,
+//     que o próprio comentário admite não calcular ST por estado nem faixa
+//     progressiva do Simples
+// Nenhum dos dois representa corretamente qualquer um dos quatro regimes
+// brasileiros. A alíquota do Simples é CALCULADA sobre o faturamento dos 12
+// meses anteriores (art. 18, §1º-A da LC 123/2006), muda todo mês e ainda
+// varia por produto.
+//
+// O TEMA DESTE SCHEMA É VIGÊNCIA. Três coisas que pareciam booleano são
+// versionadas no tempo, e sempre pela mesma razão: mês fechado não pode mudar
+// de valor retroativamente.
+//   - regime do tenant  -> o mesmo CNPJ foi MEI em 2025 e Simples em 2026
+//   - ST do produto     -> SP tirou perfumaria e higiene pessoal da ST em
+//                          01/04/2026 (Portaria SRE 94/2025)
+//   - adesão a IBS/CBS  -> escolha POR SEMESTRE a partir de 2027 (LC 214/2025)
+// ============================================================================
+
+enum TaxRegimeKind {
+  MEI_SIMEI // imposto é VALOR FIXO mensal, não percentual — alíquota 0 no piso
+  SIMPLES_NACIONAL
+  LUCRO_PRESUMIDO
+  LUCRO_REAL
+
+  @@schema("tax_intelligence")
+}
+
+enum SimplesAnexoKind {
+  I // comércio (revenda) — única tabela conferida em fonte oficial até agora
+  II // indústria
+  III
+  IV
+  V
+
+  @@schema("tax_intelligence")
+}
+
+// Regime do tenant, VERSIONADO. Não é `@id tenantId`: a empresa troca de
+// regime na virada do ano, e o DRE de um mês fechado precisa continuar sendo
+// calculado com o regime que valia nele.
+model TenantTaxProfile {
+  id       String @id @default(uuid())
+  tenantId String
+
+  // UF do estabelecimento — define sublimite, alíquota interna de ICMS e qual
+  // calendário de exclusão da ST se aplica. Sem isto o sistema só atende
+  // vendedor de um estado.
+  uf     String
+  regime TaxRegimeKind
+  anexo  SimplesAnexoKind? // só faz sentido no Simples
+
+  vigenciaInicio DateTime
+  vigenciaFim    DateTime? // null = vigente
+
+  // DAS fixo do MEI (5% do salário-mínimo + R$1 ICMS / R$5 ISS). Percentual
+  // NENHUM está certo para MEI: o imposto não varia com o faturamento até o
+  // teto. Entra no DRE como despesa fixa e como 0 no piso de preço.
+  meiValorFixoMensal Decimal? @db.Decimal(10, 2)
+
+  // --- Regime normal (Lucro Presumido e Lucro Real) ---
+  //
+  // Alíquota interna de ICMS da UF, aplicável ao que este tenant vende.
+  // Obrigatória nos dois regimes normais: sem ela o piso ignoraria o maior
+  // tributo da operação. No Simples não se usa (o ICMS já está na partilha).
+  icmsAliquotaPct Decimal? @db.Decimal(5, 2)
+
+  // Percentuais de PRESUNÇÃO do Lucro Presumido (Lei nº 9.249/1995). No
+  // comércio são 8% para IRPJ e 12% para CSLL; em serviços chegam a 32%.
+  // Ficam configuráveis em vez de constantes porque variam por atividade — e
+  // um número errado aqui vira preço errado, não um detalhe contábil.
+  presuncaoIrpjPct Decimal? @db.Decimal(5, 2)
+  presuncaoCsllPct Decimal? @db.Decimal(5, 2)
+
+  // AUTO = recalcular alíquota e pisos sozinho quando o RBT12 muda de faixa.
+  // Nunca governa mudança de PREÇO de anúncio — isso é decisão de negócio e
+  // passa pelo Safety Lock que já existe. Ver §5.4 do doc.
+  automationMode TaxAutomationMode @default(AUTO)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, vigenciaInicio])
+  @@map("tenant_tax_profiles")
+  @@schema("tax_intelligence")
+}
+
+enum TaxAutomationMode {
+  AUTO
+  MANUAL
+
+  @@schema("tax_intelligence")
+}
+
+// Perfil fiscal do PRODUTO, por UF e por data.
+//
+// Por que não é um booleano no Product: a substituição tributária é regime
+// ESTADUAL e muda por portaria. O mesmo SKU de cosmético estava em ST em
+// São Paulo até 31/03/2026 e deixou de estar em 01/04/2026. Um flag sem
+// vigência calcularia errado a partir da virada E corromperia retroativamente
+// o DRE de meses já fechados.
+//
+// `monofasico` é FEDERAL (Lei 10.147/2000 para perfumaria e higiene pessoal,
+// entre outras) e não varia por UF — mas mora aqui porque a resolução é sempre
+// por NCM e por data, igual à ST. Atenção: as duas listas NÃO coincidem (papel
+// higiênico e fraldas estavam em ST e não são monofásicos).
+model ProductTaxProfile {
+  id        String @id @default(uuid())
+  tenantId  String
+  productId String
+
+  uf String
+
+  vigenciaInicio DateTime
+  vigenciaFim    DateTime? // null = vigente
+
+  icmsSt     Boolean @default(false)
+  monofasico Boolean @default(false)
+
+  // Redundante com Product.ncm de propósito: o NCM do produto pode ser
+  // corrigido no cadastro depois, e a classificação fiscal de um período já
+  // apurado não pode mudar junto. Snapshot, mesma disciplina de
+  // OrderItem.costPrice.
+  ncm String?
+
+  // De onde veio a classificação — 'PORTARIA_SRE_94_2025', 'LEI_10147_2000',
+  // 'MANUAL', 'ERP_OLIST'. Quando a alíquota de um SKU mudar, a resposta a
+  // "por quê?" precisa ser a norma, não "alguém marcou um checkbox".
+  fonte String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, productId, uf, vigenciaInicio])
+  @@map("product_tax_profiles")
+  @@schema("tax_intelligence")
+}
+
+// Receita bruta mensal ANTERIOR ao que o Kyneti conhece, informada pelo
+// usuário/contador. Necessária para completar o RBT12 dos 12 meses anteriores
+// quando o histórico interno é mais curto que isso.
+//
+// O caso que motivou: empresa que migrou de MEI para Simples Nacional. A
+// receita do período MEI CONTA no RBT12 (o SIMEI é forma de recolhimento
+// DENTRO do Simples), e é exatamente o que o quadro de "receitas brutas
+// anteriores" do PGDAS-D pede na primeira apuração pós-desenquadramento.
+//
+// Sem estes registros o resolver BLOQUEIA em vez de somar histórico parcial —
+// somar o que se tem e chamar de RBT12 produz alíquota menor que a devida, e
+// imposto subestimado superestima margem.
+model TenantPriorRevenue {
+  id       String @id @default(uuid())
+  tenantId String
+
+  competencia DateTime // primeiro dia do mês de competência
+  // Separadas porque o RBT12 do Simples distingue as duas (e a exportação tem
+  // regra de redução própria, art. 18 §14 da LC 123/2006).
+  receitaMercadoInterno Decimal @db.Decimal(14, 2)
+  receitaMercadoExterno Decimal @db.Decimal(14, 2) @default(0)
+
+  // 'MANUAL' quando digitado, 'PGDAS_D' quando conferido contra o extrato,
+  // 'DASN_SIMEI' quando veio do período MEI.
+  fonte String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, competencia])
+  @@map("tenant_prior_revenues")
+  @@schema("tax_intelligence")
 }

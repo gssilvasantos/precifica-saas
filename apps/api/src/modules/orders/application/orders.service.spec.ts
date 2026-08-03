@@ -74,6 +74,8 @@ describe('OrdersService', () => {
       assignVendedorToItem: jest.fn(),
       findCommissionLines: jest.fn().mockResolvedValue([]),
       markCommissionsPaid: jest.fn().mockResolvedValue(0),
+      sumRevenueByMonth: jest.fn().mockResolvedValue([]),
+      findFirstOrderDate: jest.fn().mockResolvedValue(null),
     };
     const catalog: jest.Mocked<ProductCatalogReader> = {
       findBySku: jest.fn(),

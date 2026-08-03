@@ -33,6 +33,19 @@ import { RateLimiterConfig } from './rate-limiter';
 export const MARKETPLACE_RATE_LIMITS: Record<string, RateLimiterConfig> = {
   NUVEMSHOP: { requestsPerInterval: 2, intervalMs: 1000 },
   SHOPEE: { requestsPerInterval: 1, intervalMs: 1000 },
+  // OLIST/Tiny (02/08/2026) — adicionado depois de um incidente real,
+  // REPETIÇÃO EXATA do caso do Mercado Livre descrito acima: o
+  // OlistApiClient nunca usou este módulo, apesar dele já existir. Fazia
+  // `sleep(300)` fixo entre chamadas — 200 req/min — enquanto o plano base
+  // do Tiny libera 60 req/min. Resultado em produção, com um catálogo de
+  // 340 SKUs: "API Bloqueada - Excedido o número de acessos a API" e ZERO
+  // produto importado (sem retry, o erro derrubava o sync inteiro).
+  //
+  // 1 req/s = 60 req/min, o teto do plano base. Contas em plano superior
+  // (até 240 req/min) importam mais devagar do que poderiam — trade-off
+  // deliberado: um sync lento é um inconveniente, uma conta bloqueada é uma
+  // integração fora do ar.
+  OLIST: { requestsPerInterval: 1, intervalMs: 1000 },
 };
 
 // Fail-safe para qualquer canal sem entrada explícita acima — conservador

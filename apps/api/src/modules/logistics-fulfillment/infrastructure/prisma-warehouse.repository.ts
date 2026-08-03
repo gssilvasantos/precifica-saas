@@ -63,6 +63,19 @@ export class PrismaWarehouseRepository implements WarehouseRepository {
     return this.toDomain(record);
   }
 
+  // Política de frete (01/08/2026) — mesmo racional isolado dos dois acima.
+  async updateEstimatedFreightCost(
+    tenantId: string,
+    warehouseId: string,
+    estimatedFreightCost: number,
+  ): Promise<Warehouse> {
+    const record = await this.prisma.warehouse.update({
+      where: { id: warehouseId },
+      data: { estimatedFreightCost },
+    });
+    return this.toDomain(record);
+  }
+
   private toDomain(record: {
     id: string;
     tenantId: string;
@@ -72,6 +85,7 @@ export class PrismaWarehouseRepository implements WarehouseRepository {
     isActive: boolean;
     leadTimeDays: number;
     logisticsCostPerUnit: { toString(): string };
+    estimatedFreightCost: { toString(): string };
     createdAt: Date;
     updatedAt: Date;
   }): Warehouse {
@@ -84,6 +98,7 @@ export class PrismaWarehouseRepository implements WarehouseRepository {
       isActive: record.isActive,
       leadTimeDays: record.leadTimeDays,
       logisticsCostPerUnit: Number(record.logisticsCostPerUnit),
+      estimatedFreightCost: Number(record.estimatedFreightCost),
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };

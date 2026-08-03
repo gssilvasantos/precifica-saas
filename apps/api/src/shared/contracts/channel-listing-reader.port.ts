@@ -10,6 +10,20 @@ export interface ChannelListingSummary {
 
 export interface ChannelListingReader {
   findBySku(tenantId: string, channelCode: string, skuCode: string): Promise<ChannelListingSummary | null>;
+
+  // Direção INVERSA (01/08/2026): dado o id do anúncio no canal, qual SKU
+  // ele representa. Necessária para o custo de Ads por item chegar ao
+  // produto — a API do Mercado Livre entrega gasto por anúncio (MLBxxxx),
+  // e é este vínculo que traduz isso para SKU.
+  //
+  // Recebe uma LISTA porque o consumidor (DRE de um período) resolve
+  // dezenas de anúncios de uma vez; um a um seriam N queries para montar um
+  // relatório. Anúncios sem vínculo simplesmente não aparecem no resultado.
+  findSkusByExternalIds(
+    tenantId: string,
+    channelCode: string,
+    externalIds: string[],
+  ): Promise<{ externalId: string; skuCode: string }[]>;
 }
 
 // Irmã de ChannelListingReader, mas de ESCRITA (Fase 4, benchmark Tiny ERP —

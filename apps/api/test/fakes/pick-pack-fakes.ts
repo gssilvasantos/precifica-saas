@@ -317,6 +317,7 @@ export class FakeWarehouseRepository implements WarehouseRepository {
       isActive: true,
       leadTimeDays: 15,
       logisticsCostPerUnit: 0,
+      estimatedFreightCost: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -334,6 +335,13 @@ export class FakeWarehouseRepository implements WarehouseRepository {
   async updateLogisticsCostPerUnit(tenantId: string, warehouseId: string, logisticsCostPerUnit: number): Promise<Warehouse> {
     const warehouse = this.requireOwned(tenantId, warehouseId);
     warehouse.logisticsCostPerUnit = logisticsCostPerUnit;
+    warehouse.updatedAt = new Date();
+    return warehouse;
+  }
+
+  async updateEstimatedFreightCost(tenantId: string, warehouseId: string, estimatedFreightCost: number): Promise<Warehouse> {
+    const warehouse = this.requireOwned(tenantId, warehouseId);
+    warehouse.estimatedFreightCost = estimatedFreightCost;
     warehouse.updatedAt = new Date();
     return warehouse;
   }

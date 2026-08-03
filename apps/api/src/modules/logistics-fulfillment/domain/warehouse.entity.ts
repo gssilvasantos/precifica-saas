@@ -25,6 +25,12 @@ export interface Warehouse {
   // docs/promotion-intelligence-architecture.md. Editável via PATCH
   // /logistics-fulfillment/warehouses/:id/logistics-cost.
   logisticsCostPerUnit: number;
+  // Frete médio estimado por unidade neste canal (01/08/2026, política de
+  // frete). Separado de logisticsCostPerUnit porque só vira custo do
+  // vendedor quando a política do canal transfere o frete a ele — no
+  // Mercado Livre, a partir de R$79. Ver
+  // docs/marketplace-fee-model-architecture.md, §2.0.
+  estimatedFreightCost: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -55,5 +61,11 @@ export function isValidLeadTimeDays(days: number): boolean {
 // operacional real varia muito entre operações (armazenagem de itens
 // grandes pode ser bem mais caro que um envelope pequeno).
 export function isValidLogisticsCostPerUnit(cost: number): boolean {
+  return Number.isFinite(cost) && cost >= 0;
+}
+
+// Mesma régua do custo operacional, pelo mesmo motivo: sem teto arbitrário,
+// porque o frete real varia demais entre um envelope e um item volumoso.
+export function isValidEstimatedFreightCost(cost: number): boolean {
   return Number.isFinite(cost) && cost >= 0;
 }

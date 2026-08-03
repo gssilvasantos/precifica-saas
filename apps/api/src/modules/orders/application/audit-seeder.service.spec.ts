@@ -22,6 +22,8 @@ describe('AuditSeederService', () => {
       assignVendedorToItem: jest.fn(),
       findCommissionLines: jest.fn().mockResolvedValue([]),
       markCommissionsPaid: jest.fn().mockResolvedValue(0),
+      sumRevenueByMonth: jest.fn().mockResolvedValue([]),
+      findFirstOrderDate: jest.fn().mockResolvedValue(null),
     };
     const service = new AuditSeederService(orderRepository);
     return { service, orderRepository };

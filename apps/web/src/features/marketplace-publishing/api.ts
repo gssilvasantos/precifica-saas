@@ -88,6 +88,35 @@ export async function removeProductCategory(id: string): Promise<void> {
   await apiClient.delete(`/product-categories/${id}`);
 }
 
+// Importação da árvore de categorias do ERP — conveniência de MIGRAÇÃO.
+//
+// A categoria do Kyneti é organizada pelo usuário e não precisa espelhar a do
+// ERP; por isso isto NÃO faz parte do sync, e sim de uma ação explícita, com
+// prévia antes de escrever. Ver ErpCategoryImportService no backend.
+export interface ErpCategoryImportPreview {
+  categoriasACriar: { caminho: string[]; name: string; caminhoDoPai: string[] }[];
+  vinculos: { productId: string; skuCode: string; caminho: string[] }[];
+  produtosSemCategoriaNoErp: number;
+  produtosJaClassificados: number;
+}
+
+export interface ErpCategoryImportResult {
+  categoriasCriadas: number;
+  produtosVinculados: number;
+  produtosSemCategoriaNoErp: number;
+  produtosJaClassificados: number;
+}
+
+export async function previewErpCategoryImport(): Promise<ErpCategoryImportPreview> {
+  const { data } = await apiClient.get<ErpCategoryImportPreview>('/product-categories/erp-import/preview');
+  return data;
+}
+
+export async function applyErpCategoryImport(): Promise<ErpCategoryImportResult> {
+  const { data } = await apiClient.post<ErpCategoryImportResult>('/product-categories/erp-import');
+  return data;
+}
+
 export async function fetchCategoryAttributes(categoryId: string): Promise<CategoryAttribute[]> {
   const { data } = await apiClient.get<CategoryAttribute[]>(`/product-categories/${categoryId}/attributes`);
   return data;

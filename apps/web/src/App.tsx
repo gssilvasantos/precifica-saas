@@ -4,6 +4,7 @@ import SignupPage from './routes/SignupPage';
 import ProtectedRoute from './routes/ProtectedRoute';
 import AppLayout from './routes/AppLayout';
 import DashboardPage from './routes/DashboardPage';
+import SystemMapPage from './routes/SystemMapPage';
 import OrdersPage from './routes/OrdersPage';
 import CatalogPage from './routes/CatalogPage';
 import ProductPricingPage from './routes/ProductPricingPage';
@@ -45,6 +46,10 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<DashboardPage />} />
+            {/* Mapa do próprio produto — inclui o que existe no servidor e
+                ainda não tem tela. Sem `module`: é sobre o sistema, não sobre
+                uma capacidade que se possa desabilitar por plano. */}
+            <Route path="/sistema" element={<SystemMapPage />} />
             <Route path="/pedidos" element={<OrdersPage />} />
             <Route path="/ads" element={<AdsPage />} />
             <Route path="/catalogo" element={<CatalogPage />} />

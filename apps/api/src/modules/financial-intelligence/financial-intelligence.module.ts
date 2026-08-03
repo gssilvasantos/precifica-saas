@@ -21,6 +21,7 @@ import { ACCOUNTS_PAYABLE_REPOSITORY } from './application/ports/accounts-payabl
 import { ACCOUNTS_PAYABLE_WRITER } from '../../shared/contracts/accounts-payable-writer.port';
 import { OrdersModule } from '../orders/orders.module';
 import { CatalogModule } from '../catalog/catalog.module';
+import { MarketplaceAdsModule } from '../marketplace-ads/marketplace-ads.module';
 
 // Bounded context próprio (DRE + Contas a Receber) — ver
 // docs/financial-intelligence-architecture.md. A reconciliação lê só as
@@ -46,7 +47,10 @@ import { CatalogModule } from '../catalog/catalog.module';
 // supplierId informado pertence ao tenant antes de gravar, mesmo racional de
 // FinancialOrchestrator consumindo ORDER_FINANCIALS_READER do OrdersModule.
 @Module({
-  imports: [OrdersModule, CatalogModule],
+  // MarketplaceAdsModule entrou em 01/08/2026 só para consumir
+  // ADS_SPEND_READER (linha de publicidade do DRE). Sem ciclo: o módulo de
+  // Ads não importa este de volta.
+  imports: [OrdersModule, CatalogModule, MarketplaceAdsModule],
   controllers: [
     FixedExpensesController,
     ReceivablesController,

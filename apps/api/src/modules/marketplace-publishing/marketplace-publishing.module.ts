@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ChannelCategoryMappingService } from './application/channel-category-mapping.service';
+import { ChannelCategoryResolverService } from './application/channel-category-resolver.service';
 import { ListingPublicationService } from './application/listing-publication.service';
+import { CHANNEL_CATEGORY_RESOLVER } from '../../shared/contracts/tokens';
 import { ListingProviderRegistry, LISTING_CAPABLE_PROVIDERS } from './application/listing-provider-registry.service';
 import { CHANNEL_CATEGORY_MAPPING_REPOSITORY } from './application/ports/channel-category-mapping-repository.port';
 import { LISTING_PUBLICATION_REPOSITORY } from './application/ports/listing-publication-repository.port';
@@ -40,6 +42,12 @@ import { ShopeeListingProvider } from '../marketplace-intelligence/infrastructur
       useFactory: (ml: MercadoLivreListingProvider, shopee: ShopeeListingProvider) => [ml, shopee],
       inject: [MercadoLivreListingProvider, ShopeeListingProvider],
     },
+    // Porta consumida pelo Pricing Intelligence para resolver a comissão
+    // correta por categoria do canal (01/08/2026) — ver
+    // shared/contracts/channel-category-resolver.port.ts.
+    { provide: CHANNEL_CATEGORY_RESOLVER, useClass: ChannelCategoryResolverService },
+    ChannelCategoryResolverService,
   ],
+  exports: [CHANNEL_CATEGORY_RESOLVER],
 })
 export class MarketplacePublishingModule {}

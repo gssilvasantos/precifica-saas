@@ -31,6 +31,11 @@ export interface Warehouse {
   channelCode: string | null;
   isActive: boolean;
   leadTimeDays: number;
+  logisticsCostPerUnit: number;
+  // Frete médio estimado por unidade neste canal — só vira custo do
+  // vendedor quando a política do canal transfere o frete a ele (no
+  // Mercado Livre, acima de R$79).
+  estimatedFreightCost: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -53,5 +58,18 @@ export async function updateWarehouseLeadTime(warehouseId: string, leadTimeDays:
   const { data } = await apiClient.patch<Warehouse>(`/logistics-fulfillment/warehouses/${warehouseId}/lead-time`, {
     leadTimeDays,
   });
+  return data;
+}
+
+// Frete médio estimado por canal (01/08/2026) — entra no piso de preço
+// quando a política do canal transfere o frete ao vendedor.
+export async function updateWarehouseEstimatedFreight(
+  warehouseId: string,
+  estimatedFreightCost: number,
+): Promise<Warehouse> {
+  const { data } = await apiClient.patch<Warehouse>(
+    `/logistics-fulfillment/warehouses/${warehouseId}/estimated-freight`,
+    { estimatedFreightCost },
+  );
   return data;
 }

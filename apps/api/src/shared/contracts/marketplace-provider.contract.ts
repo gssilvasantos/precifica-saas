@@ -21,6 +21,11 @@ export enum ProviderCapability {
   // Capacidade separada de ADS (Interface Segregation): um provider pode ler
   // campanhas sem necessariamente saber executar uma ação sobre elas.
   ADS_ACTIONS = 'ADS_ACTIONS',
+  // Métricas de Ads por ANÚNCIO (01/08/2026) — capacidade separada de ADS
+  // (Interface Segregation) porque nem todo canal expõe custo no nível do
+  // item. O Mercado Livre expõe; é o que permite o custo de publicidade
+  // chegar ao SKU como dado real em vez de rateio do canal inteiro.
+  ADS_ITEM_METRICS = 'ADS_ITEM_METRICS',
   // Publicar anúncio novo em marketplace (Fase 4, benchmark Tiny ERP — ver
   // ListingCreateCapableProvider/CategoryDiscoveryCapableProvider abaixo).
   // Duas capacidades separadas (Interface Segregation, mesmo racional de
@@ -255,6 +260,28 @@ export interface RawAdsMetricCandidate {
   revenueAds: number; // vendas atribuídas ao anúncio pelo próprio marketplace
   clicks: number;
   impressions: number;
+}
+
+// Métrica de Ads por ANÚNCIO (01/08/2026). Irmã de RawAdsMetricCandidate,
+// que é por campanha — a diferença de chave é justamente o que permite o
+// custo chegar ao SKU (via ChannelListing.externalId).
+export interface RawAdsItemMetricCandidate {
+  externalItemId: string; // id do anúncio no canal (ex.: MLB3456789012)
+  periodDate: Date;
+  spend: number;
+  // Unidades que o próprio marketplace atribuiu à publicidade. Não é o
+  // total vendido do item — é o que o canal credita ao anúncio.
+  attributedUnits: number;
+  clicks: number;
+  impressions: number;
+}
+
+export interface AdsItemMetricsCapableProvider extends MarketplaceProvider {
+  fetchAdsItemMetrics(ctx: FetchContext, dateFrom: Date, dateTo: Date): Promise<RawAdsItemMetricCandidate[]>;
+}
+
+export function isAdsItemMetricsCapable(p: MarketplaceProvider): p is AdsItemMetricsCapableProvider {
+  return p.capabilities.includes(ProviderCapability.ADS_ITEM_METRICS);
 }
 
 export interface AdsCapableProvider extends MarketplaceProvider {

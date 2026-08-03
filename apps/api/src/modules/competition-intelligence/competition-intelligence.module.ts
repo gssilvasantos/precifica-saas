@@ -9,6 +9,8 @@ import { PrismaMonitoredListingRepository } from './infrastructure/prisma-monito
 import { PrismaCompetitorOfferSnapshotRepository } from './infrastructure/prisma-competitor-offer-snapshot.repository';
 import { PrismaCompetitiveOpportunityRepository } from './infrastructure/prisma-competitive-opportunity.repository';
 import { ManualSheetRadar } from './infrastructure/radars/manual-sheet-radar';
+import { MercadoLivreCatalogRadar } from './infrastructure/radars/mercado-livre-catalog-radar';
+import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marketplace-intelligence.module';
 import { CompetitionMonitorSchedulerJob } from './infrastructure/scheduler/competition-monitor-scheduler.job';
 
 import { CompetitiveOpportunitiesController } from './interface/controllers/competitive-opportunities.controller';
@@ -27,6 +29,9 @@ import { ErpIntegrationModule } from '../erp-integration/erp-integration.module'
     // vinculado ao MonitoredCompetitorListing) — nunca a tabela ChannelListing
     // direto. erp-integration não importa este módulo de volta: sem ciclo.
     ErpIntegrationModule,
+    // Só para consumir MercadoLivreApiClient (radar de catálogo, 01/08/2026)
+    // — marketplace-intelligence não importa este módulo de volta: sem ciclo.
+    MarketplaceIntelligenceModule,
   ],
   controllers: [CompetitiveOpportunitiesController],
   providers: [
@@ -38,14 +43,20 @@ import { ErpIntegrationModule } from '../erp-integration/erp-integration.module'
     CompetitionMonitorSchedulerJob,
 
     ManualSheetRadar,
+    MercadoLivreCatalogRadar,
     // Registro central de radars (mesmo padrão do MARKETPLACE_PROVIDERS em
     // marketplace-intelligence): fonte nova de monitoramento = um arquivo
     // novo implementando CompetitionRadar + uma linha aqui. Nunca altera
     // CompetitionRadarRegistry nem CompetitionMonitorOrchestrator.
     {
+      // Ordem importa: o radar do Mercado Livre vem primeiro por ser a
+      // fonte REAL (API pública de catálogo). O manual continua registrado
+      // como fallback para canais sem radar próprio — adicionar um radar
+      // novo (Shopee, Amazon) é mais uma linha aqui, sem tocar no
+      // orquestrador nem no contrato.
       provide: COMPETITION_RADARS,
-      useFactory: (manual: ManualSheetRadar) => [manual],
-      inject: [ManualSheetRadar],
+      useFactory: (ml: MercadoLivreCatalogRadar, manual: ManualSheetRadar) => [ml, manual],
+      inject: [MercadoLivreCatalogRadar, ManualSheetRadar],
     },
 
     { provide: MONITORED_LISTING_REPOSITORY, useClass: PrismaMonitoredListingRepository },

@@ -49,6 +49,7 @@ function buildWarehouse(overrides: Partial<Warehouse> = {}): Warehouse {
     isActive: true,
     leadTimeDays: 15,
     logisticsCostPerUnit: 2,
+  estimatedFreightCost: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -78,6 +79,7 @@ describe('LogisticsCostReaderService', () => {
       upsert: jest.fn(),
       updateLeadTimeDays: jest.fn(),
       updateLogisticsCostPerUnit: jest.fn(),
+    updateEstimatedFreightCost: jest.fn(),
     };
     const ledgerRepo = { getBalance: jest.fn(), listBalancesByWarehouse: jest.fn(), listBalancesByLot: jest.fn() };
     const auditEventsRepo = {

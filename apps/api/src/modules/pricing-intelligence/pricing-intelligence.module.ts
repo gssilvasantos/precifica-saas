@@ -12,6 +12,8 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { ErpIntegrationModule } from '../erp-integration/erp-integration.module';
 import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marketplace-intelligence.module';
 import { CompetitionIntelligenceModule } from '../competition-intelligence/competition-intelligence.module';
+import { LogisticsFulfillmentModule } from '../logistics-fulfillment/logistics-fulfillment.module';
+import { MarketplacePublishingModule } from '../marketplace-publishing/marketplace-publishing.module';
 
 // Primeira fatia do Pricing Intelligence (README, Etapa 5) — o simulador de
 // margem da Nuvemshop — mais o PricingStrategist (núcleo de decisão de
@@ -37,8 +39,22 @@ import { CompetitionIntelligenceModule } from '../competition-intelligence/compe
 // (competition-events.ts) — reagir a um evento nunca exigiu import de
 // módulo; consumir uma porta síncrona sempre exigiu (mesma regra do resto
 // da plataforma, ver docs/platform-architecture.md, seção 3).
+// Correção de 01/08/2026 (docs/revisao-geral-2026-08.md, §1): entraram mais
+// dois imports, LogisticsFulfillmentModule (LOGISTICS_COST_READER) e
+// MarketplacePublishingModule (CHANNEL_CATEGORY_RESOLVER). Motivo: o
+// PricingDecisionService passou a compor o piso de preço com a comissão
+// REAL do canal (importada do marketplace) e o custo logístico, em vez de
+// olhar só custo + margem. Nenhum dos dois módulos importa este de volta —
+// sem ciclo.
 @Module({
-  imports: [CatalogModule, ErpIntegrationModule, MarketplaceIntelligenceModule, CompetitionIntelligenceModule],
+  imports: [
+    CatalogModule,
+    ErpIntegrationModule,
+    MarketplaceIntelligenceModule,
+    CompetitionIntelligenceModule,
+    LogisticsFulfillmentModule,
+    MarketplacePublishingModule,
+  ],
   controllers: [NuvemshopMarginSimulatorController, PricingDecisionController, ApplyPricingDecisionController],
   providers: [
     NuvemshopMarginSimulatorService,

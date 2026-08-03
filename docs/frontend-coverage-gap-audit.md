@@ -1,5 +1,13 @@
 # Auditoria: Backend construído x Frontend visível (31/07/2026)
 
+> ## ✅ RESOLVIDO — verificado em 01/08/2026
+>
+> **Este documento está histórico.** Praticamente todos os 13 itens abaixo ganharam tela desde então. Conferido arquivo por arquivo em `apps/web/src/routes/`: `PurchaseOrdersPage`, `SellersPage`, `SuppliersPage`, `FiscalInvoicesPage`, `DispatchBatchesPage`, `LotsPage`, `PriceListsPage`, `CarriersPage`, `ProductionOrdersPage`, `CompetitionRadarPage`, `MarketplaceGovernancePage`, `PackagingPage`, `TagsPage` — todos existem, com os `features/*/api.ts` correspondentes.
+>
+> Mantido no repositório porque o **raciocínio de priorização** (Tier 1 = dinheiro e compliance) continua útil como referência para auditorias futuras. Não use a lista como backlog: ela não reflete mais o estado do código.
+>
+> Ver `revisao-geral-2026-08.md` §6 para a verificação.
+
 Levantamento completo de todos os 58 controllers do backend (`apps/api/src/modules/*/interface/controllers`) contra todas as chamadas reais feitas pelo frontend (`apps/web/src/features/*/api.ts`), confirmando endpoint por endpoint. Objetivo: identificar tudo que já está pronto e testado no backend mas que você não consegue usar hoje porque não existe tela.
 
 ## Resumo

@@ -67,6 +67,7 @@ describe('PurchaseOrderService', () => {
       upsert: jest.fn(),
       updateLeadTimeDays: jest.fn(),
       updateLogisticsCostPerUnit: jest.fn(),
+    updateEstimatedFreightCost: jest.fn(),
     };
     stockReceiptWriter = { receivePurchase: jest.fn() };
     accountsPayableWriter = { createSingle: jest.fn() };

@@ -15,6 +15,14 @@ export interface DreChannelBreakdown {
   custosVariaveis: number;
   margemContribuicao: number;
   margemContribuicaoPct: number | null;
+  // Publicidade (01/08/2026) — linha separada da margem de contribuição
+  // porque Ads é custo de PERÍODO, não de pedido.
+  custoAds: number;
+  margemAposAds: number;
+  margemAposAdsPct: number | null;
+  // false = nunca houve sincronização de Ads neste canal/período. Distingue
+  // "não anunciou" (true, custoAds 0) de "não sabemos" (false).
+  adSpendDataAvailable: boolean;
   dataQuality: DreDataQuality;
 }
 
@@ -36,6 +44,11 @@ export interface DreOrderLine {
   feeAmount: number;
   cmv: number;
   margemLiquida: number;
+  // Publicidade atribuída a este pedido (01/08/2026). O gasto por SKU é
+  // dado real do canal; o que é dividido aqui é esse gasto entre os pedidos
+  // do mesmo SKU no período.
+  custoAdsRateado: number;
+  margemLiquidaAposAds: number;
   dataQuality: DreDataQuality;
 }
 
@@ -49,6 +62,18 @@ export interface DreReport {
   custosVariaveis: number;
   margemContribuicao: number;
   margemContribuicaoPct: number | null;
+  custoAds: number;
+  margemAposAds: number;
+  margemAposAdsPct: number | null;
+  // Despesas fixas rateadas no período e o resultado operacional (01/08/2026).
+  // NÃO inclui contas a pagar: aquelas contêm compra de estoque, que já
+  // está em custosVariaveis como CMV — somar contaria duas vezes.
+  despesasFixas: number;
+  resultadoOperacional: number;
+  resultadoOperacionalPct: number | null;
+  // false quando o período é aberto — não dá para ratear despesa recorrente
+  // num intervalo sem fim.
+  despesasFixasApuradas: boolean;
   dataQuality: DreDataQuality;
   channels: DreChannelBreakdown[];
   incompleteOrders: DreIncompleteOrderRef[];

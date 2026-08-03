@@ -186,6 +186,52 @@ export class PrismaOrderRepository implements OrderRepository {
   // aplicado aqui na camada mais baixa possível, que garante que o DRE
   // "nunca se mistura" com pedido fictício sem depender de nenhum cuidado
   // manual de quem chama.
+  // Faturamento por mês para o RBT12 (Tax Intelligence, 02/08/2026).
+  //
+  // Três decisões, todas com consequência fiscal:
+  //
+  // 1. AGREGA NO BANCO. Um RBT12 varre 12 meses; carregar cada pedido com seus
+  //    itens para somar totalAmount é desperdício puro.
+  //
+  // 2. EXCLUI CANCELADO. O art. 3º da LC 123/2006 define receita bruta
+  //    "excluídas as vendas canceladas e os descontos incondicionais
+  //    concedidos" — pedido cancelado não é faturamento, e incluí-lo inflaria
+  //    o RBT12, empurrando o tenant para uma faixa que ele não atingiu.
+  //
+  // 3. SÓ DADO REAL (isDemo = false). Alíquota calculada sobre pedido de
+  //    demonstração produziria preço de demonstração — e ninguém perceberia.
+  //
+  // Raw SQL porque o Prisma não agrupa por expressão (date_trunc). O
+  // date_trunc roda em UTC, mesma referência do resto do schema.
+  async sumRevenueByMonth(
+    tenantId: string,
+    from: Date,
+    to: Date,
+  ): Promise<{ competencia: Date; receita: number }[]> {
+    const rows = await this.prisma.$queryRaw<{ competencia: Date; receita: unknown }[]>`
+      SELECT date_trunc('month', "orderedAt") AS "competencia",
+             SUM("totalAmount")              AS "receita"
+        FROM "orders"."orders"
+       WHERE "tenantId"  = ${tenantId}
+         AND "isDemo"    = false
+         AND "status"   <> 'CANCELADO'::"orders"."OrderStatus"
+         AND "orderedAt" >= ${from}
+         AND "orderedAt" <= ${to}
+       GROUP BY 1
+       ORDER BY 1
+    `;
+    return rows.map((r) => ({ competencia: r.competencia, receita: Number(r.receita) }));
+  }
+
+  async findFirstOrderDate(tenantId: string): Promise<Date | null> {
+    const first = await this.prisma.order.findFirst({
+      where: { tenantId, isDemo: false } as never,
+      orderBy: { orderedAt: 'asc' },
+      select: { orderedAt: true },
+    });
+    return first?.orderedAt ?? null;
+  }
+
   async findAllForPeriod(tenantId: string, dateFrom?: Date, dateTo?: Date, dataMode?: AppDataMode): Promise<Order[]> {
     const records = await this.prisma.order.findMany({
       where: {

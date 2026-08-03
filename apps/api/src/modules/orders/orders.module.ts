@@ -18,7 +18,7 @@ import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marke
 import { MercadoLivreOrderProvider } from '../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-order.provider';
 import { ShopeeOrderProvider } from '../marketplace-intelligence/infrastructure/providers/shopee/shopee-order.provider';
 import { WebhooksController } from './interface/controllers/webhooks.controller';
-import { ORDER_FINANCIALS_READER } from '../../shared/contracts/tokens';
+import { MONTHLY_REVENUE_READER, ORDER_FINANCIALS_READER } from '../../shared/contracts/tokens';
 import { ORDER_FISCAL_READER } from '../../shared/contracts/order-fiscal-reader.port';
 import { ORDER_COMMISSION_WRITER } from '../../shared/contracts/order-commission-writer.port';
 import { ObservabilityModule } from '../../shared/observability/observability.module';
@@ -72,6 +72,11 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // segunda). Consumido pelo FinancialOrchestrator (Financial
     // Intelligence) para montar o DRE — ver financial-intelligence.module.ts.
     { provide: ORDER_FINANCIALS_READER, useExisting: OrdersService },
+    // Faturamento por mês para o RBT12 do Simples Nacional (Tax Intelligence,
+    // 02/08/2026). Porta separada de ORDER_FINANCIALS_READER porque agrega no
+    // banco em vez de carregar pedido a pedido — mesma instância, outro
+    // contrato (Interface Segregation).
+    { provide: MONTHLY_REVENUE_READER, useExisting: OrdersService },
     // Fase 3 (benchmark Tiny ERP, Emissão de NF-e) — expõe a PORTA (token),
     // nunca a classe concreta — o módulo fiscal só vai conhecer
     // ORDER_FISCAL_READER + a interface OrderFiscalReader.
@@ -89,6 +94,12 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
   // MESMO registry (via findByMarketplaceCode + isShippingLabelCapable) para
   // buscar a etiqueta NATIVA do canal, em vez de duplicar um registry novo
   // só para essa capacidade.
-  exports: [ORDER_FINANCIALS_READER, ORDER_FISCAL_READER, ORDER_COMMISSION_WRITER, OrderProviderRegistry],
+  exports: [
+    ORDER_FINANCIALS_READER,
+    MONTHLY_REVENUE_READER,
+    ORDER_FISCAL_READER,
+    ORDER_COMMISSION_WRITER,
+    OrderProviderRegistry,
+  ],
 })
 export class OrdersModule {}

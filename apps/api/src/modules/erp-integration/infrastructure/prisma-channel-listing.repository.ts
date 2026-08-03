@@ -29,6 +29,19 @@ export class PrismaChannelListingRepository implements ChannelListingRepository 
     return records.map((r) => this.toDomain(r));
   }
 
+  async findSkusByExternalIds(
+    tenantId: string,
+    channelCode: string,
+    externalIds: string[],
+  ): Promise<{ externalId: string; skuCode: string }[]> {
+    if (externalIds.length === 0) return [];
+    const records = await this.prisma.channelListing.findMany({
+      where: { tenantId, channelCode, externalId: { in: externalIds } },
+      select: { externalId: true, skuCode: true },
+    });
+    return records;
+  }
+
   private toDomain(record: Record<string, unknown> & { currentPrice: { toString(): string } | null }): ChannelListingRecord {
     return {
       ...record,

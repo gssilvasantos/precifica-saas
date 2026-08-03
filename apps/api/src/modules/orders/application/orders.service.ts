@@ -7,6 +7,7 @@ import { ProductCatalogReader } from '../../../shared/contracts/product-catalog-
 import { OrderFinancialLine, OrderFinancialsReader, OrderItemForFulfillment } from '../../../shared/contracts/order-financials-reader.port';
 import { OrderFiscalData, OrderFiscalReader } from '../../../shared/contracts/order-fiscal-reader.port';
 import { CommissionLineDto, OrderCommissionWriter } from '../../../shared/contracts/order-commission-writer.port';
+import { MonthlyRevenue, MonthlyRevenueReader } from '../../../shared/contracts/monthly-revenue-reader.port';
 
 // Camada de aplicação simples — sem regra de negócio própria além de
 // delegar ao repositório e traduzir "não encontrado" em NotFoundException.
@@ -17,11 +18,26 @@ import { CommissionLineDto, OrderCommissionWriter } from '../../../shared/contra
 // fallback de custo (domain/order-margin.ts) buscando o custo ATUAL só dos
 // SKUs que realmente precisam dele.
 @Injectable()
-export class OrdersService implements OrderFinancialsReader, OrderFiscalReader, OrderCommissionWriter {
+export class OrdersService
+  implements OrderFinancialsReader, OrderFiscalReader, OrderCommissionWriter, MonthlyRevenueReader
+{
   constructor(
     @Inject(ORDER_REPOSITORY) private readonly orders: OrderRepository,
     @Inject(PRODUCT_CATALOG_READER) private readonly catalog: ProductCatalogReader,
   ) {}
+
+  // --- MonthlyRevenueReader (Tax Intelligence, 02/08/2026) ---
+  //
+  // Delegação pura: a agregação acontece no banco. Meses sem pedido NÃO
+  // aparecem no resultado — traduzir ausência em zero é decisão de quem
+  // consome, porque só ele sabe desde quando existe cobertura (firstOrderAt).
+  sumByMonth(tenantId: string, from: Date, to: Date): Promise<MonthlyRevenue[]> {
+    return this.orders.sumRevenueByMonth(tenantId, from, to);
+  }
+
+  firstOrderAt(tenantId: string): Promise<Date | null> {
+    return this.orders.findFirstOrderDate(tenantId);
+  }
 
   async findWithFilters(
     tenantId: string,

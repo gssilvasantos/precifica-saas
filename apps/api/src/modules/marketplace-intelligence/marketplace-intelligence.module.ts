@@ -36,7 +36,14 @@ import { MARKETPLACE_RULE_REPOSITORY } from './application/ports/marketplace-rul
 import { CHANGE_EVENT_REPOSITORY } from './application/ports/change-event-repository.port';
 import { MERCADO_LIVRE_CONNECTION_REPOSITORY } from './application/ports/mercado-livre-connection-repository.port';
 import { SHOPEE_CONNECTION_REPOSITORY } from './application/ports/shopee-connection-repository.port';
-import { FEE_RULE_RESOLVER, PRICE_UPDATE_DISPATCHER } from '../../shared/contracts/tokens';
+import {
+  FEE_RULE_RESOLVER,
+  PRICE_UPDATE_DISPATCHER,
+  SHIPPING_POLICY_RESOLVER,
+  CHANNEL_SELLER_PROFILE_READER,
+} from '../../shared/contracts/tokens';
+import { ChannelSellerProfileService } from './application/channel-seller-profile.service';
+import { ChannelSellerProfilesController } from './interface/controllers/channel-seller-profiles.controller';
 import { SyncOpsModule } from '../../shared/sync-ops/sync-ops.module';
 import { ErpIntegrationModule } from '../erp-integration/erp-integration.module';
 import { NuvemshopFeeRuleProvider } from '../erp-integration/infrastructure/nuvemshop/nuvemshop-fee-rule.provider';
@@ -62,6 +69,7 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     MarketplaceProvidersController,
     MercadoLivreConnectionController,
     ShopeeConnectionController,
+    ChannelSellerProfilesController,
   ],
   providers: [
     MarketplaceProviderRegistry,
@@ -151,6 +159,13 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // Exporta a PORTA (token), nunca a classe concreta — o futuro Pricing
     // Intelligence só vai conhecer FEE_RULE_RESOLVER + a interface FeeRuleResolver.
     { provide: FEE_RULE_RESOLVER, useExisting: RuleRegistryService },
+    // Mesma classe, segunda porta: RuleRegistryService resolve comissão E
+    // frete, mas cada consumidor depende só da interface que usa
+    // (Interface Segregation) — o Promotion Intelligence, por exemplo,
+    // nunca enxerga a política de frete.
+    { provide: SHIPPING_POLICY_RESOLVER, useExisting: RuleRegistryService },
+    ChannelSellerProfileService,
+    { provide: CHANNEL_SELLER_PROFILE_READER, useExisting: ChannelSellerProfileService },
     // Idem para o comando de repricing — "a regra de ouro" do pedido:
     // Pricing Engine conhece só PRICE_UPDATE_DISPATCHER + a interface.
     { provide: PRICE_UPDATE_DISPATCHER, useExisting: PriceUpdateDispatcherService },
@@ -164,6 +179,8 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
   // OAuth2/refresh já existente aqui.
   exports: [
     FEE_RULE_RESOLVER,
+    SHIPPING_POLICY_RESOLVER,
+    CHANNEL_SELLER_PROFILE_READER,
     PRICE_UPDATE_DISPATCHER,
     MercadoLivreOrderProvider,
     MercadoLivreAdsProvider,

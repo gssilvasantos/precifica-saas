@@ -127,6 +127,109 @@ export class PrismaAdsCampaignRepository implements AdsCampaignRepository {
     }));
   }
 
+  // Gasto por canal no período — linha de Ads do DRE (01/08/2026).
+  //
+  // Agrega em memória em vez de groupBy do Prisma porque a chave de
+  // agrupamento (channelCode) mora na campanha, não no snapshot, e o
+  // groupBy do Prisma não agrupa por campo de relação. Mesmo racional de
+  // "não paginado" das outras consultas de relatório deste arquivo: o
+  // volume é de um período fechado, não de uma tela infinita.
+  async sumSpendByChannel(
+    tenantId: string,
+    dateFrom?: Date,
+    dateTo?: Date,
+    dataMode?: AppDataMode,
+  ): Promise<{ channelCode: string; spend: number }[]> {
+    const periodFilter =
+      dateFrom || dateTo
+        ? { periodDate: { ...(dateFrom ? { gte: dateFrom } : {}), ...(dateTo ? { lte: dateTo } : {}) } }
+        : {};
+
+    const snapshots = await this.prisma.adsMetricSnapshot.findMany({
+      where: { tenantId, ...periodFilter, campaign: { isDemo: isDemoFlag(dataMode) } },
+      select: { spend: true, campaign: { select: { channelCode: true } } },
+    });
+
+    const byChannel = new Map<string, number>();
+    for (const snapshot of snapshots) {
+      const channelCode = snapshot.campaign.channelCode;
+      byChannel.set(channelCode, (byChannel.get(channelCode) ?? 0) + Number(snapshot.spend));
+    }
+
+    return Array.from(byChannel.entries()).map(([channelCode, spend]) => ({ channelCode, spend }));
+  }
+
+  // Gasto por ANÚNCIO no período (01/08/2026) — lê a tabela de métrica por
+  // item, que tem isDemo próprio (diferente de AdsMetricSnapshot, que
+  // depende do join com a campanha).
+  async sumSpendByItem(
+    tenantId: string,
+    dateFrom?: Date,
+    dateTo?: Date,
+    dataMode?: AppDataMode,
+  ): Promise<{ channelCode: string; externalItemId: string; spend: number; attributedUnits: number }[]> {
+    const periodFilter =
+      dateFrom || dateTo
+        ? { periodDate: { ...(dateFrom ? { gte: dateFrom } : {}), ...(dateTo ? { lte: dateTo } : {}) } }
+        : {};
+
+    const groups = await this.prisma.adsItemMetricSnapshot.groupBy({
+      by: ['channelCode', 'externalItemId'],
+      where: { tenantId, ...periodFilter, isDemo: isDemoFlag(dataMode) },
+      _sum: { spend: true, attributedUnits: true },
+    });
+
+    return groups.map((g) => ({
+      channelCode: g.channelCode,
+      externalItemId: g.externalItemId,
+      spend: Number(g._sum.spend ?? 0),
+      attributedUnits: g._sum.attributedUnits ?? 0,
+    }));
+  }
+
+  async upsertItemMetric(data: {
+    tenantId: string;
+    channelCode: string;
+    externalItemId: string;
+    periodDate: Date;
+    spend: number;
+    attributedUnits: number;
+    clicks: number;
+    impressions: number;
+  }): Promise<void> {
+    const where = {
+      tenantId_channelCode_externalItemId_periodDate: {
+        tenantId: data.tenantId,
+        channelCode: data.channelCode,
+        externalItemId: data.externalItemId,
+        periodDate: data.periodDate,
+      },
+    };
+    const values = {
+      spend: data.spend,
+      attributedUnits: data.attributedUnits,
+      clicks: data.clicks,
+      prints: data.impressions,
+      syncedAt: new Date(),
+    };
+
+    await this.prisma.adsItemMetricSnapshot.upsert({
+      where,
+      // isDemo só no create: um resync real nunca deve reclassificar uma
+      // linha existente, e o seeder de Demo Mode escreve por caminho
+      // próprio.
+      create: {
+        tenantId: data.tenantId,
+        channelCode: data.channelCode,
+        externalItemId: data.externalItemId,
+        periodDate: data.periodDate,
+        isDemo: false,
+        ...values,
+      },
+      update: values,
+    });
+  }
+
   // --- Demo Mode (AdsAuditSeederService) ---
 
   async seedDemoCampaign(tenantId: string, data: SeedDemoCampaignData): Promise<string> {

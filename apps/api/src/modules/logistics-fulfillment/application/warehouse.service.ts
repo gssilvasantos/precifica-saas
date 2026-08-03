@@ -5,7 +5,12 @@ import {
   STOCK_MOVEMENT_AUDIT_EVENT_REPOSITORY,
   StockMovementAuditEventRepository,
 } from './ports/stock-movement-audit-event-repository.port';
-import { isValidLeadTimeDays, isValidLogisticsCostPerUnit, Warehouse } from '../domain/warehouse.entity';
+import {
+  isValidLeadTimeDays,
+  isValidLogisticsCostPerUnit,
+  isValidEstimatedFreightCost,
+  Warehouse,
+} from '../domain/warehouse.entity';
 import { mergeStockBalances, StockBalanceLine } from '../domain/stock-balance';
 
 // Nome fixo do depósito físico — um por tenant, sempre o mesmo código.
@@ -87,5 +92,23 @@ export class WarehouseService {
       throw new NotFoundException(`Depósito ${warehouseId} não encontrado.`);
     }
     return this.warehouses.updateLogisticsCostPerUnit(tenantId, warehouseId, logisticsCostPerUnit);
+  }
+
+  // Frete médio estimado deste canal — consumido pelo motor de preço
+  // quando a política do canal transfere o frete ao vendedor (ML acima de
+  // R$79). Mesmo padrão defensivo dos dois updates acima.
+  async updateEstimatedFreightCost(
+    tenantId: string,
+    warehouseId: string,
+    estimatedFreightCost: number,
+  ): Promise<Warehouse> {
+    if (!isValidEstimatedFreightCost(estimatedFreightCost)) {
+      throw new BadRequestException('estimatedFreightCost deve ser um número maior ou igual a zero.');
+    }
+    const warehouse = await this.warehouses.findById(warehouseId);
+    if (!warehouse || warehouse.tenantId !== tenantId) {
+      throw new NotFoundException(`Depósito ${warehouseId} não encontrado.`);
+    }
+    return this.warehouses.updateEstimatedFreightCost(tenantId, warehouseId, estimatedFreightCost);
   }
 }
