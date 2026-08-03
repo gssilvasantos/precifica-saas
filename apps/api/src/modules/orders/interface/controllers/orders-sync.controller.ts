@@ -50,7 +50,7 @@ export class OrdersSyncController {
   // gap documentado acima; até que exista, este endpoint só "acorda" o
   // pipeline incremental (nunca escreve o payload cru direto).
   @Post(':providerCode/webhook')
-  async receiveWebhook(@Param('providerCode') providerCode: string, @Body() payload: unknown) {
+  async receiveWebhook(@Param('providerCode') providerCode: string, @Body() _payload: unknown) {
     this.logger.log(`Webhook recebido para ${providerCode} — disparando sync incremental (payload não é lido diretamente).`);
     // Fire-and-forget seria mais correto para um endpoint de webhook (o
     // marketplace espera um 2xx rápido), mas como o pipeline atual é só

@@ -50,10 +50,12 @@ services de aplicação com fakes de porta (`test/fakes/`), e autorização. E2E
 ## Comandos
 
 ```bash
-npm run start:dev                    # watch
-npm test                             # unit
-npm run test:e2e                     # e2e
-npx tsc -p tsconfig.json --noEmit    # typecheck (não há script)
+npm run start:dev          # watch
+npm test                   # unit (Jest)
+npm run test:e2e           # e2e — exige Postgres real
+npm run typecheck          # tsc --noEmit
+npm run lint               # ESLint (--max-warnings=5 = baseline conhecido)
+npm run lint:fix           # ALTERA arquivos — revise o diff
 npm run prisma:generate
 ```
 

@@ -16,12 +16,6 @@ import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 
-const ROLE_LABEL: Record<UserRole, string> = {
-  ADMIN: 'Administrador',
-  PRICING_EDITOR: 'Editor de preços',
-  VIEWER: 'Visualização',
-};
-
 // Painel de Equipe (30/07/2026) — tenant-scoped, só o ADMIN da própria conta
 // convida/edita/bloqueia colegas. Proteção real é o backend (RolesGuard +
 // ModuleAccessGuard checam fresco a cada chamada); isto aqui é só UX.

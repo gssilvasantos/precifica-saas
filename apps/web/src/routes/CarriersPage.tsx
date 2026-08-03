@@ -11,7 +11,6 @@ import {
   setCarrierActive,
   setCarrierServiceActive,
   updateCarrier,
-  updateCarrierService,
   upsertFreightConnection,
   type Carrier,
   type CarrierServiceInput,
@@ -91,7 +90,6 @@ function CarrierServiceForm({ carrierId, onDone }: { carrierId: string; onDone: 
 function CarrierServicesSection({ carrierId, canEdit }: { carrierId: string; canEdit: boolean }) {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
 
   const servicesQuery = useQuery({ queryKey: ['carrier-services', carrierId], queryFn: () => fetchCarrierServices(carrierId) });
   const services = servicesQuery.data ?? [];

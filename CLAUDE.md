@@ -150,10 +150,11 @@ Todos os comandos são executados **de dentro de cada app** — não há orquest
 | Desenvolvimento | `npm run start:dev` (API em `http://localhost:3000/api`) |
 | Produção local | `npm run build` && `npm run start:prod` |
 | Build | `npm run build` (`nest build`) |
-| Testes unitários | `npm test` (Jest, `src/**/*.spec.ts`) |
-| Testes e2e | `npm run test:e2e` |
-| Typecheck | `npx tsc -p tsconfig.json --noEmit` — **não existe script `typecheck`** |
-| Lint | `npm run lint` — **quebrado hoje: não há arquivo de configuração do ESLint** |
+| Testes unitários | `npm test` (Jest, `src/**/*.spec.ts` — 106 arquivos) |
+| Testes e2e | `npm run test:e2e` (exige Postgres real) |
+| Typecheck | `npm run typecheck` (`tsc --noEmit`) |
+| Lint | `npm run lint` (ESLint 8, `--max-warnings=5` = baseline atual) |
+| Lint com correção | `npm run lint:fix` — **altera arquivos**; revise o diff |
 | Prisma client | `npm run prisma:generate` |
 | Migration (dev) | `npm run prisma:migrate` |
 | Migration (deploy) | `npx prisma migrate deploy` |
@@ -167,9 +168,10 @@ Todos os comandos são executados **de dentro de cada app** — não há orquest
 | Instalar | `npm install` |
 | Desenvolvimento | `npm run dev` (`http://localhost:5173`, proxy `/api` → `:3000`) |
 | Build | `npm run build` (`tsc -b && vite build`) |
-| Typecheck | `npx tsc -b --noEmit` — **não existe script `typecheck`** |
+| Typecheck | `npm run typecheck` (`tsc -b`). Não use `--noEmit`: o `tsconfig.json` usa project references e o TS rejeita com TS6310 |
 | Preview | `npm run preview` |
-| Lint | `npm run lint` — **quebrado hoje: não há arquivo de configuração do ESLint** |
+| Lint | `npm run lint` (ESLint 8, `--max-warnings=3` = baseline atual) |
+| Lint com correção | `npm run lint:fix` — **altera arquivos**; revise o diff |
 | Testes | **não existem** — sem runner configurado |
 
 ### Infra local (raiz)
@@ -184,9 +186,15 @@ docker compose up -d      # Postgres 16 + Redis 7
 bash .claude/skills/product-engineering-studio/scripts/validate-project.sh
 ```
 
-**Não existem hoje:** script `format`, `typecheck`, workers/filas (Redis sobe no compose mas
-nenhum consumidor o usa), CI, testes de frontend. Não invente esses comandos — se forem
-necessários, proponha em uma tarefa própria.
+**Não existem hoje:** script `format` (**não há Prettier no projeto**), workers/filas (Redis sobe
+no compose mas nenhum consumidor o usa), CI, testes de frontend. Não invente esses comandos —
+se forem necessários, proponha em uma tarefa própria.
+
+> **Baseline de avisos do lint.** O `--max-warnings` de cada app é o número de avisos
+> conhecidos hoje (`any` em fronteiras de integração no backend; `exhaustive-deps` em 3 hooks
+> no frontend). Aviso **novo** reprova o lint; o baseline existente é dívida registrada em
+> `docs/decisions/0002-configuracao-do-eslint.md`. Ao corrigir um aviso, **baixe o número** —
+> ele nunca deve subir.
 
 ---
 

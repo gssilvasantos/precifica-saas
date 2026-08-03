@@ -46,7 +46,6 @@ import { FreightShippingModule } from '../freight-shipping/freight-shipping.modu
 import { LOGISTICS_COST_READER } from '../../shared/contracts/tokens';
 import { STOCK_RECEIPT_WRITER } from '../../shared/contracts/stock-receipt-writer.port';
 import { PRODUCTION_STOCK_WRITER } from '../../shared/contracts/production-stock-writer.port';
-import { PRODUCT_LOT_READER } from '../../shared/contracts/product-lot-reader.port';
 
 // Módulo do "Hub de Provas" + Full Fulfillment (Sprint 24) + Inteligência
 // de Abastecimento (Sprint 25) + Motor de Custo Logístico para Promoções

@@ -20,9 +20,9 @@
 
   "//hooks": "PROPOSTAS DE HOOK que hoje NÃO funcionam neste repositório, com o motivo. Ative depois de resolver a lacuna correspondente e mova para .claude/settings.json se valer para o time inteiro.",
 
-  "//hook-formatacao": "Formatação automática após edição. BLOQUEADO: o projeto não tem Prettier nem .editorconfig. Depois de adicionar Prettier, este hook passa a funcionar: { \"matcher\": \"Write|Edit\", \"hooks\": [{ \"type\": \"command\", \"command\": \"npx --no-install prettier --write \\\"$CLAUDE_FILE_PATHS\\\"\" }] }",
+  "//hook-lint": "JÁ ATIVO em .claude/settings.json desde 03/08/2026 (.claude/hooks/lint-changed-file.mjs, ver ADR 0002). Nada a fazer aqui.",
 
-  "//hook-lint": "Lint apenas dos arquivos alterados. BLOQUEADO: não existe arquivo de configuração do ESLint (eslint.config.js / .eslintrc*) em apps/api nem em apps/web, embora o eslint esteja nas devDependencies. Com a config criada: { \"matcher\": \"Write|Edit\", \"hooks\": [{ \"type\": \"command\", \"command\": \"npx --no-install eslint --max-warnings=0 \\\"$CLAUDE_FILE_PATHS\\\"\" }] }",
+  "//hook-formatacao": "Formatação automática após edição. BLOQUEADO: o projeto não tem Prettier nem .editorconfig, e adotá-lo reformataria ~770 arquivos de uma vez (destrói git blame) — é decisão do dono, não pendência trivial. Se Prettier for adotado: { \"matcher\": \"Write|Edit\", \"hooks\": [{ \"type\": \"command\", \"command\": \"npx --no-install prettier --write \\\"$CLAUDE_FILE_PATHS\\\"\" }] }",
 
   "//hook-typecheck": "Typecheck incremental ao terminar uma resposta (evento Stop). NÃO ativado por padrão porque tsc do apps/api leva dezenas de segundos em um projeto com 642 arquivos — pesado demais para rodar a cada edição. Se quiser mesmo: { \"Stop\": [{ \"hooks\": [{ \"type\": \"command\", \"command\": \"cd apps/api && npx --no-install tsc -p tsconfig.json --noEmit\", \"timeout\": 180 }] }] }",
 

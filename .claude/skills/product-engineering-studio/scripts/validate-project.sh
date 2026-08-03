@@ -124,20 +124,41 @@ if [ "$RUN_API" -eq 1 ]; then
     # 1. Formatação — não há Prettier configurado neste repositório.
     skip "apps/api: formatação (Prettier não está configurado no projeto)"
 
-    # 2. Lint — ESLint está nas devDependencies, mas não há arquivo de config.
+    # 2. Lint. O script `lint` do package.json usa --max-warnings com o número
+    # de avisos conhecidos hoje: nenhum aviso NOVO passa, e o baseline existente
+    # fica visível. Nunca chame `lint:fix` aqui — um gate não pode alterar o que
+    # está verificando.
     if has_script "$API_DIR" lint && has_eslint_config "$API_DIR"; then
-      run_step "apps/api: lint" "$API_DIR" npm run lint || true
+      run_step "apps/api: lint" "$API_DIR" npm run lint
     else
       skip "apps/api: lint (não há configuração de ESLint — 'npm run lint' falharia por falta de config, não por erro de código)"
     fi
 
-    # 3. Typecheck — não há script; chamamos o compilador diretamente.
-    run_step "apps/api: typecheck" "$API_DIR" npx --no-install tsc -p tsconfig.json --noEmit
+    # 3. Typecheck.
+    if has_script "$API_DIR" typecheck; then
+      run_step "apps/api: typecheck" "$API_DIR" npm run typecheck
+    else
+      run_step "apps/api: typecheck" "$API_DIR" npx --no-install tsc -p tsconfig.json --noEmit
+    fi
 
     # 4. Schema do Prisma — validação estática, NÃO toca em banco nenhum.
+    #
+    # `prisma validate` só faz parsing do schema, mas o bloco `datasource` deste
+    # projeto usa env("DATABASE_URL")/env("DIRECT_URL") e o parser exige que as
+    # duas existam — sem elas falha com P1012 por variável ausente, o que não
+    # diz nada sobre a corretude do schema. Por isso passamos URLs descartáveis
+    # APENAS para este comando: `validate` nunca abre conexão, então o valor é
+    # irrelevante e nenhum banco é tocado. A URL abaixo é deliberadamente SEM
+    # usuário e senha — além de não ser um segredo, evita que varreduras de
+    # credencial (inclusive o hook scan-secrets deste repositório) marquem
+    # falso positivo neste arquivo.
     if [ -f "$API_DIR/prisma/schema.prisma" ]; then
+      PRISMA_PARSE_ONLY_URL='postgresql://127.0.0.1:1/schema_parse_only'
       run_step "apps/api: prisma validate (somente schema, sem acesso ao banco)" \
-        "$API_DIR" npx --no-install prisma validate || true
+        "$API_DIR" env \
+          DATABASE_URL="$PRISMA_PARSE_ONLY_URL" \
+          DIRECT_URL="$PRISMA_PARSE_ONLY_URL" \
+          npx --no-install prisma validate
     fi
 
     # 5. Testes unitários.
@@ -172,12 +193,20 @@ if [ "$RUN_WEB" -eq 1 ]; then
     skip "apps/web: formatação (Prettier não está configurado no projeto)"
 
     if has_script "$WEB_DIR" lint && has_eslint_config "$WEB_DIR"; then
-      run_step "apps/web: lint" "$WEB_DIR" npm run lint || true
+      run_step "apps/web: lint" "$WEB_DIR" npm run lint
     else
       skip "apps/web: lint (não há configuração de ESLint)"
     fi
 
-    run_step "apps/web: typecheck" "$WEB_DIR" npx --no-install tsc -b --noEmit
+    # `tsc -b --noEmit` é INVÁLIDO aqui: tsconfig.json usa project references e
+    # o TypeScript rejeita com TS6310 ("referenced project may not disable
+    # emit"). O typecheck deste app é `tsc -b` puro — o mesmo que `npm run
+    # build` executa antes do Vite. Ele grava .tsbuildinfo (cache incremental).
+    if has_script "$WEB_DIR" typecheck; then
+      run_step "apps/web: typecheck" "$WEB_DIR" npm run typecheck
+    else
+      run_step "apps/web: typecheck" "$WEB_DIR" npx --no-install tsc -b
+    fi
 
     if [ "$SKIP_TESTS" -eq 1 ]; then
       skip "apps/web: testes (--skip-tests)"

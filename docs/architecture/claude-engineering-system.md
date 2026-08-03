@@ -156,16 +156,15 @@ arquivos e não acessam a rede.
 | `guard-destructive-bash.mjs` | `PreToolUse` em `Bash` | Nega reset de banco, SQL destrutivo, force push, publish, deploy, `rm -rf` em raiz, `curl \| sh`, leitura de `.env`; pergunta antes de commit/push, `migrate deploy`, instalação de dependência, `psql` | O agente nunca deve tocar em produção nem instalar dependência por iniciativa própria |
 | `scan-secrets.mjs` | `PostToolUse` em `Write`/`Edit` | Varre **apenas o arquivo recém-escrito** por chave privada, token de API, connection string com credencial e segredo atribuído em código. Bloqueia e explica — sem imprimir o valor | Segredo commitado é incidente com custo de rotação; barato de evitar na escrita |
 | `migration-notice.mjs` | `PostToolUse` em `prisma/schema.prisma` e migrations | Lembra que **toda tabela nova exige `apply_*_rls_only.sql` + `grant_app_runtime_*.sql`**, e sinaliza SQL destrutivo. Não bloqueia | É o risco de drift nº 1 deste projeto (já houve gap real em `product_lots`) |
+| `lint-changed-file.mjs` | `PostToolUse` em `Write`/`Edit` de `.ts`/`.tsx` | Roda o ESLint **só no arquivo editado**, no cwd do app correto. Bloqueia em erro; avisos passam. Nunca usa `--fix`. Degrada em silêncio sem `node_modules` | Ativado em 03/08/2026, quando o projeto ganhou configuração de ESLint (ADR 0002) — antes era impossível |
 
 ### Hooks deliberadamente **não** configurados
 
 Registrados como proposta em `.claude/settings.local.json.example`, com o motivo:
 
-- **Formatação automática** — o projeto não tem Prettier nem `.editorconfig`. Um hook de
-  formatação aqui não teria o que executar.
-- **Lint dos arquivos alterados** — não existe arquivo de configuração do ESLint em nenhum dos
-  dois apps, embora o `eslint` esteja nas `devDependencies`. `npm run lint` falha hoje por falta
-  de configuração, não por erro de código.
+- **Formatação automática** — o projeto não tem Prettier nem `.editorconfig`. Adotar Prettier
+  reformataria ~770 arquivos de uma vez, destruindo o `git blame` do projeto inteiro; é uma
+  decisão de custo consciente, ainda **em aberto**, não uma pendência técnica trivial.
 - **Typecheck a cada edição** — `tsc` do backend leva dezenas de segundos em 642 arquivos.
   Pesado demais para `PostToolUse`; sugerido como `Stop`, opt-in.
 - **Testes relacionados** — viável no backend com `jest --findRelatedTests`, mas exige
@@ -228,8 +227,9 @@ Se a mesma frase aparecer em dois lugares, um deles está errado: apague e refer
 
 ## 9. Limitações conhecidas
 
-1. **Lint e formatação não são verificáveis hoje.** Sem configuração de ESLint e sem Prettier,
-   o script de validação **pula** essas etapas — e diz que pulou. Item pulado não é item aprovado.
+1. **Formatação não é verificável.** Não há Prettier no projeto, então o script de validação
+   **pula** essa etapa — e diz que pulou. Item pulado não é item aprovado. (O lint deixou de ser
+   uma limitação em 03/08/2026 — ver ADR 0002.)
 2. **Não há testes no frontend.** Nenhuma afirmação sobre comportamento de UI pode se apoiar em
    suíte automatizada neste app.
 3. **Contratos duplicados manualmente** entre `apps/api` (DTOs) e `apps/web` (tipos em
@@ -241,8 +241,11 @@ Se a mesma frase aparecer em dois lugares, um deles está errado: apague e refer
    subdiretórios; a organização vale para documentos novos.
 6. **Sem CI.** Nada do que está aqui roda automaticamente em push ou PR. A validação depende de
    alguém executá-la.
-7. **A validação não pôde ser executada no ambiente em que este sistema foi criado** —
-   `node_modules` não estava instalado em nenhum dos apps. Só verificações estáticas foram feitas.
+7. **`prisma validate` roda com URLs descartáveis.** O bloco `datasource` usa
+   `env("DATABASE_URL")`/`env("DIRECT_URL")` e o parser exige que existam. O script passa uma URL
+   sem credencial só para o parsing — `validate` nunca abre conexão, nenhum banco é tocado.
+8. **Os testes e2e não entram na validação automática** — exigem Postgres real. Rode
+   `npm run test:e2e` à mão quando houver banco disponível.
 
 ---
 

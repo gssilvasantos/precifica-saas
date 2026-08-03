@@ -18,7 +18,6 @@ import { Badge } from '../components/ui/badge';
 import { extractErrorMessage } from '../lib/extract-error-message';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' });
 
 const inputClass =
   'mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';

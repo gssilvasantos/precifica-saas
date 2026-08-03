@@ -47,10 +47,17 @@ de outra feature — se precisar, o pedaço comum sobe para `components/` ou `li
 ```bash
 npm run dev                # http://localhost:5173 (proxy /api -> :3000)
 npm run build              # tsc -b && vite build
-npx tsc -b --noEmit        # typecheck (não há script)
+npm run typecheck          # tsc -b — NÃO use --noEmit: o tsconfig usa project
+                           # references e o TS rejeita com TS6310
+npm run lint               # ESLint (--max-warnings=3 = baseline conhecido)
+npm run lint:fix           # ALTERA arquivos — revise o diff
 ```
 
 Não há testes nem runner configurado neste app — não afirme que testou a UI automaticamente.
+
+O ESLint aqui barra `import axios` fora de `src/lib/` (acesso a dados passa pelo `apiClient`),
+e `exhaustive-deps` é aviso, não erro: as 3 ocorrências atuais exigem mudança de comportamento
+para resolver, não conserto mecânico. Ver `docs/decisions/0002-configuracao-do-eslint.md`.
 
 ## Regras carregadas neste escopo
 

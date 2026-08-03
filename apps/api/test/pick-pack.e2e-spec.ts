@@ -218,7 +218,6 @@ describe('Pick & Pack — fluxo E2E completo (Sprint 27, validação em produç�
     console.log(`[E2E Pick&Pack] Embalagem finalizada — vídeo com ${finalizeRes.body.totalBytes} bytes em ${CHUNK_COUNT} chunks.`);
 
     // ---- 7. Verificação de persistência do arquivo de vídeo (fake storage) --
-    const storedFile = fakeVideoStorage.files.get(finalizeRes.body.storageKey ?? '');
     // storageKey não vem no DTO de resposta do finalize por padrão — busca
     // pela sessão via GET para confirmar a key real gravada no fake.
     const sessionAfterFinalize = await request(server)

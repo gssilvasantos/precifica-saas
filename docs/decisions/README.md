@@ -22,3 +22,4 @@ Não abra ADR para: escolha de nome de variável, refatoração local, correçã
 | # | Título | Status | Data |
 |---|---|---|---|
 | [0001](./0001-sistema-de-engenharia-claude.md) | Sistema de engenharia do Claude Code | aceito | 2026-08-02 |
+| [0002](./0002-configuracao-do-eslint.md) | Configuração do ESLint e baseline de avisos | aceito | 2026-08-03 |
