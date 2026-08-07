@@ -2,22 +2,56 @@
 // ---------------------------------------------------------------------------
 // PostToolUse (Write | Edit)
 //
-// Roda o ESLint APENAS no arquivo recém-editado. Bloqueia se houver erro;
-// avisos passam (existe um baseline conhecido, ver o script `lint` de cada app).
+// Roda o ESLint APENAS no arquivo recém-editado.
 //
-// Só ficou possível em 02/08/2026, quando o projeto ganhou .eslintrc.cjs nos
-// dois apps — antes disso o ESLint estava instalado mas sem configuração, e
-// qualquer hook de lint falharia por config ausente, não por erro de código.
+// Implementa o contrato de três estados do MPES (D1):
+//   1. verificado e aprovado  -> silêncio
+//   2. verificado e reprovado -> avisa (MODO='aviso') ou bloqueia (MODO='bloqueio')
+//   3. NÃO foi possível verificar -> systemMessage + additionalContext, NUNCA silêncio
+//
+// Correção do achado F01 (03/08/2026): a versão anterior chamava `npx` via
+// execFileSync sem shell. No Windows `npx` é um shim .cmd, não um executável:
+// o spawn falhava com ENOENT, err.stdout/err.stderr vinham `undefined`, e o
+// hook saía com exit 0 SILENCIOSO. Na prática o lint nunca rodou nesta máquina.
+//
+// A estratégia agora é a oficial: invocar o script do ESLint com `node`
+// diretamente. `node` é um executável real em todo sistema operacional, então
+// não há shim, não há shell, e caminhos com espaço ou parênteses não quebram.
 //
 // Nunca usa --fix: um verificador não altera o que está verificando.
-// Degrada em silêncio quando não há node_modules ou o arquivo está fora dos apps.
 // ---------------------------------------------------------------------------
 
 import { readFileSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { join, dirname, resolve, sep } from 'node:path';
 
-const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+const HOOK = 'lint-changed-file';
+
+// 'aviso'    = fase 1: reprovação vira aviso, não bloqueia (rollout controlado)
+// 'bloqueio' = fase 2: reprovação bloqueia com exit 2
+// Trocar esta linha é a única mudança necessária entre as duas fases.
+const MODO = 'aviso';
+
+/** Estado 3: não foi possível verificar. Avisa o usuário e informa o agente. */
+function naoVerificavel(motivo, comoRestaurar) {
+  process.stdout.write(
+    JSON.stringify({
+      systemMessage: `[${HOOK}] ESTADO 3 — não foi possível verificar: ${motivo}. ${comoRestaurar}`,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext:
+          `[${HOOK}] ESTADO 3 — o lint NÃO foi executado neste arquivo: ${motivo}. ` +
+          `${comoRestaurar} Não trate este arquivo como verificado.`,
+      },
+    }),
+  );
+  process.exit(0);
+}
+
+/** N/A ou estado 1: silêncio é correto. */
+function silencio() {
+  process.exit(0);
+}
 
 function readStdin() {
   try {
@@ -27,56 +61,127 @@ function readStdin() {
   }
 }
 
+/** Sobe a partir do arquivo até achar a raiz que contém `apps/`. */
+function acharRaiz(caminhoArquivo) {
+  let dir = dirname(caminhoArquivo);
+  for (let i = 0; i < 40; i += 1) {
+    if (existsSync(join(dir, 'apps'))) return dir;
+    const pai = dirname(dir);
+    if (pai === dir) return null;
+    dir = pai;
+  }
+  return null;
+}
+
 function main() {
+  const bruto = readStdin();
   let payload;
   try {
-    payload = JSON.parse(readStdin());
+    payload = JSON.parse(bruto);
   } catch {
+    // Entrada malformada: o hook foi chamado e não conseguiu sequer ler o pedido.
+    naoVerificavel(
+      'a entrada recebida não é um JSON válido',
+      'Verifique a configuração do hook em .claude/settings.json.',
+    );
+  }
+
+  const bruto_path = payload?.tool_input?.file_path;
+  if (typeof bruto_path !== 'string' || !bruto_path) silencio(); // N/A: sem arquivo
+
+  const filePath = resolve(bruto_path);
+  if (!/\.(ts|tsx)$/.test(filePath)) silencio(); // N/A: o ESLint daqui só cobre TS
+
+  if (!existsSync(filePath)) {
+    naoVerificavel(
+      `o arquivo ${filePath} não existe mais`,
+      'Se ele foi removido de propósito, ignore este aviso.',
+    );
+  }
+
+  const raiz = acharRaiz(filePath);
+  if (!raiz) {
+    naoVerificavel(
+      'não foi possível localizar a raiz do repositório (nenhum diretório apps/ acima do arquivo)',
+      'Este hook espera a estrutura <raiz>/apps/<app>/.',
+    );
+  }
+
+  // A qual app o arquivo pertence? O ESLint precisa rodar com o cwd do app.
+  const prefixo = (d) => d.endsWith(sep) ? d : d + sep;
+  const appDir = ['apps/api', 'apps/web']
+    .map((a) => join(raiz, a))
+    .find((dir) => filePath.startsWith(prefixo(dir)));
+
+  // Arquivo .ts fora de apps/: fora do escopo de lint deste projeto. N/A legítimo.
+  if (!appDir) silencio();
+
+  if (!existsSync(join(appDir, '.eslintrc.cjs'))) {
+    naoVerificavel(
+      `${appDir} não tem .eslintrc.cjs`,
+      'Sem configuração o ESLint falharia por config ausente, não por erro de código.',
+    );
+  }
+
+  // Estratégia oficial: `node <script>` — sem npx, sem shell, sem shim .cmd.
+  const eslintJs = join(appDir, 'node_modules', 'eslint', 'bin', 'eslint.js');
+  if (!existsSync(eslintJs)) {
+    naoVerificavel(
+      `o ESLint não está instalado em ${appDir}`,
+      `Rode 'npm install' dentro de ${appDir} para restaurar a verificação.`,
+    );
+  }
+
+  const r = spawnSync(
+    process.execPath,
+    [eslintJs, '--format=stylish', '--no-error-on-unmatched-pattern', filePath],
+    { cwd: appDir, encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+
+  // Falha de spawn (binário some, timeout, sinal): estado 3, jamais aprovação.
+  if (r.error || r.status === null) {
+    naoVerificavel(
+      `o ESLint não pôde ser executado (${r.error?.code ?? 'encerrado por sinal ou timeout'})`,
+      `Verifique a instalação em ${appDir}.`,
+    );
+  }
+
+  const saida = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim();
+
+  // 0 = limpo. 1 = erros de lint. Qualquer outro = falha do próprio ESLint.
+  if (r.status === 0) silencio(); // ESTADO 1
+
+  if (r.status !== 1) {
+    naoVerificavel(
+      `o ESLint terminou com código ${r.status} (falha da ferramenta, não do código)`,
+      saida ? `Saída: ${saida.slice(0, 400)}` : 'Sem saída.',
+    );
+  }
+
+  // ESTADO 2 — verificado e reprovado.
+  const arquivoCurto = filePath.startsWith(raiz) ? filePath.slice(raiz.length + 1) : filePath;
+  const appCurto = appDir.startsWith(raiz) ? appDir.slice(raiz.length + 1) : appDir;
+
+  if (MODO === 'aviso') {
+    process.stdout.write(
+      JSON.stringify({
+        systemMessage: `[${HOOK}] ESTADO 2 — ESLint reprovou ${arquivoCurto} (fase de aviso, não bloqueado).`,
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext:
+            `[${HOOK}] ESTADO 2 — o ESLint reprovou ${arquivoCurto}:\n\n${saida}\n\n` +
+            `O hook está em FASE DE AVISO e não bloqueou. Corrija mesmo assim. ` +
+            `Para o que for mecânico, 'npm run lint:fix' dentro de ${appCurto} resolve — revise o diff.`,
+        },
+      }),
+    );
     process.exit(0);
   }
 
-  const raw = payload?.tool_input?.file_path;
-  if (typeof raw !== 'string' || !raw) process.exit(0);
-
-  const filePath = resolve(raw);
-  if (!/\.(ts|tsx)$/.test(filePath)) process.exit(0);
-  if (!existsSync(filePath)) process.exit(0);
-
-  // Descobre a qual app o arquivo pertence — o ESLint precisa rodar com o cwd
-  // do app, senão não acha o .eslintrc.cjs nem os plugins.
-  const normalized = filePath.replace(/\\/g, '/');
-  const appDir = ['apps/api', 'apps/web']
-    .map((a) => join(PROJECT_DIR, a))
-    .find((dir) => normalized.startsWith(dir.replace(/\\/g, '/') + '/'));
-
-  if (!appDir) process.exit(0);
-  if (!existsSync(join(appDir, 'node_modules'))) process.exit(0);
-  if (!existsSync(join(appDir, '.eslintrc.cjs'))) process.exit(0);
-
-  // Migrations, dist e afins já estão em ignorePatterns; o ESLint avisa que o
-  // arquivo foi ignorado, o que não é erro — --no-warn-ignored não existe no
-  // ESLint 8, então tratamos a mensagem abaixo.
-  let output = '';
-  try {
-    execFileSync(
-      'npx',
-      ['--no-install', 'eslint', '--format=stylish', '--no-error-on-unmatched-pattern', filePath],
-      { cwd: appDir, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 60_000 },
-    );
-    process.exit(0); // Sem erro de lint.
-  } catch (err) {
-    output = `${err.stdout ?? ''}${err.stderr ?? ''}`.trim();
-    // npx/eslint indisponível ou arquivo ignorado: não é erro de código.
-    if (!output || /--no-ignore|was ignored|Cannot find module|not found/i.test(output)) {
-      process.exit(0);
-    }
-  }
-
   process.stderr.write(
-    `[lint-changed-file] ESLint reprovou ${normalized.replace(PROJECT_DIR + '/', '')}:\n\n${output}\n\n` +
-      'Corrija antes de continuar. Para o que for puramente mecânico, ' +
-      `\`npm run lint:fix\` dentro de ${appDir.replace(PROJECT_DIR + '/', '')} resolve — ` +
-      'mas revise o diff, porque --fix altera arquivos.\n',
+    `[${HOOK}] ESLint reprovou ${arquivoCurto}:\n\n${saida}\n\n` +
+      `Corrija antes de continuar. Para o que for puramente mecânico, ` +
+      `'npm run lint:fix' dentro de ${appCurto} resolve — mas revise o diff, porque --fix altera arquivos.\n`,
   );
   process.exit(2);
 }

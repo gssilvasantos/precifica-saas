@@ -61,17 +61,45 @@ function readStdin() {
   }
 }
 
+/**
+ * Estado 3 do contrato de três estados do MPES (D1): o hook foi acionado e não
+ * conseguiu avaliar o pedido. Avisa sem bloquear e sem pedir autorização —
+ * exit 0 SEM permissionDecision deixa o fluxo normal de permissão valer.
+ */
+function naoVerificavel(motivo) {
+  process.stdout.write(
+    JSON.stringify({
+      systemMessage:
+        `[guard-sensitive-write] ESTADO 3 — não foi possível verificar: ${motivo}. ` +
+        'A escrita NÃO foi avaliada contra as regras de arquivo sensível.',
+    }),
+  );
+  process.exit(0);
+}
+
 function main() {
   let payload;
   try {
     payload = JSON.parse(readStdin());
   } catch {
-    process.exit(0); // Entrada inesperada: não atrapalha o fluxo.
+    naoVerificavel('a entrada recebida não é um JSON válido');
   }
 
   const input = payload?.tool_input ?? {};
   const path = input.file_path ?? input.notebook_path ?? '';
-  if (!path) process.exit(0);
+
+  // Ferramenta de escrita sem caminho legível: não dá para avaliar (estado 3).
+  // Qualquer outra ferramenta: N/A, silêncio correto.
+  if (!path) {
+    const ferramenta = String(payload?.tool_name ?? '');
+    if (/write|edit|notebook/i.test(ferramenta)) {
+      naoVerificavel(
+        `a ferramenta ${ferramenta} não trouxe um caminho de arquivo legível ` +
+          `(campos vistos: ${Object.keys(input).join(', ') || 'nenhum'})`,
+      );
+    }
+    process.exit(0);
+  }
 
   const normalized = String(path).replace(/\\/g, '/');
 

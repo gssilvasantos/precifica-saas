@@ -44,27 +44,66 @@ function emit(text) {
   process.exit(0);
 }
 
+/**
+ * Estado 3 do contrato de três estados do MPES (D1): o arquivo é de schema ou
+ * migration e não pôde ser analisado. Avisa — nunca silêncio, que seria lido
+ * como "analisado e sem pendência de RLS".
+ */
+function naoVerificavel(arquivo, motivo, comoRestaurar) {
+  process.stdout.write(
+    JSON.stringify({
+      systemMessage: `[migration-notice] ESTADO 3 — não foi possível verificar ${arquivo}: ${motivo}.`,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext:
+          `[migration-notice] ESTADO 3 — ${arquivo} NÃO foi analisado: ${motivo}. ` +
+          `${comoRestaurar} Confira à mão se há tabela nova sem o par ` +
+          'apply_*_rls_only.sql + grant_app_runtime_*.sql, e se há operação destrutiva.',
+      },
+    }),
+  );
+  process.exit(0);
+}
+
 function main() {
   let payload;
   try {
     payload = JSON.parse(readStdin());
   } catch {
-    process.exit(0);
+    naoVerificavel(
+      '(arquivo desconhecido)',
+      'a entrada recebida não é um JSON válido',
+      'Verifique a configuração do hook em .claude/settings.json.',
+    );
   }
 
   const path = payload?.tool_input?.file_path;
-  if (typeof path !== 'string' || !path) process.exit(0);
+  if (typeof path !== 'string' || !path) process.exit(0); // N/A
 
   const normalized = path.replace(/\\/g, '/');
   const isSchema = /prisma\/schema\.prisma$/.test(normalized);
   const isMigration = /prisma\/(migrations|manual-migrations)\/.+\.sql$/.test(normalized);
-  if (!isSchema && !isMigration) process.exit(0);
+  if (!isSchema && !isMigration) process.exit(0); // N/A
 
+  const MAX_BYTES = 2 * 1024 * 1024;
   let content = '';
   try {
-    if (statSync(path).size < 2 * 1024 * 1024) content = readFileSync(path, 'utf8');
-  } catch {
-    process.exit(0);
+    const tamanho = statSync(path).size;
+    if (tamanho >= MAX_BYTES) {
+      // Antes: content ficava vazio e o hook "aprovava" em silêncio.
+      naoVerificavel(
+        normalized,
+        `o arquivo tem ${Math.round(tamanho / 1024)} KB, acima do teto de ${MAX_BYTES / 1024} KB`,
+        'Analise o conteúdo manualmente.',
+      );
+    }
+    content = readFileSync(path, 'utf8');
+  } catch (err) {
+    naoVerificavel(
+      normalized,
+      `não foi possível ler o arquivo (${err?.code ?? 'erro desconhecido'})`,
+      'Se o arquivo foi removido, ignore este aviso.',
+    );
   }
 
   const notes = [];

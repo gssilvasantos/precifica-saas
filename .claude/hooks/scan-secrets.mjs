@@ -55,26 +55,63 @@ function readStdin() {
   }
 }
 
+/**
+ * Estado 3 do contrato de três estados do MPES (D1): o arquivo deveria ter sido
+ * varrido e não foi. Avisa o usuário e informa o agente — nunca silêncio, que
+ * seria indistinguível de "varrido e limpo".
+ */
+function naoVerificavel(arquivo, motivo, comoRestaurar) {
+  process.stdout.write(
+    JSON.stringify({
+      systemMessage: `[scan-secrets] ESTADO 3 — não foi possível verificar ${arquivo}: ${motivo}.`,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext:
+          `[scan-secrets] ESTADO 3 — o arquivo ${arquivo} NÃO foi varrido em busca de segredo: ` +
+          `${motivo}. ${comoRestaurar} Não trate este arquivo como verificado.`,
+      },
+    }),
+  );
+  process.exit(0);
+}
+
 function main() {
   let payload;
   try {
     payload = JSON.parse(readStdin());
   } catch {
-    process.exit(0);
+    naoVerificavel(
+      '(arquivo desconhecido)',
+      'a entrada recebida não é um JSON válido',
+      'Verifique a configuração do hook em .claude/settings.json.',
+    );
   }
 
   const path = payload?.tool_input?.file_path;
-  if (typeof path !== 'string' || !path) process.exit(0);
+  if (typeof path !== 'string' || !path) process.exit(0); // N/A
 
   const normalized = path.replace(/\\/g, '/');
-  if (ALLOWLIST.some((r) => r.test(normalized))) process.exit(0);
+  if (ALLOWLIST.some((r) => r.test(normalized))) process.exit(0); // N/A: isento por allowlist
 
   let content;
   try {
-    if (statSync(path).size > MAX_BYTES) process.exit(0);
+    const tamanho = statSync(path).size;
+    if (tamanho > MAX_BYTES) {
+      // Antes: exit(0) silencioso. Um segredo em arquivo grande passava sem
+      // varredura E sem aviso — o mesmo defeito do F01, em outro mecanismo.
+      naoVerificavel(
+        normalized,
+        `o arquivo tem ${Math.round(tamanho / 1024)} KB, acima do teto de ${MAX_BYTES / 1024} KB`,
+        'Confira manualmente se há credencial neste arquivo.',
+      );
+    }
     content = readFileSync(path, 'utf8');
-  } catch {
-    process.exit(0); // Arquivo removido ou binário: nada a fazer.
+  } catch (err) {
+    naoVerificavel(
+      normalized,
+      `não foi possível ler o arquivo (${err?.code ?? 'erro desconhecido'})`,
+      'Se o arquivo foi removido ou é binário, ignore este aviso.',
+    );
   }
 
   const hits = [];
