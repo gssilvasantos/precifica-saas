@@ -62,7 +62,8 @@ apps/web/CLAUDE.md                 contexto de escopo do frontend
 │   ├── guard-sensitive-write.mjs  bloqueia escrita em .env, migrations aplicadas, lockfiles
 │   ├── guard-destructive-bash.mjs barra reset de banco, push, deploy, install, rm -rf
 │   ├── scan-secrets.mjs           varre o arquivo recém-escrito em busca de segredo
-│   └── migration-notice.mjs       lembra de RLS/grants e sinaliza SQL destrutivo
+│   ├── migration-notice.mjs       lembra de RLS/grants e sinaliza SQL destrutivo
+│   └── lint-changed-file.mjs      roda o ESLint só no arquivo .ts/.tsx recém-editado
 ├── skills/product-engineering-studio/
 │   ├── SKILL.md                   processo A→G + limites
 │   ├── references/                13 checklists por área
