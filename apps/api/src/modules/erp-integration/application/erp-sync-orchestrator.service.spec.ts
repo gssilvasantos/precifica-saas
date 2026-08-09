@@ -48,7 +48,7 @@ function construirOrquestrador() {
     fetchAllActiveProductDetails: jest.fn(),
     obterProduto: jest.fn(),
   };
-  const photoMirror = { mirrorAll: jest.fn().mockResolvedValue([]) };
+  const photoMirror = { mirrorAll: jest.fn().mockResolvedValue({ urls: [], houveFalha: false }) };
 
   const orchestrator = new ErpSyncOrchestrator(
     connections as never,

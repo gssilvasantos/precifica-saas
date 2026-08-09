@@ -295,7 +295,15 @@ export class ErpSyncOrchestrator {
     // pai é corrigido no Olist, o hash muda, a variação é reprocessada e o
     // writer a adota — sem isso o atalho abaixo a pularia para sempre, já que
     // os dados dela no ERP nunca mudaram.
-    const contentHash = computeContentHash({ ...normalized, paiImportado: variacao?.paiImportado ?? null });
+    // `hasCompleteDimensions` fica FORA do hash (09/08/2026). Ela é derivada
+    // de weightKg/lengthCm/widthCm/heightCm, que já estão aqui dentro — não
+    // acrescenta um bit de informação ao hash. Incluí-la, porém, mudaria o
+    // hash de TODOS os SKUs já sincronizados de uma vez, e o próximo sync
+    // reprocessaria o catálogo inteiro: 1.804 upserts e o re-espelhamento de
+    // toda foto, justo na volta de uma conta que acabou de sair de bloqueio
+    // por cota. Excluir a flag mantém cada hash existente válido.
+    const { hasCompleteDimensions: _derivadaDoResto, ...paraHash } = normalized;
+    const contentHash = computeContentHash({ ...paraHash, paiImportado: variacao?.paiImportado ?? null });
     const previous = await this.changeEvents.findByExternalId(tenantId, normalized.externalId);
 
     const semDimensoes = !normalized.hasCompleteDimensions;
@@ -307,7 +315,11 @@ export class ErpSyncOrchestrator {
       return { changed: false, semDimensoes };
     }
 
-    const photoUrls = await this.photoMirror.mirrorAll(tenantId, normalized.skuCode, normalized.photoUrls);
+    const { urls: photoUrls, houveFalha: fotoFalhou } = await this.photoMirror.mirrorAll(
+      tenantId,
+      normalized.skuCode,
+      normalized.photoUrls,
+    );
 
     const { changed } = await this.catalogWriter.upsertFromExternalSource({
       tenantId,
@@ -339,7 +351,13 @@ export class ErpSyncOrchestrator {
       skuCode: normalized.skuCode,
       changeSummary: previous ? 'Produto atualizado a partir do Olist.' : 'Produto importado do Olist pela primeira vez.',
       action: previous ? 'UPDATED' : 'CREATED',
-      contentHash,
+      // FOTO PENDENTE (09/08/2026): quando alguma foto falhou, grava um hash
+      // que nunca vai bater com o hash limpo calculado no próximo sync. O
+      // produto é reprocessado e a foto retentada, em vez de ficar perdida
+      // para sempre atrás do atalho de "hash igual, pula". O sufixo é estável,
+      // então uma falha que se repete continua forçando nova tentativa — não
+      // vira um hash novo a cada passada.
+      contentHash: fotoFalhou ? `${contentHash}:fotos-pendentes` : contentHash,
     });
 
     return { changed, semDimensoes };
