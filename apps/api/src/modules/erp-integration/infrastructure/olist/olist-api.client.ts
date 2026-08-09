@@ -9,7 +9,11 @@ const BASE_URL = 'https://api.tiny.com.br/api2';
 // ("API Bloqueada - Excedido o número de acessos a API"), não com 429 — por
 // isso a detecção é por texto, não por status. Sem isso, o retry nunca
 // dispararia para o único erro em que ele realmente importa.
-function isRateLimitError(error: unknown): boolean {
+// Exportado (09/08/2026) porque o ErpSyncOrchestrator precisa do MESMO
+// predicado para NÃO re-tentar uma busca que já morreu por cota — ver o
+// comentário em ErpSyncOrchestrator.withRetry. Duas definições do que é
+// "bloqueio de cota" divergiriam com o tempo; esta é a única.
+export function isRateLimitError(error: unknown): boolean {
   const message = (error as Error)?.message ?? '';
   return /API Bloqueada|Excedido o n[úu]mero de acessos/i.test(message);
 }

@@ -53,13 +53,29 @@ export class CatalogSyncWriterService implements ProductCatalogWriter {
     // Recalcula peso cubado/frete a cada sync — o ERP é a fonte da verdade
     // para dimensões, então qualquer mudança física precisa refletir aqui,
     // exatamente como no fluxo manual (ProductsService.update).
-    const weights = await this.shippingWeight.calculate(data.tenantId, {
-      weightKg: data.weightKg,
-      packagingWeightKg: data.packagingWeightKg,
-      lengthCm: data.lengthCm,
-      widthCm: data.widthCm,
-      heightCm: data.heightCm,
-    });
+    //
+    // Cadastro sem dimensão não pode derrubar a importação (03/08/2026): o
+    // calculador de peso cubado lança quando qualquer medida é zero, e no
+    // catálogo real isso é a maioria dos SKUs. Sem dimensão simplesmente não
+    // existe peso cubado — então o peso de frete é o peso embalado, e nada
+    // mais. É um piso, não uma estimativa: quando as dimensões forem
+    // preenchidas no ERP, o próximo sync recalcula.
+    const temDimensoes =
+      data.weightKg > 0 && data.lengthCm > 0 && data.widthCm > 0 && data.heightCm > 0;
+
+    const weights = temDimensoes
+      ? await this.shippingWeight.calculate(data.tenantId, {
+          weightKg: data.weightKg,
+          packagingWeightKg: data.packagingWeightKg,
+          lengthCm: data.lengthCm,
+          widthCm: data.widthCm,
+          heightCm: data.heightCm,
+        })
+      : {
+          packedWeightKg: data.weightKg + data.packagingWeightKg,
+          cubicWeightKg: 0,
+          shippingWeightKg: data.weightKg + data.packagingWeightKg,
+        };
 
     if (!existing) {
       // Produto nunca visto antes deste externalId: cria com margem padrão

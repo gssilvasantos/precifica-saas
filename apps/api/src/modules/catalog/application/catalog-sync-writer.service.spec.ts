@@ -66,6 +66,48 @@ describe('CatalogSyncWriterService — campos fiscais', () => {
     ...fiscais,
   });
 
+  // O calculador de peso cubado lança quando qualquer medida é zero, e no
+  // catálogo real isso é a maioria dos SKUs. Sem dimensão não existe peso
+  // cubado — o peso de frete vira o peso embalado, e o produto entra.
+  describe('cadastro sem dimensões', () => {
+    const SEM_DIMENSOES = { ...DADOS_DO_SYNC, lengthCm: 0, widthCm: 0, heightCm: 0 };
+
+    it('importa sem chamar o calculador de peso cubado', async () => {
+      const calculator = { calculate: jest.fn() };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          CatalogSyncWriterService,
+          { provide: PRODUCT_REPOSITORY, useValue: products },
+          { provide: SHIPPING_WEIGHT_CALCULATOR, useValue: calculator },
+          {
+            provide: CatalogSettingsService,
+            useValue: { getDefaultMargins: jest.fn().mockResolvedValue({ desiredMarginPct: 20, minimumMarginPct: 8 }) },
+          },
+        ],
+      }).compile();
+
+      await moduleRef.get(CatalogSyncWriterService).upsertFromExternalSource(SEM_DIMENSOES);
+
+      expect(calculator.calculate).not.toHaveBeenCalled();
+      expect(products.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          // peso embalado = 0,012 + 0,018; sem cubagem possível.
+          packedWeightKg: 0.03,
+          cubicWeightKg: 0,
+          shippingWeightKg: 0.03,
+        }),
+      );
+    });
+
+    it('preserva custo, estoque e campos fiscais do produto sem dimensão', async () => {
+      await service.upsertFromExternalSource(SEM_DIMENSOES);
+
+      expect(products.create).toHaveBeenCalledWith(
+        expect.objectContaining({ costPrice: 12.5, stockQuantity: 40, ncm: '3304.99.90' }),
+      );
+    });
+  });
+
   describe('produto novo', () => {
     it('grava os campos fiscais como vieram do ERP', async () => {
       await service.upsertFromExternalSource(DADOS_DO_SYNC);

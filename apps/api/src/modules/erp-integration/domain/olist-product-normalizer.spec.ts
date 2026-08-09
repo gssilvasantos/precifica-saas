@@ -177,17 +177,51 @@ describe('normalizeOlistProduct', () => {
     });
   });
 
-  describe('rejeições que continuam valendo', () => {
-    it('rejeita produto sem dimensões, mesmo com NCM completo', () => {
-      expect(() =>
-        normalizeOlistProduct({
-          produto: { ...PRODUTO_OLIST, comprimento: '0', ncm: '3304.99.90' },
-        }),
-      ).toThrow(InvalidOlistProductError);
+  // O primeiro sync real contra a conta rejeitou 1.803 de 1.804 SKUs: o Olist
+  // tem o peso preenchido e as dimensões zeradas. Descartar o produto inteiro
+  // por isso joga fora custo, estoque, NCM, categoria e SKU.
+  describe('cadastro sem dimensões — importa marcado, não rejeita', () => {
+    const semDimensoes = { ...PRODUTO_OLIST, comprimento: '0', largura: '0', altura: '0' };
+
+    it('não rejeita, e preserva todo o resto do cadastro', () => {
+      const p = normalizeOlistProduct({ produto: { ...semDimensoes, ncm: '3304.99.90' } });
+
+      expect(p.hasCompleteDimensions).toBe(false);
+      expect(p.skuCode).toBe('BAT-VM-4G');
+      expect(p.costPrice).toBe(12.5);
+      expect(p.stockQuantity).toBe(40);
+      expect(p.ncm).toBe('3304.99.90');
     });
 
-    it('rejeita produto sem SKU', () => {
+    it('marca como completo quando peso e as três medidas estão preenchidos', () => {
+      expect(normalizeOlistProduct({ produto: PRODUTO_OLIST }).hasCompleteDimensions).toBe(true);
+    });
+
+    it.each([
+      ['comprimento', { comprimento: '0' }],
+      ['largura', { largura: '0' }],
+      ['altura', { altura: '0' }],
+      ['peso', { peso_liquido: '0' }],
+    ])('marca como incompleto quando falta %s', (_campo, override) => {
+      expect(normalizeOlistProduct({ produto: { ...PRODUTO_OLIST, ...override } }).hasCompleteDimensions).toBe(
+        false,
+      );
+    });
+  });
+
+  // O que continua rejeitando: só o que torna o registro sem sentido.
+  describe('rejeições que continuam valendo', () => {
+    it('rejeita produto sem SKU — não há como vincular a anúncio nenhum', () => {
       expect(() => normalizeOlistProduct({ produto: { ...PRODUTO_OLIST, codigo: '' } })).toThrow(
+        InvalidOlistProductError,
+      );
+    });
+
+    it('rejeita produto sem id e sem nome', () => {
+      expect(() => normalizeOlistProduct({ produto: { ...PRODUTO_OLIST, id: '' } })).toThrow(
+        InvalidOlistProductError,
+      );
+      expect(() => normalizeOlistProduct({ produto: { ...PRODUTO_OLIST, nome: '' } })).toThrow(
         InvalidOlistProductError,
       );
     });

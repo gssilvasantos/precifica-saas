@@ -3,3 +3,7 @@ dist/
 .env
 *.log
 .DS_Store
+
+# Saída do scripts/inspect-olist-product.ts — contém dados de catálogo de um
+# tenant real (código, nome, NCM, GTIN). Diagnóstico local, nunca versionado.
+olist-inspect*.txt

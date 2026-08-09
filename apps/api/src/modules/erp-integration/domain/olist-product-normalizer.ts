@@ -23,6 +23,11 @@ export interface NormalizedOlistProduct {
   lengthCm: number;
   widthCm: number;
   heightCm: number;
+  // false = o cadastro no Olist está sem peso ou sem dimensões. O produto é
+  // importado assim mesmo (ver o comentário longo em normalizeOlistProduct);
+  // este sinal existe para o sync avisar o usuário e para o motor de preço
+  // saber que não pode estimar frete deste SKU.
+  hasCompleteDimensions: boolean;
   photoUrls: string[]; // URLs ORIGINAIS do Olist — ainda não espelhadas (isso é papel do ProductPhotoMirrorService)
 
   // Campos fiscais (02/08/2026). Ausentes até aqui, o que deixava o catálogo
@@ -207,13 +212,22 @@ export function normalizeOlistProduct(rawEnvelope: unknown, stockOverride?: numb
   const widthCm = toNumber(raw.largura, 0) ?? 0;
   const heightCm = toNumber(raw.altura, 0) ?? 0;
 
-  if (lengthCm <= 0 || widthCm <= 0 || heightCm <= 0 || weightKg <= 0) {
-    throw new InvalidOlistProductError(
-      externalId,
-      `dimensões/peso inválidos (peso=${weightKg}, L=${lengthCm}, W=${widthCm}, H=${heightCm}) — ` +
-        'confira se o cadastro no Olist está completo para este SKU.',
-    );
-  }
+  // DIMENSÃO/PESO FALTANDO NÃO REJEITA MAIS O PRODUTO (03/08/2026).
+  //
+  // Até aqui isto lançava InvalidOlistProductError. O primeiro sync real
+  // contra a conta mostrou o custo dessa escolha: das 1.804 SKUs encontradas,
+  // 1.803 foram rejeitadas — o Olist tem o peso preenchido e as dimensões
+  // zeradas. A integração importava ZERO.
+  //
+  // O raciocínio original não era absurdo (dimensão alimenta peso cubado, que
+  // define frete), mas a conclusão era: jogar fora custo, estoque, NCM,
+  // categoria e SKU por causa de um campo que talvez nem seja usado naquele
+  // canal é pior do que importar o produto marcado como incompleto.
+  //
+  // É a mesma correção de filosofia já aplicada ao NCM e ao perfil fiscal:
+  // falta de informação vira SINAL, não descarte. Quem deve bloquear é o motor
+  // de preço, no momento em que a dimensão faz falta — não o importador.
+  const hasCompleteDimensions = weightKg > 0 && lengthCm > 0 && widthCm > 0 && heightCm > 0;
 
   return {
     externalId,
@@ -227,6 +241,7 @@ export function normalizeOlistProduct(rawEnvelope: unknown, stockOverride?: numb
     lengthCm,
     widthCm,
     heightCm,
+    hasCompleteDimensions,
     photoUrls: extractPhotoUrls(raw),
     // Nomes conforme produto.obter.php da API V2 do Olist/Tiny. Vale aqui o
     // mesmo aviso de honestidade do topo do arquivo: se algum vier com nome

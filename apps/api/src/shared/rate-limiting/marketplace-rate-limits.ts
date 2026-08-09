@@ -41,11 +41,22 @@ export const MARKETPLACE_RATE_LIMITS: Record<string, RateLimiterConfig> = {
   // 340 SKUs: "API Bloqueada - Excedido o número de acessos a API" e ZERO
   // produto importado (sem retry, o erro derrubava o sync inteiro).
   //
-  // 1 req/s = 60 req/min, o teto do plano base. Contas em plano superior
-  // (até 240 req/min) importam mais devagar do que poderiam — trade-off
-  // deliberado: um sync lento é um inconveniente, uma conta bloqueada é uma
-  // integração fora do ar.
-  OLIST: { requestsPerInterval: 1, intervalMs: 1000 },
+  // 09/08/2026 — CORREÇÃO: 1 req/s era exatamente 60 req/min, o teto do plano
+  // base. Zero folga. E o comentário acima já dizia o motivo de isso não
+  // bastar: "o token é da conta inteira, não só do Kyneti" — o painel do
+  // Olist, o app do celular e qualquer outra ferramenta do lojista consomem
+  // da MESMA cota. Rodar a 100% do limite garante bloqueio sempre que o
+  // seller abre o próprio ERP.
+  //
+  // Evidência em produção: 135 execuções de sync entre 31/07 e 09/08, todas
+  // as recentes falhando com "API Bloqueada", ZERO produto importado. O
+  // catálogo do tenant real está vazio.
+  //
+  // 1 req a cada 1333ms = 45 req/min = 75% do teto, deixando 15 req/min para
+  // o resto da conta. Espaçamento estrito (bucket de 1 token) em vez de
+  // rajada: o bloqueio do Tiny é por janela de minuto, então o que importa é
+  // a taxa média, e uma rajada inicial só antecipa o estouro.
+  OLIST: { requestsPerInterval: 1, intervalMs: 1333 },
 };
 
 // Fail-safe para qualquer canal sem entrada explícita acima — conservador

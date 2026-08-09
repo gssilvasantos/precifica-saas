@@ -20,7 +20,7 @@ import {
 } from '../../../shared/sync-ops/ports/provider-health-repository.port';
 import { computeContentHash } from '../../../shared/domain/content-hash';
 import { CredentialEncryptionService } from '../../../shared/security/credential-encryption.service';
-import { OlistApiClient } from '../infrastructure/olist/olist-api.client';
+import { OlistApiClient, isRateLimitError } from '../infrastructure/olist/olist-api.client';
 import { ProductPhotoMirrorService } from './product-photo-mirror.service';
 import {
   InvalidOlistProductError,
@@ -46,6 +46,23 @@ const BACKOFF_MS = [2000, 8000, 32000];
 @Injectable()
 export class ErpSyncOrchestrator {
   private readonly logger = new Logger(ErpSyncOrchestrator.name);
+
+  // Tenants com sync em andamento AGORA, neste processo (09/08/2026).
+  //
+  // Um sync completo do catálogo real levou 54 minutos (1.804 SKUs a 1 req/s);
+  // o scheduler acorda a cada 30. Sem trava, a segunda rodada começava com a
+  // primeira ainda correndo e as duas dividiam a mesma cota de 60 req/min da
+  // conta — dobrando a taxa efetiva e garantindo "API Bloqueada". O botão
+  // "Sincronizar agora" some no mesmo caldo: nada impedia N cliques, N syncs.
+  //
+  // LIMITAÇÃO CONHECIDA E DELIBERADA: a trava é por PROCESSO. Com mais de uma
+  // instância da API no Render, duas instâncias ainda podem sincronizar o
+  // mesmo tenant em paralelo. A trava correta seria um lock no Postgres
+  // (advisory lock ou linha com owner+expiração), e isso exige tabela nova com
+  // RLS + grants — fatia própria, não escondida dentro de uma correção de
+  // rate limit. Hoje a API roda em instância única, então isto resolve o caso
+  // real; se o serviço escalar horizontalmente, esta trava vira insuficiente.
+  private readonly syncsEmAndamento = new Set<string>();
 
   constructor(
     @Inject(OLIST_CONNECTION_REPOSITORY) private readonly connections: OlistConnectionRepository,
@@ -88,6 +105,16 @@ export class ErpSyncOrchestrator {
   // demais (não rethrow aqui) — só syncNow (chamada manual) precisa saber na
   // hora, e faz isso lendo o retorno.
   async syncTenant(tenantId: string): Promise<{ success: boolean; error?: string }> {
+    // Trava ANTES de abrir ProviderSyncLog: uma tentativa recusada por já
+    // haver sync rodando não é uma execução, e registrá-la só encheria o
+    // histórico de ruído (foi o que aconteceu com as 135 linhas de falha).
+    if (this.syncsEmAndamento.has(tenantId)) {
+      const message = 'Já existe uma sincronização do Olist em andamento para esta conta.';
+      this.logger.warn(`${message} (tenant ${tenantId}) — nova execução ignorada.`);
+      return { success: false, error: message };
+    }
+    this.syncsEmAndamento.add(tenantId);
+
     const correlationId = randomUUID();
     const logId = await this.syncLogs.start(PROVIDER_CODE, correlationId);
     let candidatesFound = 0;
@@ -109,6 +136,9 @@ export class ErpSyncOrchestrator {
       // sem nenhuma pista de que N SKUs ficaram de fora nem quais. Ver
       // docs/olist-import-design.md.
       const rejected: string[] = [];
+      // Produto importado, mas sem peso/dimensão no cadastro do Olist — entra
+      // no catálogo e é contado para o aviso. Ver buildPartialSyncWarning.
+      let semDimensoes = 0;
 
       // Variações (02/08/2026): o Olist só devolve os PAIS em
       // produtos.pesquisa.php — as variações vêm dentro do detalhe de cada
@@ -127,7 +157,9 @@ export class ErpSyncOrchestrator {
         // uma casca mal preenchida apagava toda a linha do catálogo.
         let paiImportado = false;
         try {
-          if (await this.processProduct(tenantId, raw)) candidatesApplied++;
+          const resultado = await this.processProduct(tenantId, raw);
+          if (resultado.changed) candidatesApplied++;
+          if (resultado.semDimensoes) semDimensoes++;
           paiImportado = true;
         } catch (error) {
           const motivo = error instanceof InvalidOlistProductError ? error.message : (error as Error).message;
@@ -149,6 +181,7 @@ export class ErpSyncOrchestrator {
           );
           candidatesFound += variacoes.length;
           candidatesApplied += resultado.applied;
+          semDimensoes += resultado.semDimensoes;
           rejected.push(...resultado.rejected);
         } catch (error) {
           this.logger.error(`Falha ao processar variações do tenant ${tenantId}: ${(error as Error).message}`);
@@ -161,8 +194,8 @@ export class ErpSyncOrchestrator {
       // esconderia o que funcionou (e sugeriria que nada entrou); SUCCESS
       // silencioso esconderia o que não funcionou.
       const warning =
-        rejected.length > 0 || failedCount > 0
-          ? buildPartialSyncWarning(rejected, failedCount, candidatesApplied, candidatesFound)
+        rejected.length > 0 || failedCount > 0 || semDimensoes > 0
+          ? buildPartialSyncWarning(rejected, failedCount, candidatesApplied, candidatesFound, semDimensoes)
           : null;
 
       const syncedAt = new Date();
@@ -193,6 +226,11 @@ export class ErpSyncOrchestrator {
         `Sync do Olist falhou para o tenant ${tenantId} (${consecutiveFailures} falhas consecutivas): ${message}`,
       );
       return { success: false, error: message };
+    } finally {
+      // Libera SEMPRE — sucesso, falha de negócio ou exceção inesperada. Um
+      // finally esquecido aqui deixaria o tenant travado até o próximo
+      // restart do processo, que é uma falha pior que a corrida original.
+      this.syncsEmAndamento.delete(tenantId);
     }
   }
 
@@ -209,19 +247,21 @@ export class ErpSyncOrchestrator {
     parentExternalId: string,
     variacoes: OlistVariationRef[],
     paiImportado: boolean,
-  ): Promise<{ applied: number; rejected: string[] }> {
+  ): Promise<{ applied: number; rejected: string[]; semDimensoes: number }> {
     let applied = 0;
+    let semDimensoes = 0;
     const rejected: string[] = [];
 
     for (const variacao of variacoes) {
       try {
         const detalhe = await this.withRetry(() => this.client.obterProduto(apiToken, variacao.externalId));
-        const changed = await this.processProduct(tenantId, detalhe, {
+        const resultado = await this.processProduct(tenantId, detalhe, {
           parentExternalId,
           variantAttributes: variacao.variantAttributes,
           paiImportado,
         });
-        if (changed) applied++;
+        if (resultado.changed) applied++;
+        if (resultado.semDimensoes) semDimensoes++;
       } catch (error) {
         const motivo =
           error instanceof InvalidOlistProductError
@@ -232,14 +272,14 @@ export class ErpSyncOrchestrator {
       }
     }
 
-    return { applied, rejected };
+    return { applied, rejected, semDimensoes };
   }
 
   private async processProduct(
     tenantId: string,
     raw: unknown,
     variacao?: { parentExternalId: string; variantAttributes: Record<string, string>; paiImportado: boolean },
-  ): Promise<boolean> {
+  ): Promise<{ changed: boolean; semDimensoes: boolean }> {
     const normalized = normalizeOlistProduct(raw);
 
     // Hash sobre os dados ORIGINAIS do Olist (antes de espelhar fotos) —
@@ -258,8 +298,13 @@ export class ErpSyncOrchestrator {
     const contentHash = computeContentHash({ ...normalized, paiImportado: variacao?.paiImportado ?? null });
     const previous = await this.changeEvents.findByExternalId(tenantId, normalized.externalId);
 
+    const semDimensoes = !normalized.hasCompleteDimensions;
+
     if (previous && previous.contentHash === contentHash) {
-      return false; // nada mudou — não baixa foto de novo, não toca no Catalog
+      // Nada mudou — não baixa foto de novo, não toca no Catalog. Mas o SKU
+      // continua sem dimensão, e o aviso precisa refletir o estado do
+      // catálogo, não só o que foi escrito nesta passada.
+      return { changed: false, semDimensoes };
     }
 
     const photoUrls = await this.photoMirror.mirrorAll(tenantId, normalized.skuCode, normalized.photoUrls);
@@ -297,7 +342,7 @@ export class ErpSyncOrchestrator {
       contentHash,
     });
 
-    return changed;
+    return { changed, semDimensoes };
   }
 
   private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
@@ -307,6 +352,20 @@ export class ErpSyncOrchestrator {
         return await fn();
       } catch (error) {
         lastError = error;
+
+        // AMPLIFICAÇÃO DE BLOQUEIO (corrigido em 09/08/2026). O OlistApiClient
+        // já re-tenta bloqueio de cota por conta própria, 4 vezes, com
+        // 10s→30s→60s. Quando o erro chega aqui, a conta continuou bloqueada
+        // depois de ~100s de espera. Re-tentar a busca INTEIRA neste ponto
+        // fazia até 12 varreduras completas do catálogo contra uma conta já
+        // suspensa — cada uma gastando mais cota e renovando o bloqueio.
+        //
+        // Foi assim que a integração ficou fora do ar: 135 syncs entre 31/07 e
+        // 09/08, os recentes todos em "API Bloqueada", zero produto importado.
+        // Cota é o único erro em que insistir PIORA o problema; desiste rápido
+        // e deixa a próxima janela do scheduler tentar com a conta liberada.
+        if (isRateLimitError(error)) throw error;
+
         if (attempt < MAX_ATTEMPTS - 1) {
           await new Promise((resolve) => setTimeout(resolve, BACKOFF_MS[attempt]));
         }
@@ -330,14 +389,25 @@ export function buildPartialSyncWarning(
   failedCount: number,
   applied: number,
   found: number,
+  semDimensoes = 0,
 ): string {
   const parts = [`Importados ${applied} de ${found} produtos do Olist.`];
 
-  if (rejected.length > 0) {
+  // Produto SEM DIMENSÃO é importado, não rejeitado (03/08/2026) — mas o
+  // usuário precisa saber, porque sem dimensão não há peso cubado e o frete
+  // deixa de ser estimável para esses SKUs. Antes desta mudança eles eram
+  // descartados: no primeiro sync real, 1.803 de 1.804.
+  if (semDimensoes > 0) {
     parts.push(
-      `${rejected.length} rejeitado(s) por cadastro incompleto no Olist ` +
-        '(peso ou dimensões faltando — o Kyneti não grava produto pela metade).',
+      `${semDimensoes} produto(s) importado(s) SEM peso ou dimensões no cadastro do Olist. ` +
+        'Eles entraram no catálogo com os demais dados, mas o frete não pode ser estimado ' +
+        'enquanto as medidas não forem preenchidas — preencha no Olist e sincronize de novo, ' +
+        'ou edite direto no cadastro do produto.',
     );
+  }
+
+  if (rejected.length > 0) {
+    parts.push(`${rejected.length} não pôde(puderam) ser processado(s):`);
     parts.push(...rejected.slice(0, MAX_REASONS_SHOWN).map((r) => `• ${r}`));
     if (rejected.length > MAX_REASONS_SHOWN) {
       parts.push(`• ...e mais ${rejected.length - MAX_REASONS_SHOWN}. Ver log completo do servidor.`);
