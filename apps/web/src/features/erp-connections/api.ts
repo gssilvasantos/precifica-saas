@@ -11,11 +11,20 @@ export interface NuvemshopConnectionStatus {
   lastSyncError: string | null;
 }
 
+// PARTIAL = sincronizou e importou, mas parte do catálogo ficou de fora
+// (cadastro incompleto no Olist, ou produto que a API não devolveu). Nem
+// SUCCESS nem FAILED contam a verdade nesse caso — ver o comentário em
+// OlistConnectionRepository.markSyncedWithWarning, no backend.
+//
+// O tipo era `string | null`, o que deixou a UI ignorar PARTIAL em silêncio
+// por não haver nada que apontasse o caso faltante.
+export type OlistSyncStatus = 'SUCCESS' | 'FAILED' | 'PARTIAL';
+
 export interface OlistConnectionStatus {
   connected: boolean;
   isActive: boolean;
   lastSyncedAt: string | null;
-  lastSyncStatus: string | null;
+  lastSyncStatus: OlistSyncStatus | null;
   lastSyncError: string | null;
 }
 

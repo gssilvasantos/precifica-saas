@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { connectOlist, disconnectOlist, fetchOlistStatus, syncOlistNow } from '../api';
+import { connectOlist, disconnectOlist, fetchOlistStatus, syncOlistNow, type OlistSyncStatus } from '../api';
 import { extractErrorMessage } from '../../../lib/extract-error-message';
 import { ConnectionStatusBadge } from './ConnectionStatusBadge';
 import { Card } from '../../../components/ui/card';
@@ -39,7 +39,11 @@ export function OlistConnectionCard() {
   const syncMutation = useMutation({
     mutationFn: syncOlistNow,
     onSuccess: () => {
-      setSyncMessage('Sincronização disparada — o catálogo é atualizado em instantes.');
+      // O endpoint é SÍNCRONO: quando esta promessa resolve, o sync já
+      // terminou. "disparada — atualizado em instantes" descrevia um trabalho
+      // em background que não existe, e aparecia em verde mesmo quando o sync
+      // tinha deixado o catálogo inteiro de fora.
+      setSyncMessage('Sincronização concluída.');
       void queryClient.invalidateQueries({ queryKey: ['olist-status'] });
     },
   });
@@ -76,10 +80,8 @@ export function OlistConnectionCard() {
 
       {/* Mesmo racional do card da Nuvemshop — mostra o motivo mesmo sem clicar
           em "Sincronizar agora" (cobre falha do scheduler automático). */}
-      {status?.connected && status.lastSyncStatus === 'FAILED' && status.lastSyncError && (
-        <p className="mt-3 rounded-md border border-margin-danger/30 bg-margin-danger/5 px-3 py-2 text-sm text-margin-danger">
-          Última tentativa de sincronização falhou: {status.lastSyncError}
-        </p>
+      {status?.connected && status.lastSyncError && (
+        <SyncResultNotice status={status.lastSyncStatus} detail={status.lastSyncError} />
       )}
 
       {!connected && (
@@ -130,11 +132,49 @@ export function OlistConnectionCard() {
         </div>
       )}
 
-      {syncMessage && <p className="mt-3 text-sm text-margin-good">{syncMessage}</p>}
+      {/* Verde só quando não há nada a avisar. Com pendência ou falha, quem
+          fala é o SyncResultNotice acima — duas mensagens contraditórias na
+          mesma tela é pior que nenhuma. */}
+      {syncMessage && !status?.lastSyncError && (
+        <p className="mt-3 text-sm text-margin-good">{syncMessage}</p>
+      )}
       {syncMutation.isError && (
         <p className="mt-3 text-sm text-margin-danger">{extractErrorMessage(syncMutation.error)}</p>
       )}
     </Card>
+  );
+}
+
+// Resultado da última sincronização, em três estados — não dois.
+//
+// Até 09/08/2026 este bloco só existia para FAILED. O backend escreve PARTIAL
+// quando sincronizou mas parte do catálogo ficou de fora, com uma mensagem
+// dizendo quantos SKUs entraram, quantos não, e por quê — e essa mensagem
+// nunca chegava à tela: ficava só na coluna lastSyncError do banco. Um sync
+// que deixou 1.803 produtos de fora aparecia para o usuário como sucesso.
+//
+// PARTIAL é aviso (âmbar), não erro (vermelho): houve importação, e a ação do
+// usuário é diferente — corrigir cadastro no ERP, não reconectar a conta.
+function SyncResultNotice({ status, detail }: { status: OlistSyncStatus | null; detail: string }) {
+  const parcial = status === 'PARTIAL';
+
+  // Nada é comunicado só por cor (.claude/rules/frontend.md): o rótulo diz o
+  // estado por escrito, e o ícone tem aria-hidden por ser redundante.
+  const rotulo = parcial
+    ? 'Sincronização concluída com pendências:'
+    : 'Última tentativa de sincronização falhou:';
+
+  const cor = parcial
+    ? 'border-margin-warning/30 bg-margin-warning/5 text-margin-warning'
+    : 'border-margin-danger/30 bg-margin-danger/5 text-margin-danger';
+
+  return (
+    <div className={`mt-3 rounded-md border px-3 py-2 text-sm ${cor}`} role="status">
+      <p className="font-medium">{rotulo}</p>
+      {/* whitespace-pre-line: o backend monta a mensagem em linhas (uma por
+          motivo, com marcador •). Sem isto tudo colapsa num parágrafo só. */}
+      <p className="mt-1 whitespace-pre-line break-words">{detail}</p>
+    </div>
   );
 }
 

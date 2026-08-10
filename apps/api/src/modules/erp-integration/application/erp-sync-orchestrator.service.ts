@@ -162,9 +162,9 @@ export class ErpSyncOrchestrator {
           if (resultado.semDimensoes) semDimensoes++;
           paiImportado = true;
         } catch (error) {
-          const motivo = error instanceof InvalidOlistProductError ? error.message : (error as Error).message;
-          this.logger.warn(motivo);
-          rejected.push(motivo);
+          // Log completo no servidor, motivo traduzido para o usuário.
+          this.logger.warn(`Falha ao processar produto do tenant ${tenantId}: ${(error as Error).message}`);
+          rejected.push(motivoVisivelDeRejeicao(descreverProduto(raw), error));
         }
 
         const variacoes = extractVariationRefs(raw);
@@ -263,12 +263,10 @@ export class ErpSyncOrchestrator {
         if (resultado.changed) applied++;
         if (resultado.semDimensoes) semDimensoes++;
       } catch (error) {
-        const motivo =
-          error instanceof InvalidOlistProductError
-            ? error.message
-            : `Variação ${variacao.skuCode} (id ${variacao.externalId}): ${(error as Error).message}`;
-        this.logger.warn(motivo);
-        rejected.push(motivo);
+        this.logger.warn(
+          `Falha ao processar variação ${variacao.externalId} do tenant ${tenantId}: ${(error as Error).message}`,
+        );
+        rejected.push(motivoVisivelDeRejeicao(`Variação ${variacao.skuCode} (id ${variacao.externalId})`, error));
       }
     }
 
@@ -401,6 +399,29 @@ export class ErpSyncOrchestrator {
 // Mostra só os primeiros motivos para caber na tela; o log completo do
 // servidor continua tendo todos.
 const MAX_REASONS_SHOWN = 3;
+
+// Motivo que o USUÁRIO vê no card de Integrações (09/08/2026).
+//
+// InvalidOlistProductError é nossa, foi escrita para o lojista e diz o que
+// fazer — passa inteira. Qualquer outro erro é de infraestrutura, e a
+// mensagem crua não serve para ele nem deveria sair do servidor: a de
+// violação de unicidade do Prisma, por exemplo, carrega o CAMINHO ABSOLUTO
+// do arquivo, o nome do model e o da constraint, e isso ia direto para
+// OlistConnection.lastSyncError, devolvido pela API e renderizado na tela.
+// O texto completo continua no log do servidor, que é onde se investiga.
+export function motivoVisivelDeRejeicao(identificacao: string, error: unknown): string {
+  if (error instanceof InvalidOlistProductError) return error.message;
+  return `${identificacao}: falha interna ao gravar — registrada no log do servidor.`;
+}
+
+// Identifica o produto na mensagem sem confiar no formato da resposta: aqui o
+// payload já falhou de alguma forma, então qualquer campo pode faltar.
+function descreverProduto(raw: unknown): string {
+  const envelope = (raw ?? {}) as Record<string, unknown>;
+  const produto = (envelope.produto ?? envelope) as Record<string, unknown>;
+  const id = produto.id ?? produto.codigo;
+  return id ? `Produto Olist ${String(id)}` : 'Produto Olist sem identificador na resposta';
+}
 
 export function buildPartialSyncWarning(
   rejected: string[],

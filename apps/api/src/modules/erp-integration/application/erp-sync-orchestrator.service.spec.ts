@@ -1,4 +1,5 @@
-import { ErpSyncOrchestrator } from './erp-sync-orchestrator.service';
+import { ErpSyncOrchestrator, motivoVisivelDeRejeicao } from './erp-sync-orchestrator.service';
+import { InvalidOlistProductError } from '../domain/olist-product-normalizer';
 
 // Regressão dos dois defeitos que derrubaram a integração do Olist em
 // produção (diagnóstico de 09/08/2026: 135 execuções entre 31/07 e 09/08, as
@@ -96,6 +97,38 @@ describe('ErpSyncOrchestrator — bloqueio de cota do Olist', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('motivoVisivelDeRejeicao', () => {
+  it('passa inteira a mensagem de cadastro incompleto, que foi escrita para o lojista', () => {
+    const erro = new InvalidOlistProductError('794327305', 'NCM ausente — preencha no cadastro do Olist.');
+
+    const motivo = motivoVisivelDeRejeicao('Produto Olist 794327305', erro);
+
+    expect(motivo).toBe(erro.message);
+    expect(motivo).toContain('preencha no cadastro do Olist');
+  });
+
+  it('não repassa mensagem crua de infraestrutura para a tela', () => {
+    // Forma real de um P2002 do Prisma: caminho absoluto do arquivo, nome do
+    // model e da constraint. Isso ia parar em lastSyncError e era renderizado
+    // no card de Integrações.
+    const erro = new Error(
+      'Invalid `prisma.product.create()` invocation in\n' +
+        'D:\\Projeto SAAS\\precifica-saas\\apps\\api\\src\\modules\\catalog\\infrastructure\\prisma-product.repository.ts:42\n' +
+        'Unique constraint failed on the fields: (`tenantId`,`skuCode`)',
+    );
+
+    const motivo = motivoVisivelDeRejeicao('Produto Olist 794327305', erro);
+
+    expect(motivo).not.toContain('prisma.product.create');
+    expect(motivo).not.toContain('prisma-product.repository.ts');
+    expect(motivo).not.toContain('tenantId');
+    expect(motivo).not.toContain('D:\\');
+    // Ainda diz QUAL produto e para onde olhar.
+    expect(motivo).toContain('794327305');
+    expect(motivo).toContain('log do servidor');
   });
 });
 
