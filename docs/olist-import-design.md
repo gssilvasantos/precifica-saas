@@ -112,26 +112,51 @@ E no **pai**: `Custo: -` (vazio). O pai carrega nome, marca, NCM e o estoque **a
 
 Também remove o risco que motivou a pergunta: a variação tem peso e dimensões próprios, então não depende do cadastro do pai.
 
-### Dimensão faltando: sinal, não descarte (09/08/2026 — PENDENTE DE VERIFICAÇÃO)
+### As 1.803 rejeições eram nome de campo errado (11/08/2026 — RESOLVIDO)
 
-Até 03/08/2026 o normalizador **rejeitava** produto sem peso ou sem dimensão. O
-primeiro sync real mostrou o custo: de 1.804 SKUs, **1.803 rejeitadas** e zero
-importadas — o Olist devolveu peso preenchido e as três medidas zeradas
-(`peso=0.076, L=0, W=0, H=0`, registrado em `provider_sync_logs` de 03/08 12:18).
+O normalizador lia `comprimento`, `largura` e `altura`. **Esses campos não
+existem** no retorno de `produto.obter.php`. A API do Tiny/Olist nomeia as
+medidas com sufixo de embalagem — confirmado na documentação oficial de dois
+endpoints ([obter](https://tiny.com.br/api-docs/api2-produtos-obter),
+[incluir](https://tiny.com.br/api-docs/api2-produtos-incluir)).
 
-Hoje o produto é importado e marcado com `hasCompleteDimensions: false`, e o
-sync avisa quantos SKUs entraram sem medida. A flag **não é persistida** — vive
-entre o normalizador e o orquestrador, e some. Enquanto isso não mudar, a
-promessa de "o motor de preço saberá que não pode estimar frete deste SKU" não
-está cumprida em lugar nenhum do sistema.
+O efeito era o zero silencioso que o cabeçalho do próprio normalizador já
+avisava ser possível: campo inexistente → `toNumber` devolve o fallback `0` →
+produto parece ter dimensão zero. No sync de 03/08, **1.803 de 1.804 SKUs**
+foram rejeitadas por isso (`peso=0.076, L=0, W=0, H=0` em
+`provider_sync_logs`). O peso vinha certo porque `peso_liquido` está em
+snake_case e era lido corretamente — foi essa assimetria que denunciou o bug.
 
-> **Esta mudança ainda não foi validada contra a API real.** 100% dos produtos
-> legíveis virem com as três medidas zeradas, enquanto o peso vem preenchido, é
-> mais consistente com **nome de campo errado** do que com cadastro incompleto —
-> a mesma ressalva registrada no item 1 de "Limitações conhecidas".
-> `apps/api/scripts/inspect-olist-product.ts` existe para decidir isso contra uma
-> resposta autenticada. Se os nomes estiverem errados, esta seção inteira é
-> revertida e os 1.803 produtos nunca estiveram incompletos.
+**Os produtos nunca estiveram incompletos.**
+
+O normalizador agora lê, em ordem: `comprimentoEmbalagem` →
+`comprimento_embalagem` → `comprimento` (idem largura e altura). As duas
+páginas oficiais divergem na grafia — camelCase em *obter*, snake_case em
+*incluir* — e ler os dois apelidos custa nada e elimina a aposta. Só a
+**ausência** do campo faz cair para o próximo nome: um zero explícito é valor
+real do ERP e é respeitado.
+
+### Dimensão faltando: sinal, não descarte
+
+Independente do bug acima, produto genuinamente sem medida **não é mais
+rejeitado**: entra marcado com `hasCompleteDimensions: false`, e o sync informa
+quantos SKUs entraram assim. Descartar o produto inteiro jogaria fora custo,
+estoque, NCM, categoria e SKU por causa de um campo que talvez nem seja usado
+naquele canal.
+
+Com o mapeamento corrigido, esse caminho volta a ser o que deveria ter sido
+desde o início: exceção pontual, não a regra.
+
+> **Limitação conhecida:** a flag **não é persistida** — vive entre o
+> normalizador e o orquestrador, e some. A promessa de "o motor de preço saberá
+> que não pode estimar frete deste SKU" não está cumprida em lugar nenhum do
+> sistema. Persistir exige coluna nova, migration e o par RLS+grant.
+>
+> **Ainda não validado contra a API real.** A correção vem da documentação
+> oficial, não de uma resposta autenticada — a mesma ressalva do item 1 de
+> "Limitações conhecidas". `apps/api/scripts/inspect-olist-product.ts` confirma
+> qual das duas grafias a conta devolve; como o normalizador lê ambas, o
+> resultado do script deixou de ser bloqueante.
 
 ### Categoria é uma árvore com separador ` > `
 

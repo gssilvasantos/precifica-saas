@@ -79,6 +79,19 @@ export class InvalidOlistProductError extends Error {
   }
 }
 
+// Lê o primeiro apelido PRESENTE, não o primeiro que dá número diferente de
+// zero. A distinção importa: uma medida legitimamente cadastrada como 0 no ERP
+// deve ficar 0, e não cair no apelido seguinte procurando um valor melhor.
+// Só a AUSÊNCIA do campo (undefined/null) faz seguir para o próximo nome.
+function primeiroNumero(raw: Record<string, unknown>, apelidos: string[]): number {
+  for (const apelido of apelidos) {
+    const valor = raw[apelido];
+    if (valor === undefined || valor === null || valor === '') continue;
+    return toNumber(valor, 0) ?? 0;
+  }
+  return 0;
+}
+
 function toNumber(value: unknown, fallback: number | null = null): number | null {
   if (value === undefined || value === null || value === '') return fallback;
   const n = Number(String(value).replace(',', '.'));
@@ -208,9 +221,31 @@ export function normalizeOlistProduct(rawEnvelope: unknown, stockOverride?: numb
   const packedWeightRaw = toNumber(raw.peso_bruto);
   const packagingWeightKg = packedWeightRaw !== null ? Math.max(0, packedWeightRaw - weightKg) : 0;
 
-  const lengthCm = toNumber(raw.comprimento, 0) ?? 0;
-  const widthCm = toNumber(raw.largura, 0) ?? 0;
-  const heightCm = toNumber(raw.altura, 0) ?? 0;
+  // CAUSA RAIZ DAS 1.803 REJEIÇÕES (11/08/2026).
+  //
+  // Estes três campos eram lidos como `comprimento`, `largura` e `altura`.
+  // Esses nomes NÃO EXISTEM no retorno de produto.obter.php: a API do
+  // Tiny/Olist nomeia as medidas com o sufixo de embalagem. Confirmado na
+  // documentação oficial de dois endpoints:
+  //   tiny.com.br/api-docs/api2-produtos-obter
+  //   tiny.com.br/api-docs/api2-produtos-incluir
+  //
+  // Era um zero silencioso, exatamente o modo de falha que o cabeçalho deste
+  // arquivo já avisava ser possível: `raw.comprimento` é undefined, toNumber
+  // devolve o fallback 0, e o produto parece ter dimensão zero. Foi o que
+  // rejeitou 1.803 de 1.804 SKUs no sync de 03/08 — o peso vinha certo
+  // (peso_liquido está em snake_case e é lido corretamente), as três medidas
+  // vinham zeradas. Os produtos nunca estiveram incompletos.
+  //
+  // POR QUE LER VÁRIOS APELIDOS: as duas páginas oficiais divergem na grafia
+  // — `alturaEmbalagem` em obter, `altura_embalagem` em incluir. Em vez de
+  // apostar numa, lê as duas, e mantém o nome isolado como último recurso
+  // (barato, e cobre qualquer conta/endpoint que realmente o devolva). A
+  // ordem importa: camelCase primeiro, porque obter é o endpoint que este
+  // normalizador consome.
+  const lengthCm = primeiroNumero(raw, ['comprimentoEmbalagem', 'comprimento_embalagem', 'comprimento']);
+  const widthCm = primeiroNumero(raw, ['larguraEmbalagem', 'largura_embalagem', 'largura']);
+  const heightCm = primeiroNumero(raw, ['alturaEmbalagem', 'altura_embalagem', 'altura']);
 
   // DIMENSÃO/PESO FALTANDO NÃO REJEITA MAIS O PRODUTO (03/08/2026).
   //

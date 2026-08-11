@@ -12,9 +12,12 @@ const PRODUTO_OLIST = {
   estoque_atual: '40',
   peso_liquido: '0,012',
   peso_bruto: '0,030',
-  comprimento: '9',
-  largura: '2',
-  altura: '2',
+  // Nomes REAIS do retorno de produto.obter.php. Até 11/08/2026 este fixture
+  // usava `comprimento`/`largura`/`altura`, que não existem na API — era por
+  // isso que a suíte ficava verde enquanto produção lia zero em 100% dos SKUs.
+  comprimentoEmbalagem: '9',
+  larguraEmbalagem: '2',
+  alturaEmbalagem: '2',
 };
 
 describe('normalizeOlistProduct', () => {
@@ -182,7 +185,12 @@ describe('normalizeOlistProduct', () => {
   // tem o peso preenchido e as dimensões zeradas. Descartar o produto inteiro
   // por isso joga fora custo, estoque, NCM, categoria e SKU.
   describe('cadastro sem dimensões — importa marcado, não rejeita', () => {
-    const semDimensoes = { ...PRODUTO_OLIST, comprimento: '0', largura: '0', altura: '0' };
+    const semDimensoes = {
+      ...PRODUTO_OLIST,
+      comprimentoEmbalagem: '0',
+      larguraEmbalagem: '0',
+      alturaEmbalagem: '0',
+    };
 
     it('não rejeita, e preserva todo o resto do cadastro', () => {
       const p = normalizeOlistProduct({ produto: { ...semDimensoes, ncm: '3304.99.90' } });
@@ -199,14 +207,86 @@ describe('normalizeOlistProduct', () => {
     });
 
     it.each([
-      ['comprimento', { comprimento: '0' }],
-      ['largura', { largura: '0' }],
-      ['altura', { altura: '0' }],
+      ['comprimento', { comprimentoEmbalagem: '0' }],
+      ['largura', { larguraEmbalagem: '0' }],
+      ['altura', { alturaEmbalagem: '0' }],
       ['peso', { peso_liquido: '0' }],
     ])('marca como incompleto quando falta %s', (_campo, override) => {
       expect(normalizeOlistProduct({ produto: { ...PRODUTO_OLIST, ...override } }).hasCompleteDimensions).toBe(
         false,
       );
+    });
+  });
+
+  // REGRESSÃO DA CAUSA RAIZ (11/08/2026).
+  //
+  // O sync de 03/08 rejeitou 1.803 de 1.804 SKUs com "peso=0.076, L=0, W=0,
+  // H=0". Não era cadastro incompleto: o normalizador lia `comprimento`,
+  // `largura` e `altura`, que não existem em produto.obter.php. O peso vinha
+  // certo porque `peso_liquido` está em snake_case e era lido corretamente.
+  describe('nomes de campo de dimensão da API real', () => {
+    const SEM_MEDIDAS = (() => {
+      const base: Record<string, unknown> = { ...PRODUTO_OLIST };
+      delete base.comprimentoEmbalagem;
+      delete base.larguraEmbalagem;
+      delete base.alturaEmbalagem;
+      return base;
+    })();
+
+    it('lê a grafia camelCase de produto.obter.php', () => {
+      const p = normalizeOlistProduct({
+        produto: { ...SEM_MEDIDAS, comprimentoEmbalagem: '9', larguraEmbalagem: '2', alturaEmbalagem: '2' },
+      });
+
+      expect([p.lengthCm, p.widthCm, p.heightCm]).toEqual([9, 2, 2]);
+      expect(p.hasCompleteDimensions).toBe(true);
+    });
+
+    it('lê a grafia snake_case documentada em produtos.incluir', () => {
+      const p = normalizeOlistProduct({
+        produto: { ...SEM_MEDIDAS, comprimento_embalagem: '9', largura_embalagem: '2', altura_embalagem: '2' },
+      });
+
+      expect([p.lengthCm, p.widthCm, p.heightCm]).toEqual([9, 2, 2]);
+      expect(p.hasCompleteDimensions).toBe(true);
+    });
+
+    it('ainda lê o nome isolado, como último recurso', () => {
+      const p = normalizeOlistProduct({
+        produto: { ...SEM_MEDIDAS, comprimento: '9', largura: '2', altura: '2' },
+      });
+
+      expect([p.lengthCm, p.widthCm, p.heightCm]).toEqual([9, 2, 2]);
+    });
+
+    it('medida cadastrada como ZERO fica zero, não procura outro apelido', () => {
+      // A ausência do campo faz cair para o próximo nome; um zero explícito é
+      // um valor real do ERP e precisa ser respeitado.
+      const p = normalizeOlistProduct({
+        produto: { ...SEM_MEDIDAS, comprimentoEmbalagem: '0', comprimento: '9', larguraEmbalagem: '2', alturaEmbalagem: '2' },
+      });
+
+      expect(p.lengthCm).toBe(0);
+      expect(p.hasCompleteDimensions).toBe(false);
+    });
+
+    it('reproduz o payload que rejeitou 1.803 SKUs — agora com as medidas certas', () => {
+      // Forma exata do produto 794327305 no log de 03/08: peso preenchido,
+      // medidas presentes sob o nome REAL. Com o mapeamento corrigido, o
+      // produto entra completo — nunca esteve incompleto.
+      const p = normalizeOlistProduct({
+        produto: {
+          ...SEM_MEDIDAS,
+          peso_liquido: '0.076',
+          comprimentoEmbalagem: '16',
+          larguraEmbalagem: '11',
+          alturaEmbalagem: '3',
+        },
+      });
+
+      expect(p.weightKg).toBe(0.076);
+      expect([p.lengthCm, p.widthCm, p.heightCm]).toEqual([16, 11, 3]);
+      expect(p.hasCompleteDimensions).toBe(true);
     });
   });
 
