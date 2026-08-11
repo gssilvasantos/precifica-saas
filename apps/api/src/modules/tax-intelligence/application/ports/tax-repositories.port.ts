@@ -87,8 +87,27 @@ export interface PriorRevenueRecord {
   receita: number; // mercado interno + externo
 }
 
+// Linha como o usuário informa e como a tela exibe: interno e externo
+// separados. `findForPeriod` soma os dois porque o RBT12 é a receita bruta
+// TOTAL — mas o cadastro precisa preservar a distinção, que existe por causa
+// da regra de redução da exportação (art. 18, §14 da LC 123/2006).
+export interface ReceitaAnteriorDetalhada {
+  competencia: Date;
+  receitaMercadoInterno: number;
+  receitaMercadoExterno: number;
+  fonte: string;
+}
+
 export interface TenantPriorRevenueRepository {
   findForPeriod(tenantId: string, from: Date, to: Date): Promise<PriorRevenueRecord[]>;
+
+  listarDetalhado(tenantId: string, from: Date, to: Date): Promise<ReceitaAnteriorDetalhada[]>;
+
+  // Idempotente por natureza: a unicidade (tenantId, competencia) já existe no
+  // banco, então salvar a mesma competência duas vezes corrige em vez de
+  // duplicar. É o que permite ao contador reenviar a planilha inteira depois
+  // de ajustar um mês, sem limpar nada antes.
+  salvarCompetencias(tenantId: string, linhas: ReceitaAnteriorDetalhada[]): Promise<void>;
 }
 
 export const TENANT_PRIOR_REVENUE_REPOSITORY = Symbol('TENANT_PRIOR_REVENUE_REPOSITORY');

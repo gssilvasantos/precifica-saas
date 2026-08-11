@@ -1,5 +1,6 @@
 import { useAuth } from '../features/auth/auth-context';
 import RegimeTributarioSection from '../features/tax-regime/components/RegimeTributarioSection';
+import FaturamentoAnteriorSection from '../features/tax-regime/components/FaturamentoAnteriorSection';
 import TaxProfilesSection from '../features/tax-profiles/components/TaxProfilesSection';
 import DefaultMarginsForm from '../features/catalog-settings/components/DefaultMarginsForm';
 import FinancialPolicyForm from '../features/catalog-settings/components/FinancialPolicyForm';
@@ -34,6 +35,9 @@ export default function ConfiguracoesFiscaisPage() {
       {/* Primeiro na página de propósito: sem regime configurado, o piso de
           preço e o DRE bloqueiam, e todo o resto desta tela fica secundário. */}
       <RegimeTributarioSection canEdit={canEdit} />
+      {/* Logo abaixo do regime: no Simples, a alíquota depende desta janela, e
+          sem ela o cálculo bloqueia mesmo com o regime configurado. */}
+      <FaturamentoAnteriorSection canEdit={canEdit} />
       <TaxProfilesSection canEdit={canEdit} />
       <DefaultMarginsForm canEdit={canEdit} />
       <FinancialPolicyForm canEdit={canEdit} />

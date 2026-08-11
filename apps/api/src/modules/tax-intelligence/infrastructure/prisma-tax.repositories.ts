@@ -5,6 +5,7 @@ import {
   PriorRevenueRecord,
   ProductTaxProfileRecord,
   ProductTaxProfileRepository,
+  ReceitaAnteriorDetalhada,
   TenantPriorRevenueRepository,
   TenantTaxProfileRecord,
   TenantTaxProfileRepository,
@@ -174,5 +175,48 @@ export class PrismaTenantPriorRevenueRepository implements TenantPriorRevenueRep
       competencia: r.competencia,
       receita: Number(r.receitaMercadoInterno) + Number(r.receitaMercadoExterno),
     }));
+  }
+
+  async listarDetalhado(tenantId: string, from: Date, to: Date): Promise<ReceitaAnteriorDetalhada[]> {
+    const records = await this.prisma.tenantPriorRevenue.findMany({
+      where: { tenantId, competencia: { gte: from, lte: to } },
+      orderBy: { competencia: 'asc' },
+    });
+
+    return records.map((r) => ({
+      competencia: r.competencia,
+      receitaMercadoInterno: Number(r.receitaMercadoInterno),
+      receitaMercadoExterno: Number(r.receitaMercadoExterno),
+      fonte: r.fonte,
+    }));
+  }
+
+  async salvarCompetencias(tenantId: string, linhas: ReceitaAnteriorDetalhada[]): Promise<void> {
+    if (linhas.length === 0) return;
+
+    // Uma transação para as N competências: o contador informa a janela inteira
+    // de uma vez, e meia janela gravada produziria um RBT12 que não corresponde
+    // a nenhuma declaração real. Sem chamada externa aqui dentro.
+    await this.prisma.$transaction(
+      linhas.map((linha) =>
+        this.prisma.tenantPriorRevenue.upsert({
+          // A unicidade natural (tenantId, competencia) É a chave de
+          // idempotência — não precisa de chave sintética.
+          where: { tenantId_competencia: { tenantId, competencia: linha.competencia } },
+          create: {
+            tenantId,
+            competencia: linha.competencia,
+            receitaMercadoInterno: linha.receitaMercadoInterno,
+            receitaMercadoExterno: linha.receitaMercadoExterno,
+            fonte: linha.fonte,
+          },
+          update: {
+            receitaMercadoInterno: linha.receitaMercadoInterno,
+            receitaMercadoExterno: linha.receitaMercadoExterno,
+            fonte: linha.fonte,
+          },
+        }),
+      ),
+    );
   }
 }
