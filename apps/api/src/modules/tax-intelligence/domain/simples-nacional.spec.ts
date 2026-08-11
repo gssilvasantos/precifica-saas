@@ -1,6 +1,5 @@
 import {
   SIMPLES_ANEXOS,
-  SIMPLES_ANEXO_I,
   SimplesAnexo,
   calcularAliquotaEfetiva,
   calcularAliquotasPorTributo,

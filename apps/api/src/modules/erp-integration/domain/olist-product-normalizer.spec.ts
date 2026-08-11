@@ -1,7 +1,8 @@
 import { InvalidOlistProductError, extractVariationRefs, normalizeOlistProduct } from './olist-product-normalizer';
 
-// Cadastro mínimo válido: peso e dimensões preenchidos (sem eles o produto é
-// rejeitado, porque quebram o cálculo de frete).
+// Cadastro mínimo válido: peso e dimensões preenchidos. Ausentes NÃO rejeitam
+// mais o produto (03/08/2026) — ele entra marcado com
+// hasCompleteDimensions: false. Ver os casos "sem dimensões" mais abaixo.
 const PRODUTO_OLIST = {
   id: '778899',
   codigo: 'BAT-VM-4G',

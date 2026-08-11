@@ -31,7 +31,7 @@ Agendado por `ErpSyncOrchestrator.syncAllTenants()` (job periódico), isolado po
 | `estoque_atual` ou `saldo` | `stockQuantity` | `stockQuantity` | Ver lacuna de multi-depósito, seção 5. |
 | `peso_liquido` | `weightKg` | `weightKg` | Espelhado, trava edição manual. |
 | `peso_bruto` − `peso_liquido` | `packagingWeightKg` | `packagingWeightKg` | Calculado, não lido direto. |
-| `comprimento` / `largura` / `altura` | `lengthCm` / `widthCm` / `heightCm` | idem | Espelhados, travam edição manual. Produto com dimensão ausente/zero é rejeitado pelo normalizador (não fica meio-cadastrado). |
+| `comprimento` / `largura` / `altura` | `lengthCm` / `widthCm` / `heightCm` | idem | Espelhados, travam edição manual. Dimensão ausente/zero **não** rejeita mais o produto — ver "Dimensão faltando" abaixo. |
 | `anexos[].anexo` ou `imagens[]` | `photoUrls` | `photoUrls` | Espelhadas via `ProductPhotoMirrorService` antes de gravar (URL interna, não a do Olist). |
 
 Campos derivados no momento da escrita (não vêm do Olist): `packedWeightKg`, `cubicWeightKg`, `shippingWeightKg` — recalculados a cada sync via `ShippingWeightCalculator`, a mesma porta usada no fluxo de edição manual.
@@ -110,7 +110,28 @@ E no **pai**: `Custo: -` (vazio). O pai carrega nome, marca, NCM e o estoque **a
 
 **Isso resolve a decisão de modelagem sem ambiguidade:** cada variação vira um `Product` próprio (opção A), porque ela tem tudo que um produto precisa ter. Importar só o pai perderia custo, estoque e preço por cor — exatamente os três dados que o Kyneti usa para precificar.
 
-Também remove o risco que motivou a pergunta: como a variação tem peso e dimensões próprios, ela **não** é rejeitada pelo normalizador por cadastro incompleto.
+Também remove o risco que motivou a pergunta: a variação tem peso e dimensões próprios, então não depende do cadastro do pai.
+
+### Dimensão faltando: sinal, não descarte (09/08/2026 — PENDENTE DE VERIFICAÇÃO)
+
+Até 03/08/2026 o normalizador **rejeitava** produto sem peso ou sem dimensão. O
+primeiro sync real mostrou o custo: de 1.804 SKUs, **1.803 rejeitadas** e zero
+importadas — o Olist devolveu peso preenchido e as três medidas zeradas
+(`peso=0.076, L=0, W=0, H=0`, registrado em `provider_sync_logs` de 03/08 12:18).
+
+Hoje o produto é importado e marcado com `hasCompleteDimensions: false`, e o
+sync avisa quantos SKUs entraram sem medida. A flag **não é persistida** — vive
+entre o normalizador e o orquestrador, e some. Enquanto isso não mudar, a
+promessa de "o motor de preço saberá que não pode estimar frete deste SKU" não
+está cumprida em lugar nenhum do sistema.
+
+> **Esta mudança ainda não foi validada contra a API real.** 100% dos produtos
+> legíveis virem com as três medidas zeradas, enquanto o peso vem preenchido, é
+> mais consistente com **nome de campo errado** do que com cadastro incompleto —
+> a mesma ressalva registrada no item 1 de "Limitações conhecidas".
+> `apps/api/scripts/inspect-olist-product.ts` existe para decidir isso contra uma
+> resposta autenticada. Se os nomes estiverem errados, esta seção inteira é
+> revertida e os 1.803 produtos nunca estiveram incompletos.
 
 ### Categoria é uma árvore com separador ` > `
 
