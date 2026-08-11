@@ -13,6 +13,9 @@ import {
   PrismaTenantPriorRevenueRepository,
   PrismaTenantTaxProfileRepository,
 } from './infrastructure/prisma-tax.repositories';
+import { IdentityAccessModule } from '../identity-access/identity-access.module';
+import { TenantTaxProfileController } from './interface/controllers/tenant-tax-profile.controller';
+import { TenantTaxProfileService } from './application/tenant-tax-profile.service';
 
 // Tax Intelligence (02/08/2026) — ver docs/tributacao-br-regimes-e-reforma.md.
 //
@@ -28,8 +31,10 @@ import {
 // Exporta apenas TAX_RATE_RESOLVER. Nenhum outro módulo deve conhecer os
 // repositórios nem a tabela do Anexo I.
 @Module({
-  imports: [PrismaModule, OrdersModule],
+  imports: [PrismaModule, OrdersModule, IdentityAccessModule],
+  controllers: [TenantTaxProfileController],
   providers: [
+    TenantTaxProfileService,
     TaxRateResolverService,
     { provide: TAX_RATE_RESOLVER, useExisting: TaxRateResolverService },
     { provide: TENANT_TAX_PROFILE_REPOSITORY, useClass: PrismaTenantTaxProfileRepository },

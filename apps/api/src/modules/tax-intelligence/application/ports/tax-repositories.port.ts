@@ -24,10 +24,39 @@ export interface TenantTaxProfileRecord {
   automationMode: 'AUTO' | 'MANUAL';
 }
 
+// Entrada de escrita (11/08/2026). Percentuais em 0–100, convenção do schema:
+// a conversão para fração acontece no repositório, na mesma fronteira em que a
+// leitura converte de volta. Ter as duas pontas no mesmo arquivo é o que
+// impede as convenções de divergirem.
+export interface NovoPerfilTributario {
+  tenantId: string;
+  uf: string;
+  regime: TaxRegime;
+  anexo: SimplesAnexo | null;
+  vigenciaInicio: Date;
+  meiValorFixoMensal: number | null;
+  icmsAliquotaPct: number | null;
+  presuncaoIrpjPct: number | null;
+  presuncaoCsllPct: number | null;
+  automationMode: 'AUTO' | 'MANUAL';
+}
+
 export interface TenantTaxProfileRepository {
   // O regime VIGENTE numa data — não "o regime atual". Um DRE de mês fechado
   // precisa do regime que valia naquele mês, não do de hoje.
   findVigente(tenantId: string, at: Date): Promise<TenantTaxProfileRecord | null>;
+
+  // Histórico completo, mais recente primeiro. É o que permite ao contador ver
+  // "era Simples até março, virou Presumido em abril" sem consultar o banco.
+  listar(tenantId: string): Promise<TenantTaxProfileRecord[]>;
+
+  // Mudança de regime NÃO sobrescreve o registro anterior: encerra a vigência
+  // aberta na véspera do novo início e cria uma nova linha, numa transação.
+  //
+  // Sobrescrever destruiria a capacidade de recalcular um mês fechado com a
+  // regra que valia nele — que é a razão de existir das colunas de vigência.
+  // Ver o comentário de findVigente.
+  abrirNovaVigencia(input: NovoPerfilTributario): Promise<TenantTaxProfileRecord>;
 }
 
 export const TENANT_TAX_PROFILE_REPOSITORY = Symbol('TENANT_TAX_PROFILE_REPOSITORY');

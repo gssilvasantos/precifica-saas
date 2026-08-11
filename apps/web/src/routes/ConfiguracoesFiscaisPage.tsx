@@ -1,4 +1,5 @@
 import { useAuth } from '../features/auth/auth-context';
+import RegimeTributarioSection from '../features/tax-regime/components/RegimeTributarioSection';
 import TaxProfilesSection from '../features/tax-profiles/components/TaxProfilesSection';
 import DefaultMarginsForm from '../features/catalog-settings/components/DefaultMarginsForm';
 import FinancialPolicyForm from '../features/catalog-settings/components/FinancialPolicyForm';
@@ -30,6 +31,9 @@ export default function ConfiguracoesFiscaisPage() {
         )}
       </div>
 
+      {/* Primeiro na página de propósito: sem regime configurado, o piso de
+          preço e o DRE bloqueiam, e todo o resto desta tela fica secundário. */}
+      <RegimeTributarioSection canEdit={canEdit} />
       <TaxProfilesSection canEdit={canEdit} />
       <DefaultMarginsForm canEdit={canEdit} />
       <FinancialPolicyForm canEdit={canEdit} />

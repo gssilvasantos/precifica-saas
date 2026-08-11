@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import {
+  NovoPerfilTributario,
   PriorRevenueRecord,
   ProductTaxProfileRecord,
   ProductTaxProfileRepository,
@@ -40,25 +41,90 @@ export class PrismaTenantTaxProfileRepository implements TenantTaxProfileReposit
       orderBy: { vigenciaInicio: 'desc' },
     });
     if (!record) return null;
-
-    return {
-      id: record.id,
-      tenantId: record.tenantId,
-      uf: record.uf,
-      regime: record.regime as TaxRegime,
-      anexo: (record.anexo as SimplesAnexo | null) ?? null,
-      vigenciaInicio: record.vigenciaInicio,
-      vigenciaFim: record.vigenciaFim,
-      meiValorFixoMensal: record.meiValorFixoMensal !== null ? Number(record.meiValorFixoMensal) : null,
-      // Guardados como percentual no schema (0-100, convenção do resto do
-      // banco), consumidos como FRAÇÃO — a conversão vive aqui, na fronteira,
-      // e em nenhum outro lugar.
-      icmsAliquota: pctParaFracao(record.icmsAliquotaPct),
-      presuncaoIrpj: pctParaFracao(record.presuncaoIrpjPct),
-      presuncaoCsll: pctParaFracao(record.presuncaoCsllPct),
-      automationMode: record.automationMode,
-    };
+    return paraRegistro(record);
   }
+
+  async listar(tenantId: string): Promise<TenantTaxProfileRecord[]> {
+    const records = await this.prisma.tenantTaxProfile.findMany({
+      where: { tenantId },
+      orderBy: { vigenciaInicio: 'desc' },
+    });
+    return records.map(paraRegistro);
+  }
+
+  async abrirNovaVigencia(input: NovoPerfilTributario): Promise<TenantTaxProfileRecord> {
+    // Encerrar a anterior e abrir a nova têm que ser atômicos: entre os dois
+    // passos o tenant ficaria ou sem regime vigente (resolver bloqueia) ou com
+    // dois (o orderBy desempataria em silêncio). Nenhuma chamada externa aqui
+    // dentro — só as duas escritas.
+    const criado = await this.prisma.$transaction(async (tx) => {
+      await tx.tenantTaxProfile.updateMany({
+        where: { tenantId: input.tenantId, vigenciaFim: null },
+        data: { vigenciaFim: vespera(input.vigenciaInicio) },
+      });
+
+      return tx.tenantTaxProfile.create({
+        data: {
+          tenantId: input.tenantId,
+          uf: input.uf,
+          regime: input.regime,
+          anexo: input.anexo,
+          vigenciaInicio: input.vigenciaInicio,
+          vigenciaFim: null,
+          meiValorFixoMensal: input.meiValorFixoMensal,
+          icmsAliquotaPct: input.icmsAliquotaPct,
+          presuncaoIrpjPct: input.presuncaoIrpjPct,
+          presuncaoCsllPct: input.presuncaoCsllPct,
+          automationMode: input.automationMode,
+        },
+      });
+    });
+
+    return paraRegistro(criado);
+  }
+}
+
+// Uma única tradução banco → domínio, usada por findVigente e por listar. Ter
+// duas cópias era o caminho mais curto para a conversão de percentual divergir
+// entre "o regime de hoje" e "o histórico".
+function paraRegistro(record: {
+  id: string;
+  tenantId: string;
+  uf: string;
+  regime: string;
+  anexo: string | null;
+  vigenciaInicio: Date;
+  vigenciaFim: Date | null;
+  meiValorFixoMensal: { toString(): string } | null;
+  icmsAliquotaPct: { toString(): string } | null;
+  presuncaoIrpjPct: { toString(): string } | null;
+  presuncaoCsllPct: { toString(): string } | null;
+  automationMode: 'AUTO' | 'MANUAL';
+}): TenantTaxProfileRecord {
+  return {
+    id: record.id,
+    tenantId: record.tenantId,
+    uf: record.uf,
+    regime: record.regime as TaxRegime,
+    anexo: (record.anexo as SimplesAnexo | null) ?? null,
+    vigenciaInicio: record.vigenciaInicio,
+    vigenciaFim: record.vigenciaFim,
+    meiValorFixoMensal: record.meiValorFixoMensal !== null ? Number(record.meiValorFixoMensal) : null,
+    // Guardados como percentual no schema (0-100, convenção do resto do
+    // banco), consumidos como FRAÇÃO — a conversão vive aqui, na fronteira,
+    // e em nenhum outro lugar.
+    icmsAliquota: pctParaFracao(record.icmsAliquotaPct),
+    presuncaoIrpj: pctParaFracao(record.presuncaoIrpjPct),
+    presuncaoCsll: pctParaFracao(record.presuncaoCsllPct),
+    automationMode: record.automationMode,
+  };
+}
+
+// Um dia antes de `data`, em UTC. A vigência anterior termina na VÉSPERA do
+// novo início — não no mesmo dia — para que `vigenteEm` nunca case duas linhas
+// para a mesma data e o `orderBy desc` não tenha que desempatar.
+function vespera(data: Date): Date {
+  return new Date(data.getTime() - 24 * 60 * 60 * 1000);
 }
 
 @Injectable()
