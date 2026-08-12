@@ -97,7 +97,16 @@ export interface TaxRateQuery {
   productId: string;
   // ST é regime ESTADUAL — o mesmo NCM pode estar em ST no PR e fora dela em
   // SP. Sem a UF na chave o sistema só atende vendedor de um estado.
-  uf: string;
+  //
+  // OPCIONAL desde 12/08/2026. Quem consome esta porta (Pricing, DRE) não tem
+  // como saber a UF: ela vive no perfil tributário do tenant, que é justamente
+  // o que este módulo encapsula — exigir o campo obrigaria o Pricing a ler
+  // dado de tributação para poder perguntar sobre tributação.
+  //
+  // Ausente = a UF do estabelecimento, lida do perfil vigente. O parâmetro
+  // continua existindo para o caso legítimo de simular OUTRA UF (venda
+  // interestadual, estudo de operação em outro estado).
+  uf?: string;
   // A data importa de verdade: São Paulo tirou perfumaria e higiene pessoal da
   // ST em 01/04/2026 (Portaria SRE 94/2025). O mesmo SKU tem alíquotas
   // diferentes antes e depois — e um mês já fechado precisa continuar sendo

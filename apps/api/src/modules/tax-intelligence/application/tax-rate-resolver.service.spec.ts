@@ -80,6 +80,21 @@ describe('TaxRateResolverService', () => {
 
   const query = { tenantId: TENANT, productId: 'prod-1', uf: 'SP', at: PA };
 
+  describe('UF opcional na consulta (12/08/2026)', () => {
+    it('sem uf, usa a do estabelecimento e resolve igual', async () => {
+      // Quem consome a porta (Pricing, DRE) não sabe a UF: ela vive no perfil
+      // tributário, que é o que este módulo encapsula. Exigir o campo obrigaria
+      // o Pricing a ler dado de tributação para perguntar sobre tributação.
+      const { uf: _omitida, ...semUf } = query;
+
+      const comUf = await service.resolve(query);
+      const semUfResolvido = await service.resolve(semUf);
+
+      expect(semUfResolvido.effectiveRate).toBe(comUf.effectiveRate);
+      expect(semUfResolvido.regime).toBe(comUf.regime);
+    });
+  });
+
   describe('Simples Nacional', () => {
     it('reproduz a alíquota do extrato oficial (7,2113%)', async () => {
       const r = await service.resolve(query);

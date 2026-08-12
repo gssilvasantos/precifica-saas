@@ -183,11 +183,16 @@ export class TaxRateResolverService implements TaxRateResolver {
     // monofásico": é falta de informação. Assumir false silenciosamente é como
     // o sistema declararia PIS/Cofins que não deve — foi exatamente o que
     // encontramos num PGDAS-D real de revendedor de cosméticos.
-    const produto = await this.productProfiles.findVigente(query.tenantId, query.productId, query.uf, query.at);
+    // UF ausente = a do estabelecimento, que já está no perfil vigente lido
+    // acima. Quem consome esta porta não tem como saber esse dado — ele mora
+    // aqui dentro. Ver o comentário de TaxRateQuery.uf.
+    const uf = query.uf ?? perfil.uf;
+
+    const produto = await this.productProfiles.findVigente(query.tenantId, query.productId, uf, query.at);
     if (!produto) {
       throw new TaxRateUnavailableError(
         'PERFIL_DO_PRODUTO_AUSENTE',
-        `o produto ${query.productId} não tem perfil fiscal vigente em ${query.uf} na data ` +
+        `o produto ${query.productId} não tem perfil fiscal vigente em ${uf} na data ` +
           `${query.at.toISOString().slice(0, 10)}. Sem saber se há substituição tributária ou tributação ` +
           'monofásica, a alíquota do produto não pode ser afirmada.',
       );
