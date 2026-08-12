@@ -73,11 +73,31 @@ export interface ProductTaxProfileRecord {
   vigenciaFim: Date | null;
 }
 
+export interface NovoPerfilDeProduto {
+  tenantId: string;
+  productId: string;
+  uf: string;
+  icmsSt: boolean;
+  monofasico: boolean;
+  ncm: string | null;
+  fonte: string;
+  vigenciaInicio: Date;
+}
+
 export interface ProductTaxProfileRepository {
   // Chave (produto, UF, data): a ST é regime estadual e muda por portaria.
   // O mesmo SKU de cosmético estava em ST em SP até 31/03/2026 e deixou de
   // estar em 01/04/2026 (Portaria SRE 94/2025).
   findVigente(tenantId: string, productId: string, uf: string, at: Date): Promise<ProductTaxProfileRecord | null>;
+
+  // Histórico do produto em TODAS as UFs, mais recente primeiro. É o que
+  // permite ver "saiu da ST em SP em abril, continua em ST no PR".
+  listarPorProduto(tenantId: string, productId: string): Promise<ProductTaxProfileRecord[]>;
+
+  // Mesmo desenho temporal do perfil do tenant: encerra a vigência aberta
+  // DAQUELA UF na véspera e abre uma nova. Por UF, não global — mudar a
+  // classificação em SP não pode encerrar a do Paraná.
+  abrirNovaVigencia(input: NovoPerfilDeProduto): Promise<ProductTaxProfileRecord>;
 }
 
 export const PRODUCT_TAX_PROFILE_REPOSITORY = Symbol('PRODUCT_TAX_PROFILE_REPOSITORY');

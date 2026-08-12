@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import {
+  NovoPerfilDeProduto,
   NovoPerfilTributario,
   PriorRevenueRecord,
   ProductTaxProfileRecord,
@@ -143,19 +144,68 @@ export class PrismaProductTaxProfileRepository implements ProductTaxProfileRepos
       orderBy: { vigenciaInicio: 'desc' },
     });
     if (!record) return null;
-
-    return {
-      id: record.id,
-      productId: record.productId,
-      uf: record.uf,
-      icmsSt: record.icmsSt,
-      monofasico: record.monofasico,
-      ncm: record.ncm,
-      fonte: record.fonte,
-      vigenciaInicio: record.vigenciaInicio,
-      vigenciaFim: record.vigenciaFim,
-    };
+    return paraRegistroDeProduto(record);
   }
+
+  async listarPorProduto(tenantId: string, productId: string): Promise<ProductTaxProfileRecord[]> {
+    const records = await this.prisma.productTaxProfile.findMany({
+      where: { tenantId, productId },
+      orderBy: [{ uf: 'asc' }, { vigenciaInicio: 'desc' }],
+    });
+    return records.map(paraRegistroDeProduto);
+  }
+
+  async abrirNovaVigencia(input: NovoPerfilDeProduto): Promise<ProductTaxProfileRecord> {
+    const criado = await this.prisma.$transaction(async (tx) => {
+      // Encerra a vigência aberta SÓ desta UF. Sem o filtro de uf, classificar
+      // o produto em SP encerraria a classificação dele no Paraná — e a ST é
+      // regime estadual, não nacional.
+      await tx.productTaxProfile.updateMany({
+        where: { tenantId: input.tenantId, productId: input.productId, uf: input.uf, vigenciaFim: null },
+        data: { vigenciaFim: vespera(input.vigenciaInicio) },
+      });
+
+      return tx.productTaxProfile.create({
+        data: {
+          tenantId: input.tenantId,
+          productId: input.productId,
+          uf: input.uf,
+          icmsSt: input.icmsSt,
+          monofasico: input.monofasico,
+          ncm: input.ncm,
+          fonte: input.fonte,
+          vigenciaInicio: input.vigenciaInicio,
+          vigenciaFim: null,
+        },
+      });
+    });
+
+    return paraRegistroDeProduto(criado);
+  }
+}
+
+function paraRegistroDeProduto(record: {
+  id: string;
+  productId: string;
+  uf: string;
+  icmsSt: boolean;
+  monofasico: boolean;
+  ncm: string | null;
+  fonte: string;
+  vigenciaInicio: Date;
+  vigenciaFim: Date | null;
+}): ProductTaxProfileRecord {
+  return {
+    id: record.id,
+    productId: record.productId,
+    uf: record.uf,
+    icmsSt: record.icmsSt,
+    monofasico: record.monofasico,
+    ncm: record.ncm,
+    fonte: record.fonte,
+    vigenciaInicio: record.vigenciaInicio,
+    vigenciaFim: record.vigenciaFim,
+  };
 }
 
 @Injectable()

@@ -18,6 +18,8 @@ import { TenantTaxProfileController } from './interface/controllers/tenant-tax-p
 import { TenantTaxProfileService } from './application/tenant-tax-profile.service';
 import { PriorRevenueController } from './interface/controllers/prior-revenue.controller';
 import { PriorRevenueService } from './application/prior-revenue.service';
+import { ProductTaxProfileController } from './interface/controllers/product-tax-profile.controller';
+import { ProductTaxProfileService } from './application/product-tax-profile.service';
 
 // Tax Intelligence (02/08/2026) — ver docs/tributacao-br-regimes-e-reforma.md.
 //
@@ -34,10 +36,11 @@ import { PriorRevenueService } from './application/prior-revenue.service';
 // repositórios nem a tabela do Anexo I.
 @Module({
   imports: [PrismaModule, OrdersModule, IdentityAccessModule],
-  controllers: [TenantTaxProfileController, PriorRevenueController],
+  controllers: [TenantTaxProfileController, PriorRevenueController, ProductTaxProfileController],
   providers: [
     TenantTaxProfileService,
     PriorRevenueService,
+    ProductTaxProfileService,
     TaxRateResolverService,
     { provide: TAX_RATE_RESOLVER, useExisting: TaxRateResolverService },
     { provide: TENANT_TAX_PROFILE_REPOSITORY, useClass: PrismaTenantTaxProfileRepository },
