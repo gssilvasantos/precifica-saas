@@ -14,6 +14,7 @@ import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marke
 import { CompetitionIntelligenceModule } from '../competition-intelligence/competition-intelligence.module';
 import { LogisticsFulfillmentModule } from '../logistics-fulfillment/logistics-fulfillment.module';
 import { MarketplacePublishingModule } from '../marketplace-publishing/marketplace-publishing.module';
+import { TaxIntelligenceModule } from '../tax-intelligence/public-api';
 
 // Primeira fatia do Pricing Intelligence (README, Etapa 5) — o simulador de
 // margem da Nuvemshop — mais o PricingStrategist (núcleo de decisão de
@@ -54,6 +55,9 @@ import { MarketplacePublishingModule } from '../marketplace-publishing/marketpla
     CompetitionIntelligenceModule,
     LogisticsFulfillmentModule,
     MarketplacePublishingModule,
+    // Alíquota real por produto (12/08/2026) — exporta só TAX_RATE_RESOLVER.
+    // Este módulo não conhece RBT12, anexo do Simples nem tabela de faixa.
+    TaxIntelligenceModule,
   ],
   controllers: [NuvemshopMarginSimulatorController, PricingDecisionController, ApplyPricingDecisionController],
   providers: [

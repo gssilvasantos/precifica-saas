@@ -1,3 +1,5 @@
+import { UnprocessableEntityException } from '@nestjs/common';
+import { TaxRateUnavailableError } from '../../../shared/contracts/tax-rate-resolver.port';
 import { Test } from '@nestjs/testing';
 import { PricingDecisionService } from './pricing-decision.service';
 import { PRICING_STRATEGIST, PricingDecision, PricingStrategist } from '../domain/pricing-strategist';
@@ -12,6 +14,7 @@ import {
   CHANNEL_CATEGORY_RESOLVER,
   SHIPPING_POLICY_RESOLVER,
   CHANNEL_SELLER_PROFILE_READER,
+  TAX_RATE_RESOLVER,
 } from '../../../shared/contracts/tokens';
 import { ShippingPolicyResolver } from '../../../shared/contracts/shipping-policy-resolver.port';
 import { ChannelSellerProfileReader } from '../../../shared/contracts/channel-seller-profile-reader.port';
@@ -126,6 +129,7 @@ describe('PricingDecisionService (modo operação)', () => {
   let channelCategories: jest.Mocked<ChannelCategoryResolver>;
   let shippingPolicies: jest.Mocked<ShippingPolicyResolver>;
   let sellerProfiles: jest.Mocked<ChannelSellerProfileReader>;
+  let taxRates: { resolve: jest.Mock };
   let service: PricingDecisionService;
 
   async function buildService(): Promise<PricingDecisionService> {
@@ -161,6 +165,22 @@ describe('PricingDecisionService (modo operação)', () => {
       }),
     };
 
+    // Alíquota resolvida (12/08/2026). O default espelha o `noFinancialPolicy`
+    // que os cenários existentes já usavam (taxRate: 0), para que este teste
+    // continue medindo o que mediu antes — o que mudou é a FONTE da alíquota,
+    // não o número. Cenários específicos sobrescrevem o valor.
+    taxRates = {
+      resolve: jest.fn().mockResolvedValue({
+        effectiveRate: 0,
+        incidence: 'POR_DENTRO',
+        creditableRate: 0,
+        regime: 'SIMPLES_NACIONAL',
+        source: 'CALCULATED_RBT12',
+        breakdown: {},
+        fixedMonthlyTaxAmount: null,
+      }),
+    };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         PricingDecisionService,
@@ -175,6 +195,7 @@ describe('PricingDecisionService (modo operação)', () => {
         { provide: CHANNEL_CATEGORY_RESOLVER, useValue: channelCategories },
         { provide: SHIPPING_POLICY_RESOLVER, useValue: shippingPolicies },
         { provide: CHANNEL_SELLER_PROFILE_READER, useValue: sellerProfiles },
+        { provide: TAX_RATE_RESOLVER, useValue: taxRates },
       ],
     }).compile();
 
@@ -280,7 +301,18 @@ describe('PricingDecisionService (modo operação)', () => {
     // ficava de fora da conta — os 7,94 de diferença são exatamente a
     // comissão que o vendedor pagava sem que o piso soubesse.
     beforeEach(() => {
+      // minProfitMargin continua vindo da política financeira; a ALÍQUOTA
+      // mudou de fonte em 12/08/2026 e agora vem do Tax Intelligence.
       financialPolicy.getPolicy.mockResolvedValue({ taxRate: 0.06, minProfitMargin: 0.3, targetRoas: 3 });
+      taxRates.resolve.mockResolvedValue({
+        effectiveRate: 0.06,
+        incidence: 'POR_DENTRO',
+        creditableRate: 0,
+        regime: 'SIMPLES_NACIONAL',
+        source: 'CALCULATED_RBT12',
+        breakdown: {},
+        fixedMonthlyTaxAmount: null,
+      });
     });
 
     it('decide(): sobrescreve a sugestão do strategist quando ela fura o piso financeiro', async () => {
@@ -552,6 +584,70 @@ describe('PricingDecisionService (modo operação)', () => {
       expect(strategist.calculateOptimalPrice).toHaveBeenCalledWith(
         expect.objectContaining({ costPrice: 60, logisticsCost: 15, effectiveCostPriceLegacy: 75 }),
       );
+    });
+  });
+
+  // CORTE SECO (12/08/2026): a alíquota deixou de vir de um percentual
+  // digitado por tenant e passa a vir do Tax Intelligence. Quando ele não
+  // consegue AFIRMAR a alíquota, a decisão é bloqueada — mesma disciplina já
+  // aplicada à comissão do canal. Estimar imposto para baixo superestima
+  // margem, que é a direção de erro mais cara.
+  describe('alíquota indisponível', () => {
+    beforeEach(async () => {
+      service = await buildService();
+    });
+
+    // Estreita o tipo e falha se a operação NÃO lançar — um `.catch()` solto
+    // deixaria o teste verde no dia em que o bloqueio deixasse de acontecer,
+    // que é justamente o que ele existe para impedir.
+    async function capturar(promessa: Promise<unknown>): Promise<UnprocessableEntityException> {
+      try {
+        await promessa;
+      } catch (erro) {
+        if (erro instanceof UnprocessableEntityException) return erro;
+        throw erro;
+      }
+      throw new Error('Esperava a decisão ser BLOQUEADA, mas ela foi concluída.');
+    }
+
+    it('bloqueia a decisão com 422 e código estável em vez de assumir zero', async () => {
+      taxRates.resolve.mockRejectedValue(
+        new TaxRateUnavailableError('REGIME_NAO_CONFIGURADO', 'nenhum regime vigente para este tenant.'),
+      );
+
+      const erro = await capturar(service.decide('tenant-1', 'SKU-001'));
+
+      const corpo = erro.getResponse() as { code: string; reason: string; acao: string };
+      expect(corpo.code).toBe('TAX_RATE_UNAVAILABLE');
+      expect(corpo.reason).toBe('REGIME_NAO_CONFIGURADO');
+      // A UI precisa saber PARA ONDE mandar o usuário, não só que falhou.
+      expect(corpo.acao).toContain('Regime tributário');
+      // Nenhum preço foi decidido nem aplicado.
+      expect(strategist.calculateOptimalPrice).not.toHaveBeenCalled();
+      expect(dispatcher.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('aponta a tela certa para cada motivo de recusa', async () => {
+      const casos: [string, string][] = [
+        ['RBT12_INCOMPLETO', 'Faturamento anterior'],
+        ['ANEXO_NAO_CONFERIDO', 'Regime tributário'],
+        ['PERFIL_DO_PRODUTO_AUSENTE', 'Classificação fiscal por produto'],
+      ];
+
+      for (const [motivo, trecho] of casos) {
+        taxRates.resolve.mockRejectedValue(new TaxRateUnavailableError(motivo as never, 'detalhe'));
+
+        const erro = await capturar(service.decide('tenant-1', 'SKU-001'));
+        const corpo = erro.getResponse() as { acao: string };
+
+        expect(corpo.acao).toContain(trecho);
+      }
+    });
+
+    it('erro que NÃO é de alíquota continua subindo — não vira 422 disfarçado', async () => {
+      taxRates.resolve.mockRejectedValue(new Error('conexão recusada'));
+
+      await expect(service.decide('tenant-1', 'SKU-001')).rejects.toThrow('conexão recusada');
     });
   });
 });

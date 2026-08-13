@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
 import {
   PRICING_STRATEGIST,
   PricingStrategist,
@@ -24,7 +24,9 @@ import {
   CHANNEL_CATEGORY_RESOLVER,
   SHIPPING_POLICY_RESOLVER,
   CHANNEL_SELLER_PROFILE_READER,
+  TAX_RATE_RESOLVER,
 } from '../../../shared/contracts/tokens';
+import { ResolvedTaxRate, TaxRateResolver, TaxRateUnavailableError } from '../../../shared/contracts/tax-rate-resolver.port';
 import { ChannelSellerProfileReader } from '../../../shared/contracts/channel-seller-profile-reader.port';
 import { ProductCatalogReader } from '../../../shared/contracts/product-catalog-reader.port';
 import { CompetitorSnapshotReader } from '../../../shared/contracts/competitor-snapshot-reader.port';
@@ -42,6 +44,20 @@ import {
   ShippingPolicyResolver,
   resolveSellerFreightCost,
 } from '../../../shared/contracts/shipping-policy-resolver.port';
+
+// Próximo passo do usuário, por motivo da recusa. Cada um aponta a tela que
+// resolve — em Configurações Fiscais os três cadastros existem desde
+// 11-12/08/2026.
+const ACAO_POR_MOTIVO: Record<string, string> = {
+  REGIME_NAO_CONFIGURADO:
+    'Configure o regime tributário da empresa em Configurações Fiscais → Regime tributário.',
+  RBT12_INCOMPLETO:
+    'Informe o faturamento dos meses anteriores à cobertura do Kyneti em Configurações Fiscais → Faturamento anterior (RBT12).',
+  ANEXO_NAO_CONFERIDO:
+    'Confirme o anexo do Simples Nacional (I a V) em Configurações Fiscais → Regime tributário.',
+  PERFIL_DO_PRODUTO_AUSENTE:
+    'Classifique este produto (ICMS-ST e PIS/Cofins monofásico) em Configurações Fiscais → Classificação fiscal por produto.',
+};
 
 const FINANCIAL_FLOOR_NOTE = 'Preço ajustado para o piso financeiro por proteção de margem.';
 const MAP_FLOOR_NOTE = 'Preço ajustado para respeitar a política de MAP (Preço Mínimo Anunciado) do fornecedor.';
@@ -93,6 +109,12 @@ export class PricingDecisionService {
     // preço (ML: R$79). Sem ela, o piso ignorava o degrau em que o frete
     // vira custo do vendedor.
     @Inject(SHIPPING_POLICY_RESOLVER) private readonly shippingPolicies: ShippingPolicyResolver,
+    // Alíquota real, por produto (12/08/2026). Substitui
+    // FinancialPolicy.taxRate, que era UM percentual por tenant digitado à
+    // mão — errado por construção no Simples, onde a alíquota sai do
+    // faturamento dos 12 meses anteriores e ainda varia por SKU (ST e
+    // monofásico). Ver docs/tributacao-br-regimes-e-reforma.md.
+    @Inject(TAX_RATE_RESOLVER) private readonly taxRates: TaxRateResolver,
     // O que ESTE vendedor contratou no canal (plano da Amazon, reputação do
     // ML) — muda o custo real sem mudar a regra do canal.
     @Inject(CHANNEL_SELLER_PROFILE_READER) private readonly sellerProfiles: ChannelSellerProfileReader,
@@ -236,6 +258,15 @@ export class PricingDecisionService {
     const freeShippingThreshold =
       shippingPolicy?.bands.find((b) => b.freeShippingRequired)?.minPrice ?? null;
 
+    // Alíquota REAL deste SKU, nesta data. Corte seco: se o Tax Intelligence
+    // não consegue afirmar a alíquota, a decisão é BLOQUEADA — mesma
+    // disciplina já aplicada à comissão do canal, que também recusa decidir em
+    // vez de assumir zero. Imposto subestimado superestima margem, que é a
+    // direção de erro mais cara.
+    //
+    // `uf` fica de fora de propósito: o resolver usa a do estabelecimento.
+    const imposto = await this.resolveTaxRate(tenantId, product.productId);
+
     const context: PricingContext = {
       skuCode,
       // productCostPrice (SEM embalagem), não costPrice — a embalagem já
@@ -246,7 +277,7 @@ export class PricingDecisionService {
       currentPrice: opportunity.ourPrice,
       desiredMarginPct: product.desiredMarginPct,
       minimumMarginPct: product.minimumMarginPct,
-      taxRate: policy.taxRate,
+      taxRate: imposto.effectiveRate,
       minProfitMargin: policy.minProfitMargin,
       channelCode,
       feeTiers,
@@ -353,6 +384,37 @@ export class PricingDecisionService {
   //
   // Não existe passo 3. Se nenhum dos dois responder, devolve null e quem
   // chama aborta a decisão — nunca "estima" uma comissão.
+  // Traduz a recusa do Tax Intelligence num erro que a UI sabe tratar.
+  //
+  // 422 e não 500: a requisição está correta, o sistema é que não pode
+  // afirmar a alíquota — é falha de CONFIGURAÇÃO, com ação clara do usuário,
+  // não defeito. E não 400, porque não há nada errado no que foi enviado.
+  //
+  // O `reason` do domínio vira o código estável que o cliente consome; a
+  // mensagem é para leitura humana e pode mudar sem quebrar a UI
+  // (.claude/rules/backend.md: "a UI decide comportamento pelo código, não
+  // pela mensagem").
+  private async resolveTaxRate(tenantId: string, productId: string): Promise<ResolvedTaxRate> {
+    try {
+      return await this.taxRates.resolve({ tenantId, productId, at: new Date() });
+    } catch (error) {
+      if (!(error instanceof TaxRateUnavailableError)) throw error;
+
+      this.logger.warn(
+        `Decisão de preço bloqueada para o produto ${productId} do tenant ${tenantId}: ${error.reason}.`,
+      );
+
+      throw new UnprocessableEntityException({
+        code: 'TAX_RATE_UNAVAILABLE',
+        reason: error.reason,
+        message: error.message,
+        // O que fazer, por motivo. Sem isto o usuário vê "não foi possível
+        // resolver a alíquota" e não tem para onde ir.
+        acao: ACAO_POR_MOTIVO[error.reason],
+      });
+    }
+  }
+
   private async resolveFeeRule(
     tenantId: string,
     internalCategoryId: string | null,
