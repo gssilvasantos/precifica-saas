@@ -42,7 +42,7 @@ export class AuthService {
       role: UserRole.ADMIN, // primeiro usuário de uma conta nova é sempre admin
     });
 
-    return this.buildAuthResponse(user.id, tenant.id, user.role, user.isPlatformAdmin, user.moduleAccess);
+    return this.buildAuthResponse(user.id, tenant.id, tenant.name, user.role, user.isPlatformAdmin, user.moduleAccess);
   }
 
   async login(input: LoginInput) {
@@ -79,12 +79,30 @@ export class AuthService {
       throw new UnauthorizedException('E-mail ou senha inválidos.');
     }
 
-    return this.buildAuthResponse(candidate.id, candidate.tenantId, candidate.role, candidate.isPlatformAdmin, candidate.moduleAccess);
+    return this.buildAuthResponse(
+      candidate.id,
+      candidate.tenantId,
+      candidate.tenant.name,
+      candidate.role,
+      candidate.isPlatformAdmin,
+      candidate.moduleAccess,
+    );
   }
 
+  // `tenantName` entra na RESPOSTA, não no token (13/08/2026).
+  //
+  // Motivo: a mesma pessoa administra mais de uma conta aqui, e a interface
+  // não tinha como dizer em qual delas a sessão está. Uma ação destrutiva que
+  // não nomeia o alvo é armadilha — já desconectou a integração da conta
+  // errada uma vez.
+  //
+  // Fora do JWT de propósito: o token é enviado em toda requisição e não deve
+  // crescer com dado de exibição; e o nome da conta pode mudar sem que a
+  // sessão precise ser invalidada.
   private buildAuthResponse(
     userId: string,
     tenantId: string,
+    tenantName: string,
     role: UserRole,
     isPlatformAdmin: boolean,
     moduleAccess: string[],
@@ -92,7 +110,7 @@ export class AuthService {
     const payload: JwtPayload = { sub: userId, tenantId, role, moduleAccess };
     return {
       accessToken: this.jwt.sign(payload),
-      user: { id: userId, tenantId, role, isPlatformAdmin, moduleAccess },
+      user: { id: userId, tenantId, tenantName, role, isPlatformAdmin, moduleAccess },
     };
   }
 }

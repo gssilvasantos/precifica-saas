@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { connectOlist, disconnectOlist, fetchOlistStatus, syncOlistNow, type OlistSyncStatus } from '../api';
 import { extractErrorMessage } from '../../../lib/extract-error-message';
 import { ConnectionStatusBadge } from './ConnectionStatusBadge';
+import { useAuth } from '../../auth/auth-context';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
 
@@ -15,8 +16,10 @@ const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', tim
 // manualmente. Token estático da API V2, não OAuth2.
 export function OlistConnectionCard() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [apiToken, setApiToken] = useState('');
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [confirmandoDesconexao, setConfirmandoDesconexao] = useState(false);
 
   const statusQuery = useQuery({ queryKey: ['olist-status'], queryFn: fetchOlistStatus });
 
@@ -124,11 +127,51 @@ export function OlistConnectionCard() {
           <Button
             variant="outline"
             className="border-margin-danger/40 text-margin-danger hover:bg-margin-danger/10 hover:text-margin-danger"
-            onClick={() => disconnectMutation.mutate()}
+            onClick={() => setConfirmandoDesconexao(true)}
             disabled={disconnectMutation.isPending}
           >
             {disconnectMutation.isPending ? 'Desconectando…' : 'Desconectar'}
           </Button>
+        </div>
+      )}
+
+      {/* Confirmação NOMEANDO a conta (13/08/2026).
+          A mesma pessoa administra mais de uma conta aqui, e o botão age sobre
+          aquela em que a sessão está — que a tela não dizia em lugar nenhum.
+          Já custou a desconexão da integração da conta errada. Regra do
+          projeto: ação destrutiva diz O QUE será afetado. */}
+      {confirmandoDesconexao && (
+        <div
+          role="alertdialog"
+          aria-labelledby="confirmar-desconexao-titulo"
+          className="mt-4 rounded-md border border-margin-danger/30 bg-margin-danger/5 px-3 py-3 text-sm"
+        >
+          <p id="confirmar-desconexao-titulo" className="font-medium text-margin-danger">
+            {/* Sessão anterior a esta mudança não tem o nome salvo — nesse
+                caso a pergunta é genérica, nunca um nome inventado. */}
+            {user?.tenantName
+              ? `Desconectar o Olist da conta “${user.tenantName}”?`
+              : 'Desconectar o Olist desta conta?'}
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            O catálogo já importado permanece. O token fica guardado, então reconectar depois não exige gerá-lo de
+            novo — mas a sincronização automática para até você reconectar.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              className="border-margin-danger/40 text-margin-danger hover:bg-margin-danger/10 hover:text-margin-danger"
+              onClick={() => {
+                setConfirmandoDesconexao(false);
+                disconnectMutation.mutate();
+              }}
+            >
+              Sim, desconectar
+            </Button>
+            <Button variant="outline" onClick={() => setConfirmandoDesconexao(false)}>
+              Cancelar
+            </Button>
+          </div>
         </div>
       )}
 
