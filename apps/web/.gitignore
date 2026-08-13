@@ -1,3 +1,8 @@
 node_modules
 dist
 .env
+
+# Cache incremental do `tsc -b`. É saída de build: muda a cada compilação e
+# suja o working tree sem informar nada. Foram rastreados por engano no commit
+# bacf00b (WIP); o conteúdo é regenerado sozinho na próxima compilação.
+*.tsbuildinfo
