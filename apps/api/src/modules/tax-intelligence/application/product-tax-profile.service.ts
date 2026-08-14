@@ -4,8 +4,12 @@ import {
   PRODUCT_TAX_PROFILE_REPOSITORY,
   ProductTaxProfileRecord,
   ProductTaxProfileRepository,
+  TENANT_TAX_PROFILE_REPOSITORY,
+  TenantTaxProfileRepository,
 } from './ports/tax-repositories.port';
 import { isUf } from '../domain/tenant-tax-profile-rules';
+import { derivarPerfilFiscal } from '../domain/derivacao-fiscal';
+import { ClassificacaoDeProdutoInput } from '../../../shared/contracts/product-tax-classifier.port';
 
 // Perfil fiscal do produto (12/08/2026) — o último bloqueio do Simples.
 //
@@ -39,10 +43,68 @@ export class ProductTaxProfileService {
 
   constructor(
     @Inject(PRODUCT_TAX_PROFILE_REPOSITORY) private readonly repository: ProductTaxProfileRepository,
+    // Só para descobrir a UF do estabelecimento — ST é regime estadual.
+    @Inject(TENANT_TAX_PROFILE_REPOSITORY) private readonly tenantProfiles: TenantTaxProfileRepository,
   ) {}
 
   async listarPorProduto(tenantId: string, productId: string): Promise<ProductTaxProfileRecord[]> {
     return this.repository.listarPorProduto(tenantId, productId);
+  }
+
+  // Classificação derivada do NCM que o ERP já importa (13/08/2026).
+  //
+  // Chamada pelo sync do Olist a cada produto. NÃO sobrescreve classificação
+  // manual: se já existe vigência para aquele produto/UF, sai sem tocar em
+  // nada — o lojista que classificou um caso atípico continua mandando.
+  //
+  // Idempotente: rodar de novo com o mesmo NCM não abre vigência duplicada.
+  async classificarDoErp(input: ClassificacaoDeProdutoInput): Promise<boolean> {
+    const perfilDoTenant = await this.tenantProfiles.findVigente(input.tenantId, input.at);
+    // Sem regime configurado não sabemos a UF do estabelecimento, e ST é
+    // estadual. Não classifica — e não é erro: é ordem de configuração.
+    if (!perfilDoTenant) return false;
+
+    const derivado = derivarPerfilFiscal({ ncm: input.ncm, uf: perfilDoTenant.uf, at: input.at });
+    // Sem norma aplicável, NADA é gravado. O motor continua bloqueando aquele
+    // SKU, que é melhor que precificar sobre um palpite.
+    if (!derivado) return false;
+
+    const vigente = await this.repository.findVigente(
+      input.tenantId,
+      input.productId,
+      perfilDoTenant.uf,
+      input.at,
+    );
+
+    // Já classificado. Só reabre vigência se a NORMA mudou o resultado —
+    // comparar o conteúdo é o que torna a chamada idempotente sem precisar de
+    // chave de controle.
+    if (vigente) {
+      const igual =
+        vigente.icmsSt === derivado.icmsSt &&
+        vigente.monofasico === derivado.monofasico &&
+        vigente.fonte === derivado.fonte;
+      if (igual) return false;
+
+      // Classificação MANUAL não é sobrescrita por derivação: quem assumiu a
+      // decisão continua com ela.
+      if (vigente.fonte === 'MANUAL') return false;
+    }
+
+    await this.repository.abrirNovaVigencia({
+      tenantId: input.tenantId,
+      productId: input.productId,
+      uf: perfilDoTenant.uf,
+      icmsSt: derivado.icmsSt,
+      monofasico: derivado.monofasico,
+      ncm: input.ncm?.replace(/\D/g, '') || null,
+      fonte: derivado.fonte,
+      // Vigência a partir de hoje, nunca retroativa: a classificação de um mês
+      // já apurado não muda porque o sync rodou.
+      vigenciaInicio: input.at,
+    });
+
+    return true;
   }
 
   async classificar(

@@ -9,6 +9,8 @@ import {
   ErpSyncChangeEventRepository,
 } from './ports/erp-sync-change-event-repository.port';
 import { PRODUCT_CATALOG_WRITER } from '../../../shared/contracts/tokens';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ERP_PRODUCT_EVENTS, ErpProductImportedEvent } from '../domain/erp-product-events';
 import { ProductCatalogWriter } from '../../../shared/contracts/product-catalog-writer.port';
 import {
   PROVIDER_SYNC_LOG_REPOSITORY,
@@ -73,6 +75,9 @@ export class ErpSyncOrchestrator {
     private readonly credentials: CredentialEncryptionService,
     private readonly client: OlistApiClient,
     private readonly photoMirror: ProductPhotoMirrorService,
+    // Classificação fiscal derivada do NCM (13/08/2026). O importador não
+    // conhece norma nenhuma — passa NCM e UF, o Tax Intelligence aplica.
+    private readonly events: EventEmitter2,
   ) {}
 
   // Simplificação consciente: o intervalo é o mesmo para todos os tenants
@@ -319,7 +324,7 @@ export class ErpSyncOrchestrator {
       normalized.photoUrls,
     );
 
-    const { changed } = await this.catalogWriter.upsertFromExternalSource({
+    const { changed, productId } = await this.catalogWriter.upsertFromExternalSource({
       tenantId,
       skuCode: normalized.skuCode,
       name: normalized.name,
@@ -357,6 +362,20 @@ export class ErpSyncOrchestrator {
       // vira um hash novo a cada passada.
       contentHash: fotoFalhou ? `${contentHash}:fotos-pendentes` : contentHash,
     });
+
+    // Anuncia o produto importado (13/08/2026). O Tax Intelligence escuta e
+    // classifica a partir do NCM — o Olist traz NCM em 100% dos produtos, e
+    // sem isso o lojista teria que reclassificar centenas de SKUs à mão.
+    //
+    // Evento e não chamada direta: ver o comentário em erp-product-events.ts.
+    // `productId` é o do CATÁLOGO, devolvido pelo writer — não o externalId do
+    // Olist.
+    this.events.emit(ERP_PRODUCT_EVENTS.IMPORTED, {
+      tenantId,
+      productId,
+      skuCode: normalized.skuCode,
+      ncm: normalized.ncm,
+    } satisfies ErpProductImportedEvent);
 
     return { changed, semDimensoes };
   }

@@ -40,6 +40,12 @@ import { CatalogModule } from '../catalog/catalog.module';
   imports: [
     SyncOpsModule, // agenda/log/saúde de sync — mesma infra genérica usada pelo Marketplace Intelligence
     CatalogModule, // só para consumir PRODUCT_CATALOG_WRITER — nunca a tabela Product direto
+    // NÃO importa TaxIntelligenceModule (13/08/2026): aquele módulo importa
+    // OrdersModule (para o RBT12), e OrdersModule importa este — o ciclo
+    // ErpIntegration -> TaxIntelligence -> Orders -> ErpIntegration. A
+    // classificação fiscal do produto importado sai por EVENTO
+    // (ERP_PRODUCT_EVENTS.IMPORTED), não por chamada direta. forwardRef
+    // resolveria a compilação e esconderia o acoplamento.
   ],
   controllers: [OlistConnectionController, NuvemshopConnectionController, ChannelListingsController],
   providers: [

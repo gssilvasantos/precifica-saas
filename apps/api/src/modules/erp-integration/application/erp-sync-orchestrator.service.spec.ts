@@ -50,6 +50,9 @@ function construirOrquestrador() {
     obterProduto: jest.fn(),
   };
   const photoMirror = { mirrorAll: jest.fn().mockResolvedValue({ urls: [], houveFalha: false }) };
+  // Classificação fiscal derivada (13/08/2026). Falha aqui nunca derruba a
+  // importação — os cenários deste arquivo são sobre o sync, não sobre norma.
+  const taxClassifier = { classificarDoErp: jest.fn().mockResolvedValue(true) };
 
   const orchestrator = new ErpSyncOrchestrator(
     connections as never,
@@ -60,9 +63,10 @@ function construirOrquestrador() {
     credentials as never,
     client as never,
     photoMirror as never,
+    taxClassifier as never,
   );
 
-  return { orchestrator, connections, syncLogs, health, client };
+  return { orchestrator, connections, syncLogs, health, client, taxClassifier };
 }
 
 describe('ErpSyncOrchestrator — bloqueio de cota do Olist', () => {
@@ -129,6 +133,21 @@ describe('motivoVisivelDeRejeicao', () => {
     // Ainda diz QUAL produto e para onde olhar.
     expect(motivo).toContain('794327305');
     expect(motivo).toContain('log do servidor');
+  });
+});
+
+describe('ErpSyncOrchestrator — classificação fiscal derivada', () => {
+  it('falha ao classificar NÃO derruba a importação', async () => {
+    // O produto já está no catálogo quando a classificação roda. Classificar é
+    // passo seguinte, não pré-requisito: sem ela o piso bloqueia aquele SKU,
+    // que é recuperável — perder a importação inteira não seria.
+    const { orchestrator, client, taxClassifier } = construirOrquestrador();
+    client.fetchAllActiveProductDetails.mockResolvedValue({ details: [], failedCount: 0 });
+    taxClassifier.classificarDoErp.mockRejectedValue(new Error('banco indisponível'));
+
+    const resultado = await orchestrator.syncTenant('tenant-1');
+
+    expect(resultado.success).toBe(true);
   });
 });
 

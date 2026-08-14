@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../shared/prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
-import { TAX_RATE_RESOLVER } from '../../shared/contracts/tokens';
+import { PRODUCT_TAX_CLASSIFIER, TAX_RATE_RESOLVER } from '../../shared/contracts/tokens';
 import { TaxRateResolverService } from './application/tax-rate-resolver.service';
 import {
   PRODUCT_TAX_PROFILE_REPOSITORY,
@@ -20,6 +20,7 @@ import { PriorRevenueController } from './interface/controllers/prior-revenue.co
 import { PriorRevenueService } from './application/prior-revenue.service';
 import { ProductTaxProfileController } from './interface/controllers/product-tax-profile.controller';
 import { ProductTaxProfileService } from './application/product-tax-profile.service';
+import { ProductImportedTaxListener } from './application/product-imported-tax.listener';
 
 // Tax Intelligence (02/08/2026) — ver docs/tributacao-br-regimes-e-reforma.md.
 //
@@ -41,12 +42,14 @@ import { ProductTaxProfileService } from './application/product-tax-profile.serv
     TenantTaxProfileService,
     PriorRevenueService,
     ProductTaxProfileService,
+    ProductImportedTaxListener,
     TaxRateResolverService,
     { provide: TAX_RATE_RESOLVER, useExisting: TaxRateResolverService },
+    { provide: PRODUCT_TAX_CLASSIFIER, useExisting: ProductTaxProfileService },
     { provide: TENANT_TAX_PROFILE_REPOSITORY, useClass: PrismaTenantTaxProfileRepository },
     { provide: PRODUCT_TAX_PROFILE_REPOSITORY, useClass: PrismaProductTaxProfileRepository },
     { provide: TENANT_PRIOR_REVENUE_REPOSITORY, useClass: PrismaTenantPriorRevenueRepository },
   ],
-  exports: [TAX_RATE_RESOLVER],
+  exports: [TAX_RATE_RESOLVER, PRODUCT_TAX_CLASSIFIER],
 })
 export class TaxIntelligenceModule {}

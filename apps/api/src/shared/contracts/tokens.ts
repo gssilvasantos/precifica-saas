@@ -74,6 +74,10 @@ export const MONTHLY_REVENUE_READER = Symbol('MONTHLY_REVENUE_READER');
 // docs/tributacao-br-regimes-e-reforma.md.
 export const TAX_RATE_RESOLVER = Symbol('TAX_RATE_RESOLVER');
 
+// Classificação fiscal derivada do NCM que o ERP já importa — consumida pelo
+// sync do Olist. Ver product-tax-classifier.port.ts.
+export const PRODUCT_TAX_CLASSIFIER = Symbol('PRODUCT_TAX_CLASSIFIER');
+
 // Exportado pelo Catalog — consumido pelo PackagingCostChangeListener
 // (Pricing Intelligence) para descobrir quais SKUs recalcular quando o
 // custo de uma Packaging muda (ver domain/packaging-events.ts).
