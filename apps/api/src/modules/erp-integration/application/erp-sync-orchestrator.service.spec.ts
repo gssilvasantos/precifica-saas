@@ -34,8 +34,10 @@ function construirOrquestrador() {
     markSyncedWithWarning: jest.fn().mockResolvedValue(undefined),
     markSyncFailed: jest.fn().mockResolvedValue(undefined),
   };
-  const changeEvents = { findByExternalId: jest.fn().mockResolvedValue(null), record: jest.fn() };
-  const catalogWriter = { upsertFromExternalSource: jest.fn() };
+  const changeEvents = { findByExternalId: jest.fn().mockResolvedValue(null), upsert: jest.fn() };
+  const catalogWriter = {
+    upsertFromExternalSource: jest.fn().mockResolvedValue({ changed: true, productId: 'prod-catalogo-1' }),
+  };
   const syncLogs = {
     start: jest.fn().mockResolvedValue('log-1'),
     finish: jest.fn().mockResolvedValue(undefined),
@@ -50,9 +52,15 @@ function construirOrquestrador() {
     obterProduto: jest.fn(),
   };
   const photoMirror = { mirrorAll: jest.fn().mockResolvedValue({ urls: [], houveFalha: false }) };
-  // Classificação fiscal derivada (13/08/2026). Falha aqui nunca derruba a
-  // importação — os cenários deste arquivo são sobre o sync, não sobre norma.
-  const taxClassifier = { classificarDoErp: jest.fn().mockResolvedValue(true) };
+  // O produto importado é ANUNCIADO por evento (13/08/2026); quem classifica
+  // é o Tax Intelligence, que escuta. Este arquivo verifica que o anúncio sai,
+  // não o que o ouvinte faz com ele.
+  const events = { emit: jest.fn() };
+  // Só serve ao caminho do atalho (hash igual), onde o writer não é chamado e
+  // o productId precisa ser resolvido pelo SKU.
+  const catalogReader = {
+    findBySku: jest.fn().mockResolvedValue({ productId: 'prod-catalogo-1', skuCode: 'SKU-1' }),
+  };
 
   const orchestrator = new ErpSyncOrchestrator(
     connections as never,
@@ -63,10 +71,11 @@ function construirOrquestrador() {
     credentials as never,
     client as never,
     photoMirror as never,
-    taxClassifier as never,
+    events as never,
+    catalogReader as never,
   );
 
-  return { orchestrator, connections, syncLogs, health, client, taxClassifier };
+  return { orchestrator, connections, syncLogs, health, client, events, catalogReader, changeEvents, catalogWriter };
 }
 
 describe('ErpSyncOrchestrator — bloqueio de cota do Olist', () => {
@@ -136,18 +145,51 @@ describe('motivoVisivelDeRejeicao', () => {
   });
 });
 
-describe('ErpSyncOrchestrator — classificação fiscal derivada', () => {
-  it('falha ao classificar NÃO derruba a importação', async () => {
-    // O produto já está no catálogo quando a classificação roda. Classificar é
-    // passo seguinte, não pré-requisito: sem ela o piso bloqueia aquele SKU,
-    // que é recuperável — perder a importação inteira não seria.
-    const { orchestrator, client, taxClassifier } = construirOrquestrador();
-    client.fetchAllActiveProductDetails.mockResolvedValue({ details: [], failedCount: 0 });
-    taxClassifier.classificarDoErp.mockRejectedValue(new Error('banco indisponível'));
+describe('ErpSyncOrchestrator — anúncio do produto importado', () => {
+  // REGRESSÃO (14/08/2026). O evento nasceu só no caminho de ESCRITA, depois
+  // do atalho de "hash igual, pula". Resultado em produção: 249 produtos
+  // importados e estáveis, ZERO classificados — nenhum deles mudava no ERP, e
+  // portanto nenhum chegava ao anúncio.
+  //
+  // Classificação fiscal não depende de o dado ter mudado: depende do NCM, da
+  // UF e da norma vigente.
+  const PRODUTO_OLIST = {
+    id: '1',
+    codigo: 'SKU-1',
+    nome: 'Batom',
+    ncm: '33041000',
+    peso_liquido: '0.076',
+    comprimentoEmbalagem: '16',
+    larguraEmbalagem: '11',
+    alturaEmbalagem: '3',
+  };
 
-    const resultado = await orchestrator.syncTenant('tenant-1');
+  it('anuncia o produto MESMO quando nada mudou no ERP', async () => {
+    const { orchestrator, client, events, catalogReader, changeEvents } = construirOrquestrador();
+    client.fetchAllActiveProductDetails.mockResolvedValue({
+      details: [{ produto: PRODUTO_OLIST }],
+      failedCount: 0,
+    });
 
-    expect(resultado.success).toBe(true);
+    // PRIMEIRA passada: produto novo, caminho de escrita.
+    await orchestrator.syncTenant('tenant-1');
+    const hashGravado = changeEvents.upsert.mock.calls[0][0].contentHash;
+    expect(events.emit).toHaveBeenCalledTimes(1);
+
+    // SEGUNDA passada: mesmo dado, hash idêntico — o atalho é tomado e o
+    // writer NÃO é chamado. Antes da correção, o anúncio morria aqui.
+    events.emit.mockClear();
+    catalogReader.findBySku.mockClear();
+    changeEvents.findByExternalId.mockResolvedValue({ contentHash: hashGravado });
+
+    await orchestrator.syncTenant('tenant-1');
+
+    // O productId vem do catálogo, já que o writer não rodou nesta passada.
+    expect(catalogReader.findBySku).toHaveBeenCalled();
+    expect(events.emit).toHaveBeenCalledWith(
+      'erp.product.imported',
+      expect.objectContaining({ tenantId: 'tenant-1', productId: 'prod-catalogo-1', ncm: '33041000' }),
+    );
   });
 });
 

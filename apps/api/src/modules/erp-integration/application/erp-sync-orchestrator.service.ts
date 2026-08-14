@@ -8,7 +8,8 @@ import {
   ERP_SYNC_CHANGE_EVENT_REPOSITORY,
   ErpSyncChangeEventRepository,
 } from './ports/erp-sync-change-event-repository.port';
-import { PRODUCT_CATALOG_WRITER } from '../../../shared/contracts/tokens';
+import { PRODUCT_CATALOG_READER, PRODUCT_CATALOG_WRITER } from '../../../shared/contracts/tokens';
+import { ProductCatalogReader } from '../../../shared/contracts/product-catalog-reader.port';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ERP_PRODUCT_EVENTS, ErpProductImportedEvent } from '../domain/erp-product-events';
 import { ProductCatalogWriter } from '../../../shared/contracts/product-catalog-writer.port';
@@ -78,6 +79,9 @@ export class ErpSyncOrchestrator {
     // Classificação fiscal derivada do NCM (13/08/2026). O importador não
     // conhece norma nenhuma — passa NCM e UF, o Tax Intelligence aplica.
     private readonly events: EventEmitter2,
+    // Só para resolver o productId no caminho do atalho (hash igual), onde o
+    // writer não é chamado. Nunca lê a tabela Product direto — porta.
+    @Inject(PRODUCT_CATALOG_READER) private readonly catalogReader: ProductCatalogReader,
   ) {}
 
   // Simplificação consciente: o intervalo é o mesmo para todos os tenants
@@ -315,6 +319,16 @@ export class ErpSyncOrchestrator {
       // Nada mudou — não baixa foto de novo, não toca no Catalog. Mas o SKU
       // continua sem dimensão, e o aviso precisa refletir o estado do
       // catálogo, não só o que foi escrito nesta passada.
+      //
+      // MESMO ASSIM anuncia o produto (14/08/2026). A classificação fiscal
+      // NÃO depende de o dado ter mudado no ERP: depende do NCM, da UF e da
+      // norma vigente. Um produto estável mas nunca classificado — todo o
+      // catálogo já importado, no dia em que a derivação nasceu — jamais seria
+      // alcançado se o evento vivesse só no caminho de escrita. Foi
+      // exatamente o que aconteceu: 249 produtos, zero classificados.
+      //
+      // O listener é idempotente e sai barato quando já está classificado.
+      await this.anunciarProdutoImportado(tenantId, normalized.skuCode, normalized.ncm);
       return { changed: false, semDimensoes };
     }
 
@@ -378,6 +392,30 @@ export class ErpSyncOrchestrator {
     } satisfies ErpProductImportedEvent);
 
     return { changed, semDimensoes };
+  }
+
+  // Anuncia o produto no caminho em que o writer NÃO foi chamado (hash igual),
+  // e por isso não temos o productId em mãos. Uma leitura por SKU a mais por
+  // produto pulado — lookup por chave única, e só uma vez a cada ciclo de
+  // sync.
+  //
+  // Alternativa descartada: chamar o writer também no caminho do atalho. Seria
+  // mais caro (re-espelha foto, reescreve o catálogo) e desfaria a otimização
+  // que o atalho existe para dar.
+  private async anunciarProdutoImportado(
+    tenantId: string,
+    skuCode: string,
+    ncm: string | null,
+  ): Promise<void> {
+    const produto = await this.catalogReader.findBySku(tenantId, skuCode);
+    if (!produto) return;
+
+    this.events.emit(ERP_PRODUCT_EVENTS.IMPORTED, {
+      tenantId,
+      productId: produto.productId,
+      skuCode,
+      ncm,
+    } satisfies ErpProductImportedEvent);
   }
 
   private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
