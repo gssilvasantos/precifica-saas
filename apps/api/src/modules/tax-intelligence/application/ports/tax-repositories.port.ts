@@ -22,6 +22,9 @@ export interface TenantTaxProfileRecord {
   presuncaoIrpj: number | null;
   presuncaoCsll: number | null;
   automationMode: 'AUTO' | 'MANUAL';
+  // Alíquota mantida à mão pelo lojista, em FRAÇÃO (convertida no repositório
+  // como as demais). null = não sobrescrito, diferente de zero.
+  aliquotaManual: number | null;
 }
 
 // Entrada de escrita (11/08/2026). Percentuais em 0–100, convenção do schema:
@@ -39,6 +42,9 @@ export interface NovoPerfilTributario {
   presuncaoIrpjPct: number | null;
   presuncaoCsllPct: number | null;
   automationMode: 'AUTO' | 'MANUAL';
+  // Alíquota mantida à mão, em PERCENTUAL (0–100) como os demais campos de
+  // escrita. null = não sobrescrito, diferente de zero.
+  aliquotaManualPct: number | null;
 }
 
 export interface TenantTaxProfileRepository {

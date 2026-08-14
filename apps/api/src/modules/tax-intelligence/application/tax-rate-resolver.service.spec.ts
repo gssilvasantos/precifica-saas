@@ -80,6 +80,34 @@ describe('TaxRateResolverService', () => {
 
   const query = { tenantId: TENANT, productId: 'prod-1', uf: 'SP', at: PA };
 
+  describe('alíquota mantida à mão (13/08/2026)', () => {
+    it('vence a calculada e reporta MANUAL_OVERRIDE, com a calculada no breakdown', async () => {
+      // O lojista mantém 7,30% de propósito, acima dos 7,2113% calculados —
+      // margem de segurança deliberada. O sistema usa o número dele, mas não
+      // esconde o cálculo.
+      const base = await tenantProfiles.findVigente();
+      tenantProfiles.findVigente.mockResolvedValue({ ...base, aliquotaManual: 0.073 });
+
+      const r = await service.resolve(query);
+
+      expect(r.effectiveRate).toBe(0.073);
+      expect(r.source).toBe('MANUAL_OVERRIDE');
+      expect(r.breakdown.aliquotaCheia).toBeCloseTo(0.0721126574, 9);
+    });
+
+    it('perfil SEM o campo não é tratado como sobrescrito', async () => {
+      // Regressão: `undefined !== null` é TRUE. Com a checagem frouxa, um
+      // registro sem a coluna virava MANUAL_OVERRIDE com effectiveRate
+      // undefined — contaminando piso de preço e DRE em silêncio.
+      // O fake padrão desta suíte JÁ é um perfil sem a coluna — é exatamente
+      // a forma que expôs o bug quando a checagem era `!== null`.
+      const r = await service.resolve(query);
+
+      expect(r.source).toBe('CALCULATED_RBT12');
+      expect(r.effectiveRate).toBeCloseTo(0.0721126574, 9);
+    });
+  });
+
   describe('UF opcional na consulta (12/08/2026)', () => {
     it('sem uf, usa a do estabelecimento e resolve igual', async () => {
       // Quem consome a porta (Pricing, DRE) não sabe a UF: ela vive no perfil

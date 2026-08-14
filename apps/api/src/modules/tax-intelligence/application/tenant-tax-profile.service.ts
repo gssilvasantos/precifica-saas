@@ -6,6 +6,9 @@ import {
   TenantTaxProfileRepository,
 } from './ports/tax-repositories.port';
 import { validarPerfilTributario } from '../domain/tenant-tax-profile-rules';
+import { SugestaoDeAliquota, calcularSugestao, medirFolga } from '../domain/sugestao-de-aliquota';
+import { TAX_RATE_RESOLVER } from '../../../shared/contracts/tokens';
+import { TaxRateResolver, TaxRateUnavailableError } from '../../../shared/contracts/tax-rate-resolver.port';
 
 // Caso de uso do cadastro de regime tributário (11/08/2026).
 //
@@ -19,6 +22,10 @@ export class TenantTaxProfileService {
 
   constructor(
     @Inject(TENANT_TAX_PROFILE_REPOSITORY) private readonly repository: TenantTaxProfileRepository,
+    // O próprio resolver do módulo, injetado pelo token como qualquer
+    // consumidor. Usado só para a SUGESTÃO — o cálculo continua vivendo lá, e
+    // este serviço não reimplementa RBT12.
+    @Inject(TAX_RATE_RESOLVER) private readonly taxRates: TaxRateResolver,
   ) {}
 
   // O regime que vale HOJE. null = nunca configurado, e a UI precisa distinguir
@@ -29,6 +36,45 @@ export class TenantTaxProfileService {
 
   async listarHistorico(tenantId: string): Promise<TenantTaxProfileRecord[]> {
     return this.repository.listar(tenantId);
+  }
+
+  // Sugestão de reajuste da alíquota mantida à mão (13/08/2026).
+  //
+  // Só existe quando o lojista definiu um percentual próprio E o cálculo do
+  // RBT12 ultrapassou esse número — ou seja, quando a margem de segurança dele
+  // deixou de existir. Ver domain/sugestao-de-aliquota.ts.
+  //
+  // Devolve null em silêncio nos casos normais (sem regime, sem alíquota
+  // manual, folga ainda positiva). Também engole TaxRateUnavailableError: uma
+  // sugestão é informação secundária, e não pode derrubar a tela de
+  // configuração justamente quando o que falta É a configuração.
+  async obterSugestaoDeReajuste(tenantId: string): Promise<SugestaoDeAliquota | null> {
+    const vigente = await this.repository.findVigente(tenantId, new Date());
+    if (!vigente || vigente.aliquotaManual === null) return null;
+
+    let calculadaPct: number;
+    try {
+      // `productId` vazio: a sugestão é sobre a alíquota da CONTA, não de um
+      // SKU. O resolver ainda exige o perfil do produto para segregar ST e
+      // monofásico — quando não consegue, cai no catch abaixo e não sugere.
+      const calculada = await this.taxRates.resolve({ tenantId, productId: '', at: new Date() });
+      calculadaPct = calculada.breakdown.aliquotaCheia !== undefined
+        ? calculada.breakdown.aliquotaCheia * 100
+        : calculada.effectiveRate * 100;
+    } catch (erro) {
+      if (erro instanceof TaxRateUnavailableError) return null;
+      throw erro;
+    }
+
+    const manualPct = vigente.aliquotaManual * 100;
+
+    return calcularSugestao({
+      aliquotaManualPct: manualPct,
+      aliquotaCalculadaPct: calculadaPct,
+      // A folga é MEDIDA do comportamento dele, não configurada — ver o
+      // comentário de medirFolga.
+      folgaPctPontos: medirFolga(manualPct, calculadaPct),
+    });
   }
 
   async definirRegime(

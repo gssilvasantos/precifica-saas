@@ -1,3 +1,4 @@
+import { TaxRateUnavailableError } from '../../../shared/contracts/tax-rate-resolver.port';
 import { BadRequestException } from '@nestjs/common';
 import { TenantTaxProfileService } from './tenant-tax-profile.service';
 import { NovoPerfilTributario, TenantTaxProfileRecord } from './ports/tax-repositories.port';
@@ -17,6 +18,7 @@ function registro(over: Partial<TenantTaxProfileRecord> = {}): TenantTaxProfileR
     icmsAliquota: null,
     presuncaoIrpj: null,
     presuncaoCsll: null,
+    aliquotaManual: null,
     automationMode: 'AUTO',
     ...over,
   };
@@ -34,7 +36,22 @@ function construir(vigenteAtual: TenantTaxProfileRecord | null = null) {
       return registro({ uf: input.uf, regime: input.regime, vigenciaInicio: input.vigenciaInicio });
     }),
   };
-  return { service: new TenantTaxProfileService(repo as never), repo, recebido };
+  // Resolver fake: os cenários deste arquivo são sobre CADASTRO, não sobre
+  // sugestão. Devolve a alíquota do extrato oficial (7,2113%) para os testes
+  // de sugestão terem uma base realista.
+  const taxRates = {
+    resolve: jest.fn().mockResolvedValue({
+      effectiveRate: 0.072113,
+      incidence: 'POR_DENTRO',
+      creditableRate: 0,
+      regime: 'SIMPLES_NACIONAL',
+      source: 'CALCULATED_RBT12',
+      breakdown: {},
+      fixedMonthlyTaxAmount: null,
+    }),
+  };
+
+  return { service: new TenantTaxProfileService(repo as never, taxRates as never), repo, recebido, taxRates };
 }
 
 // Captura o erro esperado e ESTREITA o tipo. Também falha explicitamente se a
@@ -59,6 +76,7 @@ const SIMPLES_VALIDO = {
   icmsAliquotaPct: null,
   presuncaoIrpjPct: null,
   presuncaoCsllPct: null,
+  aliquotaManualPct: null,
   automationMode: 'AUTO' as const,
 };
 
@@ -143,6 +161,61 @@ describe('TenantTaxProfileService', () => {
     });
 
     expect(recebido[0].regime).toBe('LUCRO_PRESUMIDO');
+  });
+
+  describe('sugestão de reajuste', () => {
+    it('não sugere nada enquanto a folga de segurança do lojista existe', async () => {
+      // Ele usa 7,30% e o cálculo dá 7,2113% — está protegido.
+      const { service } = construir(registro({ aliquotaManual: 0.073 }));
+
+      expect(await service.obterSugestaoDeReajuste(TENANT)).toBeNull();
+    });
+
+    it('sugere quando o RBT12 ultrapassa o número em uso, preservando a folga', async () => {
+      const { service, taxRates } = construir(registro({ aliquotaManual: 0.073 }));
+      // Faturamento subiu de faixa: o cálculo foi para 7,80%.
+      taxRates.resolve.mockResolvedValue({
+        effectiveRate: 0.078,
+        incidence: 'POR_DENTRO',
+        creditableRate: 0,
+        regime: 'SIMPLES_NACIONAL',
+        source: 'CALCULATED_RBT12',
+        breakdown: {},
+        fixedMonthlyTaxAmount: null,
+      });
+
+      const s = await service.obterSugestaoDeReajuste(TENANT);
+
+      expect(s).not.toBeNull();
+      expect(s!.atualPct).toBe(7.3);
+      expect(s!.calculadaPct).toBe(7.8);
+      expect(s!.sugeridaPct).toBe(7.8); // folga zerada: ele já estava abaixo
+      expect(s!.defasagemPctPontos).toBe(0.5);
+    });
+
+    it('não sugere para quem nunca definiu alíquota manual', async () => {
+      // Sem sobrescrita, a alíquota já se ajusta sozinha — nada a aprovar.
+      const { service } = construir(registro({ aliquotaManual: null }));
+
+      expect(await service.obterSugestaoDeReajuste(TENANT)).toBeNull();
+    });
+
+    it('sem regime configurado, devolve null em vez de estourar', async () => {
+      const { service } = construir(null);
+
+      expect(await service.obterSugestaoDeReajuste(TENANT)).toBeNull();
+    });
+
+    it('cálculo indisponível não derruba a tela de configuração', async () => {
+      // A sugestão é informação secundária. Estourar aqui quebraria a tela
+      // justamente quando o que falta É a configuração.
+      const { service, taxRates } = construir(registro({ aliquotaManual: 0.073 }));
+      taxRates.resolve.mockRejectedValue(
+        new TaxRateUnavailableError('PERFIL_DO_PRODUTO_AUSENTE', 'sem perfil fiscal'),
+      );
+
+      expect(await service.obterSugestaoDeReajuste(TENANT)).toBeNull();
+    });
   });
 
   it('obterVigente devolve null quando nunca foi configurado', async () => {

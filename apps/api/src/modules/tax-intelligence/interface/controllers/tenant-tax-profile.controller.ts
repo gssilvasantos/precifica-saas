@@ -36,6 +36,13 @@ export class TenantTaxProfileController {
     return vigente ? paraResposta(vigente) : null;
   }
 
+  // Sugestão de reajuste da alíquota mantida à mão. null = nada a sugerir, que
+  // é o estado normal enquanto a folga de segurança do lojista existir.
+  @Get('sugestao')
+  async obterSugestao(@CurrentUser() user: AuthenticatedUser) {
+    return this.service.obterSugestaoDeReajuste(user.tenantId);
+  }
+
   @Get('historico')
   async listarHistorico(@CurrentUser() user: AuthenticatedUser) {
     const historico = await this.service.listarHistorico(user.tenantId);
@@ -54,6 +61,7 @@ export class TenantTaxProfileController {
       icmsAliquotaPct: dto.icmsAliquotaPct ?? null,
       presuncaoIrpjPct: dto.presuncaoIrpjPct ?? null,
       presuncaoCsllPct: dto.presuncaoCsllPct ?? null,
+      aliquotaManualPct: dto.aliquotaManualPct ?? null,
       automationMode: dto.automationMode ?? 'AUTO',
     });
     return paraResposta(criado);
@@ -81,6 +89,7 @@ function paraResposta(record: TenantTaxProfileRecord) {
     icmsAliquotaPct: paraPct(record.icmsAliquota),
     presuncaoIrpjPct: paraPct(record.presuncaoIrpj),
     presuncaoCsllPct: paraPct(record.presuncaoCsll),
+    aliquotaManualPct: paraPct(record.aliquotaManual),
     automationMode: record.automationMode,
   };
 }

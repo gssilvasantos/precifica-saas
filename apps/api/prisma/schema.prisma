@@ -3372,6 +3372,24 @@ model TenantTaxProfile {
   // passa pelo Safety Lock que já existe. Ver §5.4 do doc.
   automationMode TaxAutomationMode @default(AUTO)
 
+  // Alíquota que o LOJISTA mantém à mão (13/08/2026), tipicamente um pouco
+  // ACIMA da calculada, como margem de segurança deliberada — errar imposto
+  // para cima subestima lucro no DRE e sobe o piso de preço, que é a direção
+  // segura.
+  //
+  // Quando preenchida, VENCE a calculada e o resolver devolve
+  // source: 'MANUAL_OVERRIDE', sempre com a calculada junto no breakdown para
+  // a diferença ficar visível.
+  //
+  // null = usar a calculada. Não é "zero por cento": zero seria uma alíquota
+  // afirmada, e o resolver deve tratar ausência como "não sobrescrito".
+  //
+  // Vive aqui, e não em CatalogSettings.taxRatePct, porque esta tabela tem
+  // VIGÊNCIA: aceitar uma sugestão de reajuste abre uma linha nova em vez de
+  // apagar a anterior, e um DRE de mês fechado continua usando o número que
+  // valia naquele mês.
+  aliquotaManualPct Decimal? @db.Decimal(5, 2)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

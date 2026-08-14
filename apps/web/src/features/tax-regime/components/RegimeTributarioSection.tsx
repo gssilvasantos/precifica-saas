@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   definirRegime,
   fetchRegimeVigente,
+  fetchSugestaoDeAliquota,
   problemasPorCampo,
   type SimplesAnexo,
   type TaxRegime,
@@ -51,6 +52,10 @@ export default function RegimeTributarioSection({ canEdit }: Props) {
   const [icmsAliquotaPct, setIcmsAliquotaPct] = useState('');
   const [presuncaoIrpjPct, setPresuncaoIrpjPct] = useState('');
   const [presuncaoCsllPct, setPresuncaoCsllPct] = useState('');
+  const [aliquotaManualPct, setAliquotaManualPct] = useState('');
+
+  const sugestaoQuery = useQuery({ queryKey: ['tax-regime', 'sugestao'], queryFn: fetchSugestaoDeAliquota });
+  const sugestao = sugestaoQuery.data;
 
   const vigente = vigenteQuery.data;
 
@@ -63,6 +68,7 @@ export default function RegimeTributarioSection({ canEdit }: Props) {
     setIcmsAliquotaPct(vigente.icmsAliquotaPct !== null ? String(vigente.icmsAliquotaPct) : '');
     setPresuncaoIrpjPct(vigente.presuncaoIrpjPct !== null ? String(vigente.presuncaoIrpjPct) : '');
     setPresuncaoCsllPct(vigente.presuncaoCsllPct !== null ? String(vigente.presuncaoCsllPct) : '');
+    setAliquotaManualPct(vigente.aliquotaManualPct !== null ? String(vigente.aliquotaManualPct) : '');
   }, [vigente]);
 
   const numeroOuNulo = (v: string) => (v.trim() === '' ? null : Number(v));
@@ -81,6 +87,7 @@ export default function RegimeTributarioSection({ canEdit }: Props) {
         icmsAliquotaPct: ehNormal ? numeroOuNulo(icmsAliquotaPct) : null,
         presuncaoIrpjPct: regime === 'LUCRO_PRESUMIDO' ? numeroOuNulo(presuncaoIrpjPct) : null,
         presuncaoCsllPct: regime === 'LUCRO_PRESUMIDO' ? numeroOuNulo(presuncaoCsllPct) : null,
+        aliquotaManualPct: numeroOuNulo(aliquotaManualPct),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['tax-regime'] });
@@ -118,6 +125,43 @@ export default function RegimeTributarioSection({ canEdit }: Props) {
         <p className="mt-4 rounded-md border border-margin-warning/30 bg-margin-warning/5 px-3 py-2 text-sm text-margin-warning">
           Nenhum regime configurado ainda. Enquanto isso, o piso de preço e o DRE não conseguem calcular imposto.
         </p>
+      )}
+
+      {/* Sugestão de reajuste (13/08/2026).
+          Só aparece quando o RBT12 ultrapassou a alíquota que o lojista mantém
+          — ou seja, quando a margem de segurança dele deixou de existir. O
+          número NÃO muda sozinho: ele aprova ou ignora. Mesmo padrão de
+          "Sugestão de ação do anúncio" que já existe no Ads. */}
+      {sugestao && (
+        <div
+          role="status"
+          className="mt-4 rounded-md border border-margin-warning/30 bg-margin-warning/5 px-3 py-3 text-sm text-margin-warning"
+        >
+          <p className="font-medium">Seu faturamento subiu de faixa.</p>
+          <p className="mt-1">
+            A alíquota calculada agora é <strong>{formatarPct(sugestao.calculadaPct)}</strong> — acima dos{' '}
+            <strong>{formatarPct(sugestao.atualPct)}</strong> que você usa, uma diferença de{' '}
+            {formatarPct(sugestao.defasagemPctPontos)} para menos.
+            {sugestao.folgaPreservadaPctPontos > 0 && (
+              <> Sugerimos <strong>{formatarPct(sugestao.sugeridaPct)}</strong>, preservando sua folga de{' '}
+              {formatarPct(sugestao.folgaPreservadaPctPontos)}.</>
+            )}
+            {sugestao.folgaPreservadaPctPontos === 0 && (
+              <> Sugerimos <strong>{formatarPct(sugestao.sugeridaPct)}</strong>.</>
+            )}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              onClick={() => setAliquotaManualPct(String(sugestao.sugeridaPct))}
+              disabled={!canEdit}
+            >
+              Usar {formatarPct(sugestao.sugeridaPct)}
+            </Button>
+            <span className="self-center text-xs text-muted-foreground">
+              Preenche o campo abaixo. Nada muda até você escolher a data e salvar.
+            </span>
+          </div>
+        </div>
       )}
 
       {vigente && (
@@ -235,6 +279,25 @@ export default function RegimeTributarioSection({ canEdit }: Props) {
           </>
         )}
 
+        <Campo rotulo="Alíquota que você mantém (%)" erro={erros.aliquotaManualPct}>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            max="100"
+            value={aliquotaManualPct}
+            onChange={(e) => setAliquotaManualPct(e.target.value)}
+            disabled={!canEdit}
+            placeholder="deixe vazio para usar a calculada"
+            className={entradaClasse}
+          />
+          <span className="mt-1 block text-xs font-normal text-muted-foreground">
+            Opcional. Se você mantém um percentual próprio — normalmente um pouco acima do calculado, como margem de
+            segurança — informe aqui: ele é o que vale no piso de preço e no DRE. Vazio significa usar o cálculo do
+            RBT12.
+          </span>
+        </Campo>
+
         <Campo rotulo="Passa a valer em" erro={erros.vigenciaInicio}>
           <input
             type="date"
@@ -273,6 +336,12 @@ export default function RegimeTributarioSection({ canEdit }: Props) {
       </div>
     </Card>
   );
+}
+
+// Vírgula decimal e no máximo 2 casas — a precisão da coluna no banco. Mostrar
+// 7,8000000001 na sugestão faria o número exibido divergir do que é gravado.
+function formatarPct(valor: number): string {
+  return `${valor.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
 }
 
 const entradaClasse =

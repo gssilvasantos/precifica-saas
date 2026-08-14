@@ -28,7 +28,20 @@ export interface RegimeTributario {
   icmsAliquotaPct: number | null;
   presuncaoIrpjPct: number | null;
   presuncaoCsllPct: number | null;
+  // Alíquota mantida à mão. null = usar a calculada.
+  aliquotaManualPct: number | null;
   automationMode: TaxAutomationMode;
+}
+
+// Sugestão de reajuste. null quando não há nada a sugerir — o estado normal
+// enquanto a margem de segurança do lojista existir.
+export interface SugestaoDeAliquota {
+  atualPct: number;
+  calculadaPct: number;
+  sugeridaPct: number;
+  folgaPreservadaPctPontos: number;
+  // Quanto o número em uso está ABAIXO do calculado. É a exposição real.
+  defasagemPctPontos: number;
 }
 
 export interface DefinirRegimeInput {
@@ -40,6 +53,7 @@ export interface DefinirRegimeInput {
   icmsAliquotaPct?: number | null;
   presuncaoIrpjPct?: number | null;
   presuncaoCsllPct?: number | null;
+  aliquotaManualPct?: number | null;
   automationMode?: TaxAutomationMode;
 }
 
@@ -61,6 +75,11 @@ export interface ErroDeRegime {
 // mostra o formulário vazio, não uma mensagem de falha.
 export async function fetchRegimeVigente(): Promise<RegimeTributario | null> {
   const { data } = await apiClient.get<RegimeTributario | null>('/tax-intelligence/regime');
+  return data;
+}
+
+export async function fetchSugestaoDeAliquota(): Promise<SugestaoDeAliquota | null> {
+  const { data } = await apiClient.get<SugestaoDeAliquota | null>('/tax-intelligence/regime/sugestao');
   return data;
 }
 

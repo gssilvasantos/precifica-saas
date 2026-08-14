@@ -65,6 +65,17 @@ export class DefinirRegimeDto {
   @Max(100)
   presuncaoCsllPct?: number | null;
 
+  // Alíquota que o lojista mantém à mão, tipicamente um pouco acima da
+  // calculada, como margem de segurança. Ausente ou null = usar a calculada.
+  //
+  // Teto de 100 é sanidade, não regra fiscal — alíquota acima disso é erro de
+  // digitação.
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  aliquotaManualPct?: number | null;
+
   @IsOptional()
   @IsEnum({ AUTO: 'AUTO', MANUAL: 'MANUAL' }, { message: 'automationMode deve ser AUTO ou MANUAL.' })
   automationMode?: 'AUTO' | 'MANUAL';

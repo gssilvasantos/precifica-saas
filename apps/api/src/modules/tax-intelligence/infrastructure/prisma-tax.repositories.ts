@@ -77,6 +77,7 @@ export class PrismaTenantTaxProfileRepository implements TenantTaxProfileReposit
           icmsAliquotaPct: input.icmsAliquotaPct,
           presuncaoIrpjPct: input.presuncaoIrpjPct,
           presuncaoCsllPct: input.presuncaoCsllPct,
+          aliquotaManualPct: input.aliquotaManualPct,
           automationMode: input.automationMode,
         },
       });
@@ -101,6 +102,7 @@ function paraRegistro(record: {
   icmsAliquotaPct: { toString(): string } | null;
   presuncaoIrpjPct: { toString(): string } | null;
   presuncaoCsllPct: { toString(): string } | null;
+  aliquotaManualPct: { toString(): string } | null;
   automationMode: 'AUTO' | 'MANUAL';
 }): TenantTaxProfileRecord {
   return {
@@ -118,6 +120,8 @@ function paraRegistro(record: {
     icmsAliquota: pctParaFracao(record.icmsAliquotaPct),
     presuncaoIrpj: pctParaFracao(record.presuncaoIrpjPct),
     presuncaoCsll: pctParaFracao(record.presuncaoCsllPct),
+    // Alíquota mantida à mão: mesma conversão percentual -> fração dos demais.
+    aliquotaManual: pctParaFracao(record.aliquotaManualPct),
     automationMode: record.automationMode,
   };
 }

@@ -52,6 +52,39 @@ export class TaxRateResolverService implements TaxRateResolver {
       );
     }
 
+    const calculada = await this.resolvePorRegime(perfil, query);
+
+    // ALÍQUOTA MANTIDA À MÃO (13/08/2026) vence a calculada.
+    //
+    // O lojista acompanha o próprio faturamento e mantém um percentual um
+    // pouco ACIMA do calculado, de propósito: errar imposto para cima
+    // subestima lucro no DRE e sobe o piso de preço — a direção segura. É
+    // política dele, não descuido, e o sistema não a sobrescreve.
+    //
+    // O calculado NÃO some: vai junto no breakdown, e é ele que alimenta a
+    // sugestão de reajuste quando o RBT12 sobe de faixa e ultrapassa o número
+    // digitado. Ver domain/sugestao-de-aliquota.ts.
+    // `typeof === 'number'` e não `!== null`: um registro sem o campo devolve
+    // undefined, e `undefined !== null` é TRUE — o perfil seria tratado como
+    // sobrescrito, com effectiveRate undefined, contaminando piso de preço e
+    // DRE em silêncio. Num campo que governa imposto, a checagem tem que ser
+    // afirmativa sobre o que ACEITA, não sobre o que rejeita.
+    if (typeof perfil.aliquotaManual === 'number') {
+      return {
+        ...calculada,
+        effectiveRate: perfil.aliquotaManual,
+        source: 'MANUAL_OVERRIDE',
+        breakdown: { ...calculada.breakdown, aliquotaCheia: calculada.effectiveRate },
+      };
+    }
+
+    return calculada;
+  }
+
+  private async resolvePorRegime(
+    perfil: TenantTaxProfileRecord,
+    query: TaxRateQuery,
+  ): Promise<ResolvedTaxRate> {
     switch (perfil.regime) {
       case 'MEI_SIMEI':
         return this.resolveMei(perfil);
