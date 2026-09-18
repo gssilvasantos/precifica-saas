@@ -4,6 +4,8 @@ import { CompetitionMonitorOrchestrator } from './application/competition-monito
 import { CompetitiveOpportunityReaderService } from './application/competitive-opportunity-reader.service';
 import { MonitoredListingsAdminService } from './application/monitored-listings-admin.service';
 import { CompetitiveOpportunitiesQueryService } from './application/competitive-opportunities-query.service';
+import { MercadoLivreMonitoringAutoRegistrationService } from './application/mercado-livre-monitoring-auto-registration.service';
+import { MercadoLivreChannelListingSyncedListener } from './application/mercado-livre-channel-listing-synced.listener';
 
 import { PrismaMonitoredListingRepository } from './infrastructure/prisma-monitored-listing.repository';
 import { PrismaCompetitorOfferSnapshotRepository } from './infrastructure/prisma-competitor-offer-snapshot.repository';
@@ -41,6 +43,14 @@ import { ErpIntegrationModule } from '../erp-integration/erp-integration.module'
     MonitoredListingsAdminService,
     CompetitiveOpportunitiesQueryService,
     CompetitionMonitorSchedulerJob,
+
+    // Ativação do radar de catálogo para tenants reais (18/09/2026, "Só
+    // ligar o radar") — assina CHANNEL_LISTING_EVENTS.MERCADO_LIVRE_SYNCED
+    // (marketplace-intelligence/domain, puro dado) e reconcilia
+    // MonitoredCompetitorListing a partir dos anúncios sincronizados. Ver
+    // mercado-livre-channel-listing-synced.listener.ts.
+    MercadoLivreMonitoringAutoRegistrationService,
+    MercadoLivreChannelListingSyncedListener,
 
     ManualSheetRadar,
     MercadoLivreCatalogRadar,

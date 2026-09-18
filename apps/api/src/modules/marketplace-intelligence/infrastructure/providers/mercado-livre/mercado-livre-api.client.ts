@@ -96,6 +96,32 @@ export interface MlItem {
   catalog_product_id?: string | null;
 }
 
+// Vínculo SKU <-> anúncio (18/09/2026, sincronização de ChannelListing do
+// Mercado Livre — ver mercado-livre-channel-listing-sync.service.ts). Só o
+// subconjunto que o sync realmente usa, mesmo racional de MlCatalogItem
+// acima: a resposta real de GET /items tem dezenas de campos, declarar todos
+// criaria acoplamento a dado que não consumimos.
+export interface MlSellerItem {
+  id: string;
+  price: number | null;
+  permalink: string | null;
+  // Resolvido a partir de seller_custom_field (campo legado, ainda o mais
+  // comum em contas antigas) OU do atributo SELLER_SKU (formato atual) —
+  // ver resolveSellerSku. null quando o vendedor nunca cadastrou um SKU
+  // para aquele anúncio no Mercado Livre; nesse caso não há como vincular
+  // ao Product do Kyneti por SKU, e o sync descarta o item (loga, não falha
+  // o lote inteiro).
+  skuCode: string | null;
+}
+
+interface MlRawItemBody {
+  id: string;
+  price?: number | null;
+  permalink?: string | null;
+  seller_custom_field?: string | null;
+  attributes?: { id: string; value_name?: string | null }[];
+}
+
 // Resposta de POST /oauth/token — mesmo formato para authorization_code e
 // refresh_token (RFC 6749 + extensões do Mercado Livre: user_id/refresh_token
 // sempre presentes quando o app tem o escopo offline_access).
@@ -251,6 +277,87 @@ export class MercadoLivreApiClient {
       throw new Error(`Mercado Livre items API retornou ${response.status} para ${itemId}`);
     }
     return (await response.json()) as MlItem;
+  }
+
+  // --- Vínculo SKU <-> anúncio (18/09/2026, ChannelListing) ---
+  //
+  // Endpoint AUTENTICADO (o vendedor consulta os PRÓPRIOS anúncios, ativos e
+  // pausados) — diferente do radar de catálogo acima, que é público.
+  // Documentação: https://developers.mercadolivre.com.br/pt_br/gerenciando-anuncios
+  //
+  // AVISO DE HONESTIDADE: paginação por offset/limit, mesmo padrão de
+  // fetchOrders/fetchAdsCampaigns — mas o Mercado Livre documenta um teto de
+  // 1000 resultados nesse modo (offset+limit); acima disso seria necessário
+  // `search_type=scan` (scroll_id), não implementado aqui por falta de
+  // necessidade comprovada até agora (nenhuma conta do projeto chega perto
+  // disso). Uma conta com mais de 1000 anúncios ativos teria a sincronização
+  // truncada silenciosamente nesse ponto — risco aceito e documentado, não
+  // uma omissão.
+  async fetchSellerItemIds(sellerId: string, accessToken: string): Promise<string[]> {
+    const ids: string[] = [];
+    let offset = 0;
+    const limit = 50;
+    const HARD_CAP = 1000;
+
+    while (true) {
+      const url = `${BASE_URL}/users/${sellerId}/items/search?offset=${offset}&limit=${limit}`;
+      const response = await this.request(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!response.ok) {
+        throw new Error(`Mercado Livre /users/${sellerId}/items/search retornou HTTP ${response.status} (offset ${offset})`);
+      }
+      const data = (await response.json()) as { results?: string[]; paging?: { total?: number } };
+      const batch = Array.isArray(data.results) ? data.results : [];
+      if (batch.length === 0) break;
+
+      ids.push(...batch);
+      offset += batch.length;
+      const total = data.paging?.total ?? ids.length;
+      if (offset >= total || offset >= HARD_CAP) break;
+    }
+
+    return ids;
+  }
+
+  // Multiget (GET /items?ids=...) em vez de um GET /items/{id} por anúncio —
+  // com dezenas/centenas de anúncios, item a item seriam N round-trips só
+  // para montar ChannelListing; mesma estratégia de lote já usada em
+  // fetchAdsItemMetrics. Lote de 20: limite documentado do endpoint.
+  // Item com `code !== 200` (removido, denunciado, etc.) é descartado sem
+  // derrubar o lote inteiro — mesma filosofia de "resultado parcial honesto"
+  // do resto deste client.
+  async fetchItemsDetails(itemIds: string[], accessToken: string): Promise<MlSellerItem[]> {
+    const BATCH_SIZE = 20;
+    const results: MlSellerItem[] = [];
+
+    for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
+      const batchIds = itemIds.slice(i, i + BATCH_SIZE);
+      const url = `${BASE_URL}/items?ids=${batchIds.join(',')}`;
+      const response = await this.request(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!response.ok) {
+        throw new Error(`Mercado Livre /items (multiget) retornou HTTP ${response.status} para o lote iniciando em ${batchIds[0]}`);
+      }
+      const data = (await response.json()) as { code: number; body?: MlRawItemBody }[];
+      for (const entry of data) {
+        if (entry.code !== 200 || !entry.body) continue;
+        results.push({
+          id: entry.body.id,
+          price: typeof entry.body.price === 'number' ? entry.body.price : null,
+          permalink: entry.body.permalink ?? null,
+          skuCode: this.resolveSellerSku(entry.body),
+        });
+      }
+    }
+
+    return results;
+  }
+
+  // seller_custom_field é o campo legado (ainda o mais usado em contas
+  // antigas); SELLER_SKU é o atributo atual. Tenta os dois, nessa ordem —
+  // nunca inventa um SKU quando nenhum dos dois está preenchido.
+  private resolveSellerSku(item: MlRawItemBody): string | null {
+    if (item.seller_custom_field) return item.seller_custom_field;
+    const attribute = item.attributes?.find((a) => a.id === 'SELLER_SKU');
+    return attribute?.value_name ?? null;
   }
 
   // Troca do `code` de autorização por access_token/refresh_token — passo 2

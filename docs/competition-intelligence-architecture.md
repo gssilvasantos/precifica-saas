@@ -1,6 +1,6 @@
 # Competition Intelligence — Arquitetura
 
-**Status:** implementado (primeira fatia) — contratos, orquestrador, um radar de exemplo (estrutura, sem integração externa real), eventos de domínio e um listener de exemplo no Pricing Intelligence.
+**Status:** implementado — contratos, orquestrador, radar real do Mercado Livre (`MercadoLivreCatalogRadar`, API pública de catálogo) + radar de exemplo (`ManualSheetRadar`, estrutura sem integração), eventos de domínio, um listener real no Pricing Intelligence (`CompetitorSignalListener`, calcula e pode aplicar decisão de preço) e, desde 18/09/2026, ativação automática do radar do Mercado Livre para tenants reais (seção 10) — corrige as seções 2 e 3 abaixo, que descreviam a primeira fatia (só `ManualSheetRadar`, listener stub).
 
 ## 1. Objetivo e posicionamento do módulo
 
@@ -38,7 +38,10 @@ export interface CompetitionRadar {
 
 `CompetitionRadarRegistry` (`application/competition-radar-registry.service.ts`) é o registro central — mesmo padrão do `MarketplaceProviderRegistry`: um radar novo = um arquivo novo implementando `CompetitionRadar` + uma linha no factory do token `COMPETITION_RADARS` no module. Nunca altera o registry nem o orquestrador.
 
-**Radar de exemplo implementado:** `ManualSheetRadar` (`infrastructure/radars/manual-sheet-radar.ts`), `sourceType: INTERNAL_MONITORING`. É estrutura, não integração real — `fetchOffers` retorna `[]` hoje (honestidade técnica, mesmo padrão do `MercadoLivreFeeRuleProvider` na primeira entrega). É o candidato mais realista para virar funcional primeiro, porque não depende de scraping (frágil, questão de termos de uso) nem de contratar uma API paga.
+**Radares implementados** (ordem de registro em `COMPETITION_RADARS`, `competition-intelligence.module.ts` — o do Mercado Livre vem primeiro por ser a fonte real):
+
+- `MercadoLivreCatalogRadar` (`infrastructure/radars/mercado-livre-catalog-radar.ts`), `sourceType: PARTNER_API` — **integração real**, API pública de catálogo/Buy Box do Mercado Livre (`GET /products/{id}`, `GET /products/{id}/items`), sem OAuth. `targetRef` aceita id de produto de catálogo ou id de anúncio (resolve um a partir do outro). É a fonte de dado por trás de toda oportunidade de Buy Box real hoje na plataforma.
+- `ManualSheetRadar` (`infrastructure/radars/manual-sheet-radar.ts`), `sourceType: INTERNAL_MONITORING` — estrutura, não integração real; `fetchOffers` retorna `[]` (honestidade técnica). Fallback para canais sem radar próprio.
 
 ## 3. Arquitetura orientada a eventos
 
@@ -59,7 +62,7 @@ export const COMPETITION_EVENTS = {
 
 **Como o Pricing Engine assina, sem acoplamento** — a resposta prática ao "como estruturar isso no NestJS": um listener é só uma classe `@Injectable()` com métodos decorados `@OnEvent(NOME_DO_EVENTO)`, registrada como `provider` em **qualquer** módulo já carregado pela aplicação. O `EventEmitterModule` descobre esses métodos varrendo todos os providers da aplicação — **não é preciso importar o módulo que emite o evento**. Prova disso em código: `modules/pricing-intelligence/application/competitor-signal.listener.ts` importa só o arquivo de constantes/tipos `competition-events.ts` (puro dado, zero classe/token de DI) e é registrado em `PricingIntelligenceModule`, que **não importa** `CompetitionIntelligenceModule`. Se este módulo virar um serviço separado no futuro, só o transporte muda (evento in-process → fila); o listener não muda uma linha.
 
-Hoje o listener é um stub honesto (loga o sinal recebido). Nenhuma regra de "quando reagir automaticamente" foi pedida ainda — ver seção 4 sobre onde ela vai morar quando existir.
+`PriceChangedEvent`/`NewCompetitorDetectedEvent` continuam log-only (nenhuma regra de "quando reagir" foi pedida para eles). `BuyBoxLostEvent` deixou de ser stub: `CompetitorSignalListener.handleBuyBoxLost` chama `PricingDecisionService.decideAndMaybeApply` (Pricing Intelligence) — calcula a decisão sempre, e só a **aplica** de fato (via `PRICE_UPDATE_DISPATCHER`) se `Product.autoRepricingEnabled = true`; para os demais produtos, fica log-only, mesmo comportamento de antes. Ver `docs/pricing-intelligence-architecture.md` para o motor de decisão.
 
 ## 4. Onde fica a lógica de "Oportunidade" (e a decisão de reagir)
 
@@ -159,7 +162,7 @@ export interface CompetitorSnapshotReader {
 }
 ```
 
-Implementada por `CompetitiveOpportunityReaderService`, ligada ao token `COMPETITOR_SNAPSHOT_READER` (`shared/contracts/tokens.ts`) — nome já previsto em `docs/platform-architecture.md`, seção 3, desde antes deste módulo existir. Nenhum consumidor real ainda (o Pricing Intelligence de hoje só tem o simulador de margem da Nuvemshop) — fica pronto para quando o motor de precificação completo existir.
+Implementada por `CompetitiveOpportunityReaderService`, ligada ao token `COMPETITOR_SNAPSHOT_READER` (`shared/contracts/tokens.ts`) — nome já previsto em `docs/platform-architecture.md`, seção 3, desde antes deste módulo existir. Consumida hoje por `PricingDecisionService` (Pricing Intelligence, ver `docs/pricing-intelligence-architecture.md`) para calcular `MATCH_COMPETITOR`/`HOLD_PRICE`/preço de segurança a partir da melhor oferta de concorrente conhecida.
 
 ## 7. Estrutura de pastas
 
@@ -210,10 +213,61 @@ Reaproveita `shared/sync-ops` (agenda/log/saúde), a mesma infraestrutura genér
 
 Nenhuma linha muda em `CompetitionRadarRegistry`, `CompetitionMonitorOrchestrator` ou no `opportunity-calculator.ts` — mesma disciplina já documentada para Marketplace Intelligence (seção 12 daquele doc) e ERP Integration.
 
-## 10. Simplificações conscientes desta primeira fatia
+## 10. Ativação do radar do Mercado Livre para tenants reais (18/09/2026)
 
-- Nenhum radar real (scraping ou PriceAPI) foi implementado — `ManualSheetRadar` é estrutura, prova o contrato, mas retorna `[]`. É honesto: nenhuma credencial/contrato com fonte de dado de concorrência foi validado ainda.
+**Objetivo:** até esta data, `MercadoLivreCatalogRadar` existia e funcionava, mas nenhum tenant real tinha `ChannelListing` nem `MonitoredCompetitorListing` cadastrados para o Mercado Livre — o motor estava correto e testado, mas sem "combustível" (nenhum SKU era monitorado). Esta fatia liga isso, e **só isso**: nenhuma escrita automática de preço em canal nenhum foi implementada (nenhum canal tem `PriceUpdateCapableProvider` registrado hoje — ver seção 16 de `docs/marketplace-intelligence-architecture.md`).
+
+**Pipeline novo, de ponta a ponta:**
+
+```
+MercadoLivreChannelListingSyncService.syncTenant()           (marketplace-intelligence, a cada 30 min)
+  -> GET /users/{sellerId}/items/search (todos os ids de anúncio do vendedor)
+  -> GET /items?ids=... em lotes de 20 (preço, permalink, SKU do vendedor)
+  -> upsert em ChannelListing (CHANNEL_LISTING_WRITER) por anúncio com SKU cadastrado
+  -> emite CHANNEL_LISTING_EVENTS.MERCADO_LIVRE_SYNCED { tenantId, listings[] }
+       (marketplace-intelligence/domain/channel-listing-events.ts — puro dado)
+       |
+       v
+MercadoLivreChannelListingSyncedListener.handleSynced()      (competition-intelligence, assina o evento)
+  -> MercadoLivreMonitoringAutoRegistrationService.reconcile()
+  -> cria MonitoredCompetitorListing (radarCode MERCADO_LIVRE_CATALOG_V1, channelCode MERCADO_LIVRE)
+     para todo anúncio sincronizado que ainda não tinha um registro ativo
+       |
+       v
+CompetitionMonitorSchedulerJob (já existia, a cada 10 min)
+  -> agora encontra os MonitoredCompetitorListing novos
+  -> MercadoLivreCatalogRadar.fetchOffers() traz concorrência real
+  -> CompetitiveOpportunity populado -> tela "Radar de Concorrência" mostra dado real
+  -> se BUY_BOX_LOST: CompetitorSignalListener (Pricing Intelligence) calcula/recomenda preço (seção 3)
+```
+
+**Desacoplamento entre os dois módulos, mesma disciplina da seção 3:** o listener em Competition Intelligence importa só `marketplace-intelligence/domain/channel-listing-events.ts` (puro dado, zero classe/token de DI) — nunca uma classe concreta de Marketplace Intelligence. `CompetitionIntelligenceModule` já importava `MarketplaceIntelligenceModule` antes (só para `MercadoLivreApiClient`, usado pelo radar), então nenhum import de módulo novo foi necessário.
+
+**Por que o evento carrega a lista de anúncios sincronizados, não só `tenantId`:** minimização de dado (`CLAUDE.md`, §6) — assim `MercadoLivreMonitoringAutoRegistrationService` nunca precisa ler `ChannelListing` diretamente (nem por uma porta nova), só reconcilia o que o payload já traz. Como `syncTenant()` sempre varre **todos** os anúncios do vendedor a cada execução (nunca só os novos), o evento também funciona como reconciliação periódica: um anúncio que por algum motivo não virou `MonitoredCompetitorListing` numa rodada é reconsiderado na próxima, sem ação manual.
+
+**Arquivos novos:**
+
+```
+modules/marketplace-intelligence/
+  domain/channel-listing-events.ts                        # CHANNEL_LISTING_EVENTS.MERCADO_LIVRE_SYNCED
+  application/mercado-livre-channel-listing-sync.service.ts
+  infrastructure/scheduler/mercado-livre-channel-listing-sync-scheduler.job.ts
+
+modules/competition-intelligence/
+  application/mercado-livre-monitoring-auto-registration.service.ts
+  application/mercado-livre-channel-listing-synced.listener.ts
+```
+
+**Simplificações conscientes desta fatia:**
+
+- `MercadoLivreChannelListingSyncService.syncAllTenants()` não faz "due check" por tenant (diferente do equivalente Nuvemshop) — `MercadoLivreConnection` não tem uma coluna `lastSyncedAt` hoje, só `lastRefreshedAt` (do token OAuth2). Adicionar essa coluna seria migration + RLS/grant novos para um ganho hoje irrelevante (poucos tenants com Mercado Livre conectado); o scheduler já roda no máximo a cada 30 min e toda chamada de rede passa pelo `RateLimiter`/`withRetry` do `MercadoLivreApiClient`.
+- Anúncio sem SKU cadastrado no Mercado Livre (nem `seller_custom_field` nem atributo `SELLER_SKU`) é descartado do sync, não vinculado — não há como associá-lo a um `Product` do Kyneti por SKU sem inventar um.
+- `MercadoLivreMonitoringAutoRegistrationService.reconcile()` só enxerga `MonitoredCompetitorListing` **ativos** (`findAllActiveByTenant`) — um listing que o usuário desativou manualmente pela tela "Radar de Concorrência" é recriado no próximo sync, como se nunca tivesse sido desligado. Resolver isso (silenciar um anúncio específico permanentemente) é uma decisão de produto separada, não implementada aqui.
+- Igual à Nuvemshop, os dois novos schedulers (`MercadoLivreChannelListingSyncSchedulerJob`, e o `CompetitionMonitorSchedulerJob` que já existia) rodam sob `TenantContextStore.runAsService()` (bypass de RLS) do início ao fim do ciclo, inclusive os listeners de evento disparados durante ele — mesmo padrão já aceito e documentado nos jobs irmãos (`NuvemshopSyncSchedulerJob`, `competition-monitor-scheduler.job.ts`); hardening futuro não bloqueante, não uma exceção nova introduzida por esta fatia.
+
+## 12. Simplificações conscientes da primeira fatia (histórico, ainda válidas)
+
 - "Concorrente novo" é detectado por proxy simples (mudança de identidade do líder de preço), não por um conjunto persistente de labels conhecidos por SKU — documentado no código.
 - `CompetitionMonitorOrchestrator.runAll()` processa todos os `MonitoredCompetitorListing` ativos a cada ciclo — não há "due check" por listing como no ERP Integration, porque o volume esperado por listing é leve; revisitar se o número de listings monitorados crescer muito.
-- `CompetitorSignalListener` é um stub que só loga — nenhuma regra de "quando reagir automaticamente" foi pedida ainda; quando for, ela consome `PRICE_UPDATE_DISPATCHER` a partir daqui.
 - Sem porta de leitura de histórico para Analytics ainda (`CompetitorOfferSnapshot` não tem consumidor via porta) — o módulo Analytics ainda não existe; quando existir, ganha sua própria porta (`CompetitorHistoryReader` ou nome equivalente) apontando para essa tabela, sem que o Pricing Engine precise saber que ela existe.
+- `ManualSheetRadar` continua sem integração real — nenhuma credencial/contrato com fonte de dado de concorrência fora do Mercado Livre foi validado ainda.

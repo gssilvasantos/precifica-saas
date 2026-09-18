@@ -24,6 +24,8 @@ import { ShopeeApiClient } from './infrastructure/providers/shopee/shopee-api-cl
 import { ShopeeOrderProvider } from './infrastructure/providers/shopee/shopee-order.provider';
 import { ShopeeListingProvider } from './infrastructure/providers/shopee/shopee-listing.provider';
 import { SyncSchedulerJob } from './infrastructure/scheduler/sync-scheduler.job';
+import { MercadoLivreChannelListingSyncService } from './application/mercado-livre-channel-listing-sync.service';
+import { MercadoLivreChannelListingSyncSchedulerJob } from './infrastructure/scheduler/mercado-livre-channel-listing-sync-scheduler.job';
 
 import { MarketplaceRulesAdminController } from './interface/controllers/marketplace-rules-admin.controller';
 import { MarketplaceChangeEventsController } from './interface/controllers/marketplace-change-events.controller';
@@ -112,6 +114,16 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // que isto é uma classe separada de MercadoLivreConnectionService.
     MercadoLivreHandshakeService,
     { provide: MERCADO_LIVRE_CONNECTION_REPOSITORY, useClass: PrismaMercadoLivreConnectionRepository },
+
+    // Ativação do radar de catálogo para tenants reais (18/09/2026, "Só
+    // ligar o radar") — popula ChannelListing com os anúncios REAIS do
+    // vendedor no Mercado Livre; consome CHANNEL_LISTING_WRITER (já exportado
+    // por ErpIntegrationModule, importado acima) sem precisar redeclarar o
+    // provider aqui. Ver mercado-livre-channel-listing-sync.service.ts para o
+    // racional completo (inclusive por que isto NÃO aplica preço em lugar
+    // nenhum).
+    MercadoLivreChannelListingSyncService,
+    MercadoLivreChannelListingSyncSchedulerJob,
 
     // Integração Shopee Open Platform (27/07/2026) — mesmo racional
     // estrutural de MercadoLivreConnectionService/ApiClient acima, mas com

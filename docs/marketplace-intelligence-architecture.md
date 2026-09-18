@@ -471,7 +471,7 @@ Isso roda só este arquivo (o nome bate com `.spec.ts` do `testRegex`). Para rod
 | Canal | Status | O que existe |
 |---|---|---|
 | Nuvemshop | Funcional (leitura + escrita) | `NuvemshopFeeRuleProvider` (Etapa 7) + conexão/credencial + sync de `ChannelListing`; `PriceUpdateDispatcher` aplica preço de verdade via app privado |
-| Mercado Livre | Parcial | `MercadoLivreFeeRuleProvider` lê taxas de verdade (API pública); `listActiveListings`/`updatePrice` são stubs (`NotImplementedException`) — a API de escrita exige OAuth2 por vendedor, não implementado ainda (seção 14) |
+| Mercado Livre | Parcial | `MercadoLivreFeeRuleProvider` lê taxas de verdade (API pública); OAuth2 por vendedor implementado e testado em produção (Sprint 22, `MercadoLivreConnectionService`) — pedidos, Ads e sync de `ChannelListing` (18/09/2026, `MercadoLivreChannelListingSyncService`, mesmo padrão do Nuvemshop) já são reais; `updatePrice` continua sem implementação (`PriceUpdateCapableProvider` não registrado para este canal) — nenhum preço é escrito de volta no Mercado Livre hoje, ver `docs/competition-intelligence-architecture.md`, seção 10 |
 | Shopee | Backlog | Nenhum adaptador — entra seguindo a receita da seção 12 quando houver credencial/acesso à API para implementar de verdade |
 | TikTok Shop | Backlog | Idem |
 | Amazon | Backlog | Idem |
