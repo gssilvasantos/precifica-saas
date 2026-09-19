@@ -1,0 +1,28 @@
+{
+  "name": "kyneti-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Servidor MCP (Model Context Protocol) somente-leitura para a API do Kyneti — expõe catálogo, pricing, concorrência, pedidos, integrações e financeiro como ferramentas MCP.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "axios": "^1.7.9",
+    "express": "^4.21.2",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
