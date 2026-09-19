@@ -6,6 +6,7 @@ import {
   RawCompetitorOffer,
 } from '../../../../shared/contracts/competition-radar.contract';
 import { MercadoLivreApiClient } from '../../../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-api.client';
+import { MercadoLivreConnectionService } from '../../../marketplace-intelligence/application/mercado-livre-connection.service';
 
 // Radar de concorrência REAL do Mercado Livre (01/08/2026, ver
 // docs/revisao-geral-2026-08.md, §4).
@@ -38,18 +39,35 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
 
   private readonly logger = new Logger(MercadoLivreCatalogRadar.name);
 
-  constructor(private readonly client: MercadoLivreApiClient) {}
+  constructor(
+    private readonly client: MercadoLivreApiClient,
+    private readonly connections: MercadoLivreConnectionService,
+  ) {}
 
   async fetchOffers(ctx: CompetitionFetchContext): Promise<RawCompetitorOffer[]> {
     const targetRef = ctx.targetRef?.trim();
     if (!targetRef) return [];
 
-    const productId = await this.resolveCatalogProductId(targetRef, ctx.skuCode);
+    // Bug de produção (19/09/2026): /products, /products/:id/items e
+    // /items/:id são documentados como públicos, mas o Mercado Livre passou
+    // a responder 403 para chamada anônima (ver mercado-livre-api.client.ts
+    // para o histórico completo). Reaproveita o token OAuth2 já conectado
+    // do tenant — não precisa ser o dono do anúncio específico, só um token
+    // válido. Sem conexão ativa, segue sem token (comportamento anterior) e
+    // deixa o 403 real aparecer no log, em vez de falhar aqui.
+    const accessToken = await this.connections.getValidAccessToken(ctx.tenantId).catch((error) => {
+      this.logger.warn(
+        `SKU ${ctx.skuCode} (tenant ${ctx.tenantId}): não foi possível obter token do Mercado Livre para o radar de catálogo — seguindo sem autenticação (pode retornar 403). ${(error as Error).message}`,
+      );
+      return undefined;
+    });
+
+    const productId = await this.resolveCatalogProductId(targetRef, ctx.skuCode, accessToken);
     if (!productId) return [];
 
     const [product, items] = await Promise.all([
-      this.client.fetchCatalogProduct(productId).catch(() => null),
-      this.client.fetchCatalogProductItems(productId),
+      this.client.fetchCatalogProduct(productId, accessToken).catch(() => null),
+      this.client.fetchCatalogProductItems(productId, accessToken),
     ]);
 
     const winnerItemId = product?.buy_box_winner?.item_id ?? null;
@@ -77,16 +95,16 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
   // Aceita id de produto ou de anúncio. Tenta produto primeiro (caminho
   // direto e mais barato); se falhar, trata como anúncio e busca o produto
   // ao qual ele pertence.
-  private async resolveCatalogProductId(targetRef: string, skuCode: string): Promise<string | null> {
+  private async resolveCatalogProductId(targetRef: string, skuCode: string, accessToken?: string): Promise<string | null> {
     try {
-      await this.client.fetchCatalogProduct(targetRef);
+      await this.client.fetchCatalogProduct(targetRef, accessToken);
       return targetRef;
     } catch {
       // Não é um produto de catálogo — segue para a interpretação de anúncio.
     }
 
     try {
-      const item = await this.client.fetchItem(targetRef);
+      const item = await this.client.fetchItem(targetRef, accessToken);
       if (!item.catalog_product_id) {
         // Anúncio fora do catálogo não disputa Buy Box com ninguém: não há
         // concorrência a medir. Log explícito para o usuário entender por

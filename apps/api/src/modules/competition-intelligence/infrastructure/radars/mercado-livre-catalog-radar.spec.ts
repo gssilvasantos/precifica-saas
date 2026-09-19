@@ -1,5 +1,6 @@
 import { MercadoLivreCatalogRadar } from './mercado-livre-catalog-radar';
 import { MercadoLivreApiClient } from '../../../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-api.client';
+import { MercadoLivreConnectionService } from '../../../marketplace-intelligence/application/mercado-livre-connection.service';
 
 // Radar REAL de concorrência (01/08/2026, docs/revisao-geral-2026-08.md §4)
 // — antes dele, todo o loop de repricing dependia de planilha manual.
@@ -12,6 +13,16 @@ describe('MercadoLivreCatalogRadar', () => {
       fetchTopLevelCategories: jest.fn().mockResolvedValue([]),
       ...overrides,
     } as unknown as jest.Mocked<MercadoLivreApiClient>;
+  }
+
+  // Bug de producao (19/09/2026, ver mercado-livre-api.client.ts): o radar
+  // agora sempre busca o token OAuth2 do tenant antes de chamar a API de
+  // catalogo (publica, mas passou a responder 403 sem Authorization).
+  const MOCK_ACCESS_TOKEN = 'mock-access-token';
+  function buildConnections() {
+    return {
+      getValidAccessToken: jest.fn().mockResolvedValue(MOCK_ACCESS_TOKEN),
+    } as unknown as MercadoLivreConnectionService;
   }
 
   const ctx = { tenantId: 'tenant-1', skuCode: 'SKU-001', targetRef: 'MLB19151277' };
@@ -28,7 +39,7 @@ describe('MercadoLivreCatalogRadar', () => {
       ]),
     });
 
-    const offers = await new MercadoLivreCatalogRadar(client).fetchOffers(ctx);
+    const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx);
 
     expect(offers).toHaveLength(2);
     expect(offers[0].price).toBe(89.9);
@@ -44,7 +55,7 @@ describe('MercadoLivreCatalogRadar', () => {
         .mockResolvedValue([{ item_id: 'MLB222', seller_id: 222, price: 95.5, winner: true }]),
     });
 
-    const offers = await new MercadoLivreCatalogRadar(client).fetchOffers(ctx);
+    const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx);
 
     expect(offers[0].isBuyBoxWinner).toBe(true);
   });
@@ -62,7 +73,7 @@ describe('MercadoLivreCatalogRadar', () => {
       ]),
     });
 
-    const offers = await new MercadoLivreCatalogRadar(client).fetchOffers(ctx);
+    const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx);
 
     expect(offers).toHaveLength(1);
     expect(offers[0].price).toBe(50);
@@ -80,13 +91,13 @@ describe('MercadoLivreCatalogRadar', () => {
         fetchCatalogProductItems: jest.fn().mockResolvedValue([{ item_id: 'MLB1', seller_id: 1, price: 10 }]),
       });
 
-      const offers = await new MercadoLivreCatalogRadar(client).fetchOffers({
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers({
         ...ctx,
         targetRef: 'MLB3456789012',
       });
 
-      expect(client.fetchItem).toHaveBeenCalledWith('MLB3456789012');
-      expect(client.fetchCatalogProductItems).toHaveBeenCalledWith('MLB999');
+      expect(client.fetchItem).toHaveBeenCalledWith('MLB3456789012', MOCK_ACCESS_TOKEN);
+      expect(client.fetchCatalogProductItems).toHaveBeenCalledWith('MLB999', MOCK_ACCESS_TOKEN);
       expect(offers).toHaveLength(1);
     });
 
@@ -96,7 +107,7 @@ describe('MercadoLivreCatalogRadar', () => {
         fetchItem: jest.fn().mockResolvedValue({ id: 'MLB123', catalog_product_id: null }),
       });
 
-      const offers = await new MercadoLivreCatalogRadar(client).fetchOffers(ctx);
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx);
 
       expect(offers).toEqual([]);
       expect(client.fetchCatalogProductItems).not.toHaveBeenCalled();
@@ -108,13 +119,13 @@ describe('MercadoLivreCatalogRadar', () => {
         fetchItem: jest.fn().mockRejectedValue(new Error('500')),
       });
 
-      await expect(new MercadoLivreCatalogRadar(client).fetchOffers(ctx)).resolves.toEqual([]);
+      await expect(new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx)).resolves.toEqual([]);
     });
 
     it('targetRef vazio não chama a API', async () => {
       const client = buildClient();
 
-      const offers = await new MercadoLivreCatalogRadar(client).fetchOffers({ ...ctx, targetRef: '  ' });
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers({ ...ctx, targetRef: '  ' });
 
       expect(offers).toEqual([]);
       expect(client.fetchCatalogProduct).not.toHaveBeenCalled();
@@ -123,7 +134,7 @@ describe('MercadoLivreCatalogRadar', () => {
 
   describe('healthCheck', () => {
     it('UP quando a API pública responde', async () => {
-      const radar = new MercadoLivreCatalogRadar(buildClient());
+      const radar = new MercadoLivreCatalogRadar(buildClient(), buildConnections());
       await expect(radar.healthCheck()).resolves.toEqual({ status: 'UP' });
     });
 
@@ -132,7 +143,7 @@ describe('MercadoLivreCatalogRadar', () => {
         fetchTopLevelCategories: jest.fn().mockRejectedValue(new Error('timeout')),
       });
 
-      await expect(new MercadoLivreCatalogRadar(client).healthCheck()).resolves.toEqual({
+      await expect(new MercadoLivreCatalogRadar(client, buildConnections()).healthCheck()).resolves.toEqual({
         status: 'DOWN',
         message: 'timeout',
       });

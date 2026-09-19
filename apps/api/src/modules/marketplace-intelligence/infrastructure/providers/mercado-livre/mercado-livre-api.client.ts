@@ -251,16 +251,22 @@ export class MercadoLivreApiClient {
   // PricingStrategist precisa e que, até agora, só existia se alguém
   // preenchesse uma planilha à mão.
 
-  async fetchCatalogProduct(productId: string): Promise<MlCatalogProduct> {
-    const response = await this.request(`${BASE_URL}/products/${productId}`);
+  async fetchCatalogProduct(productId: string, accessToken?: string): Promise<MlCatalogProduct> {
+    const response = await this.request(
+      `${BASE_URL}/products/${productId}`,
+      accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined,
+    );
     if (!response.ok) {
       throw new Error(`Mercado Livre products API retornou ${response.status} para ${productId}`);
     }
     return (await response.json()) as MlCatalogProduct;
   }
 
-  async fetchCatalogProductItems(productId: string): Promise<MlCatalogItem[]> {
-    const response = await this.request(`${BASE_URL}/products/${productId}/items`);
+  async fetchCatalogProductItems(productId: string, accessToken?: string): Promise<MlCatalogItem[]> {
+    const response = await this.request(
+      `${BASE_URL}/products/${productId}/items`,
+      accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined,
+    );
     if (!response.ok) {
       throw new Error(`Mercado Livre products/items API retornou ${response.status} para ${productId}`);
     }
@@ -271,8 +277,20 @@ export class MercadoLivreApiClient {
   // Usado quando o alvo monitorado é um ANÚNCIO (MLB de item) em vez de um
   // produto de catálogo: aqui se descobre a qual produto ele pertence para
   // então listar os concorrentes.
-  async fetchItem(itemId: string): Promise<MlItem> {
-    const response = await this.request(`${BASE_URL}/items/${itemId}`);
+  //
+  // Bug de produção (19/09/2026): estes três endpoints são documentados pelo
+  // Mercado Livre como públicos, mas passaram a responder 403 para chamada
+  // anônima (sem Authorization) — confirmado em produção, 100% dos SKUs de
+  // um tenant real falhando com "items API retornou 403". accessToken é
+  // opcional (mantém a chamada sem token como fallback), mas
+  // mercado-livre-catalog-radar.ts agora sempre passa o token do vendedor
+  // já conectado — não precisa ser o dono do anúncio específico, só um
+  // token válido do Mercado Livre.
+  async fetchItem(itemId: string, accessToken?: string): Promise<MlItem> {
+    const response = await this.request(
+      `${BASE_URL}/items/${itemId}`,
+      accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined,
+    );
     if (!response.ok) {
       throw new Error(`Mercado Livre items API retornou ${response.status} para ${itemId}`);
     }
