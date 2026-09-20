@@ -357,8 +357,23 @@ export class MercadoLivreApiClient {
   // devolve 0 resultados. Devolve null se não houver nenhum pedido ainda
   // (tenant novo) ou se o payload vier em formato inesperado — nunca lança,
   // o chamador trata null como "sem alternativa, mantém 0 candidatos".
+  //
+  // Bug de produção (20/09/2026, achado com o log de diagnóstico acima): a
+  // primeira versão desta sonda chamava `/orders/search?seller=X&offset=0&limit=1`
+  // SEM nenhum filtro de data — e devolveu 200 OK com paging.total=0, mesmo
+  // para um tenant com pedido real criado minutos antes (confirmado direto
+  // no banco). Ou seja, a suposição do comentário acima ("endpoint já
+  // comprovado funcional... escopado pelo token") só vale quando a chamada
+  // inclui um filtro de data — é exatamente assim que
+  // MercadoLivreApiClient.fetchOrders() sempre chama esse mesmo endpoint (ver
+  // abaixo), nunca sem `order.<campo>.from`. Sem esse filtro, o Mercado Livre
+  // aparentemente aplica uma janela padrão que pode vir vazia. Fix: usa o
+  // MESMO padrão comprovado — `order.date_created.from` com uma data bem
+  // antiga (cobre qualquer histórico, incluindo reconexões), igual ao
+  // backfill em MercadoLivreOrderProvider.fetchOrders.
   async fetchOrderSellerIdSample(sellerId: string, accessToken: string): Promise<string | null> {
-    const url = `${BASE_URL}/orders/search?seller=${sellerId}&offset=0&limit=1`;
+    const sinceFloor = '2015-01-01T00:00:00.000-00:00'; // bem antes de qualquer conta real neste sistema
+    const url = `${BASE_URL}/orders/search?seller=${sellerId}&offset=0&limit=1&order.date_created.from=${sinceFloor}`;
     const response = await this.request(url, { headers: { Authorization: `Bearer ${accessToken}` } });
     if (!response.ok) {
       // Bug de produção (20/09/2026): primeira execução real deste fallback
