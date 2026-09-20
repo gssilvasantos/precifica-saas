@@ -360,11 +360,30 @@ export class MercadoLivreApiClient {
   async fetchOrderSellerIdSample(sellerId: string, accessToken: string): Promise<string | null> {
     const url = `${BASE_URL}/orders/search?seller=${sellerId}&offset=0&limit=1`;
     const response = await this.request(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // Bug de produção (20/09/2026): primeira execução real deste fallback
+      // devolveu 0 candidatos sem nenhum log de aviso — porque um `!response.ok`
+      // aqui simplesmente devolvia null, em silêncio total. Isso deixou
+      // literalmente impossível saber, pelos logs, se a sonda falhou por HTTP
+      // (ex.: 4xx específico deste endpoint sem `since`/`status`, diferente do
+      // fetchOrders() normal) ou por payload vazio (abaixo). Loga o status
+      // real — nunca lança, o comportamento pro chamador continua o mesmo
+      // (null = "sem alternativa, mantém 0 candidatos").
+      this.logger.warn(`fetchOrderSellerIdSample: ${url} retornou HTTP ${response.status} — sem sellerId alternativo disponível.`);
+      return null;
+    }
 
     const data = (await response.json()) as { results?: Array<{ seller?: { id?: number | string } }> };
     const first = Array.isArray(data.results) ? data.results[0] : undefined;
     const realSellerId = first?.seller?.id;
+    if (realSellerId == null) {
+      // Mesmo racional do log acima: 200 OK mas sem seller.id no primeiro
+      // resultado (lista vazia, ou item com formato inesperado) — sem isto,
+      // esse caminho também falhava em silêncio total.
+      this.logger.warn(
+        `fetchOrderSellerIdSample: ${url} devolveu 200 OK mas sem seller.id utilizável (paging.total=${(data as { paging?: { total?: number } }).paging?.total ?? 'desconhecido'}, resultados=${data.results?.length ?? 0}).`,
+      );
+    }
     return realSellerId != null ? String(realSellerId) : null;
   }
 
