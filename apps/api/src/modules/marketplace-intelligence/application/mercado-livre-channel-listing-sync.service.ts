@@ -82,7 +82,24 @@ export class MercadoLivreChannelListingSyncService {
       if (!sellerId) throw new Error('Conexão com o Mercado Livre inativa ou sem sellerId para este tenant.');
       const accessToken = await this.connections.getValidAccessToken(tenantId);
 
-      const itemIds = await this.client.fetchSellerItemIds(sellerId, accessToken);
+      let itemIds = await this.client.fetchSellerItemIds(sellerId, accessToken);
+
+      // Fallback (19/09/2026, ver comentário em fetchOrderSellerIdSample no
+      // client): 0 anúncios com o sellerId vindo do token OAuth2 pode
+      // significar que esse ID não é o dono real dos anúncios (conta
+      // operadora/colaboradora). Só entra aqui quando a busca normal já deu
+      // 0 — nunca piora o resultado (na pior hipótese, o sellerId
+      // alternativo também devolve 0, igual ao comportamento anterior).
+      if (itemIds.length === 0) {
+        const alternateSellerId = await this.client.fetchOrderSellerIdSample(sellerId, accessToken);
+        if (alternateSellerId && alternateSellerId !== sellerId) {
+          this.logger.warn(
+            `Tenant ${tenantId}: /users/${sellerId}/items/search devolveu 0 anúncios — tentando sellerId alternativo ${alternateSellerId} (extraído de um pedido real já sincronizado deste tenant).`,
+          );
+          itemIds = await this.client.fetchSellerItemIds(alternateSellerId, accessToken);
+        }
+      }
+
       const items = await this.client.fetchItemsDetails(itemIds, accessToken);
       candidatesFound = items.length;
       await this.health.recordSuccess(MERCADO_LIVRE_CHANNEL_LISTINGS_PROVIDER_CODE);

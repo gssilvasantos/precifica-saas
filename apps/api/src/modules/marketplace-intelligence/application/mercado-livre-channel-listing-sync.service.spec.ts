@@ -24,6 +24,7 @@ describe('MercadoLivreChannelListingSyncService', () => {
     const client = {
       fetchSellerItemIds: jest.fn(),
       fetchItemsDetails: jest.fn(),
+      fetchOrderSellerIdSample: jest.fn().mockResolvedValue(null),
     } as unknown as jest.Mocked<MercadoLivreApiClient>;
 
     const events = { emit: jest.fn() };
@@ -119,6 +120,39 @@ describe('MercadoLivreChannelListingSyncService', () => {
     const result = await service.syncTenant('tenant-1');
 
     expect(result.success).toBe(true);
+    expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  it('fetchSellerItemIds devolve 0 anúncios: tenta sellerId alternativo (extraído de pedido real) e sincroniza com ele', async () => {
+    const { service, listings, events, connections, client } = buildService();
+    connections.getSellerId.mockResolvedValue('50756967');
+    connections.getValidAccessToken.mockResolvedValue('token-valido');
+    client.fetchSellerItemIds.mockResolvedValueOnce([]).mockResolvedValueOnce(['MLB111']);
+    client.fetchOrderSellerIdSample.mockResolvedValue('2341287049');
+    client.fetchItemsDetails.mockResolvedValue([buildItem({ id: 'MLB111', skuCode: 'SKU-1' })]);
+
+    const result = await service.syncTenant('tenant-1');
+
+    expect(result.success).toBe(true);
+    expect(client.fetchOrderSellerIdSample).toHaveBeenCalledWith('50756967', 'token-valido');
+    expect(client.fetchSellerItemIds).toHaveBeenNthCalledWith(1, '50756967', 'token-valido');
+    expect(client.fetchSellerItemIds).toHaveBeenNthCalledWith(2, '2341287049', 'token-valido');
+    expect(listings.upsert).toHaveBeenCalledWith(expect.objectContaining({ externalId: 'MLB111', skuCode: 'SKU-1' }));
+    expect(events.emit).toHaveBeenCalledWith(CHANNEL_LISTING_EVENTS.MERCADO_LIVRE_SYNCED, expect.objectContaining({ tenantId: 'tenant-1' }));
+  });
+
+  it('fetchSellerItemIds devolve 0 anúncios e não há pedido real para extrair sellerId alternativo: mantém 0 candidatos, sem erro', async () => {
+    const { service, connections, client, events } = buildService();
+    connections.getSellerId.mockResolvedValue('50756967');
+    connections.getValidAccessToken.mockResolvedValue('token-valido');
+    client.fetchSellerItemIds.mockResolvedValue([]);
+    client.fetchOrderSellerIdSample.mockResolvedValue(null);
+    client.fetchItemsDetails.mockResolvedValue([]);
+
+    const result = await service.syncTenant('tenant-1');
+
+    expect(result.success).toBe(true);
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(1);
     expect(events.emit).not.toHaveBeenCalled();
   });
 

@@ -336,6 +336,38 @@ export class MercadoLivreApiClient {
     return ids;
   }
 
+  // Bug de produção (19/09/2026, tenant real): fetchSellerItemIds(sellerId)
+  // acima devolveu 0 anúncios por SEMANAS para um tenant com conexão ativa
+  // e pedidos reais sincronizando normalmente (2000+ pedidos, todos com o
+  // MESMO seller.id embutido no payload — ver mercado-livre-order.provider.ts).
+  // Causa raiz: `sellerId` persistido em MercadoLivreConnectionService vem
+  // de `token.user_id` (resposta do OAuth2) — mas esse nem sempre é o ID
+  // que de fato "possui" os anúncios no Mercado Livre (ex.: token de uma
+  // conta operadora/colaboradora distinta da conta vendedora). `/orders/search`
+  // continua funcionando com o `sellerId` do token porque é escopado pelo
+  // TOKEN, não pelo parâmetro `seller` da querystring — mas
+  // `/users/{sellerId}/items/search` é estritamente por ID no path, e
+  // devolve lista vazia (200 OK, nunca erro) se o ID não for o dono real.
+  //
+  // Este método busca 1 pedido recente (mesmo endpoint /orders/search já
+  // comprovado funcional para este tenant, mesmo token) só para LER o
+  // `seller.id` de verdade embutido no payload — nunca escreve nada, nunca
+  // aplica preço, é uma sonda read-only usada como fallback em
+  // MercadoLivreChannelListingSyncService quando fetchSellerItemIds(sellerId)
+  // devolve 0 resultados. Devolve null se não houver nenhum pedido ainda
+  // (tenant novo) ou se o payload vier em formato inesperado — nunca lança,
+  // o chamador trata null como "sem alternativa, mantém 0 candidatos".
+  async fetchOrderSellerIdSample(sellerId: string, accessToken: string): Promise<string | null> {
+    const url = `${BASE_URL}/orders/search?seller=${sellerId}&offset=0&limit=1`;
+    const response = await this.request(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as { results?: Array<{ seller?: { id?: number | string } }> };
+    const first = Array.isArray(data.results) ? data.results[0] : undefined;
+    const realSellerId = first?.seller?.id;
+    return realSellerId != null ? String(realSellerId) : null;
+  }
+
   // Multiget (GET /items?ids=...) em vez de um GET /items/{id} por anúncio —
   // com dezenas/centenas de anúncios, item a item seriam N round-trips só
   // para montar ChannelListing; mesma estratégia de lote já usada em
