@@ -398,8 +398,44 @@ export class MercadoLivreApiClient {
       this.logger.warn(
         `fetchOrderSellerIdSample: ${url} devolveu 200 OK mas sem seller.id utilizável (paging.total=${(data as { paging?: { total?: number } }).paging?.total ?? 'desconhecido'}, resultados=${data.results?.length ?? 0}).`,
       );
+      // Bug de produção (21/09/2026): mesmo com o filtro de data (fix
+      // anterior), a sonda continuou devolvendo paging.total=0 — ou seja,
+      // esse `sellerId` NUNCA teve nenhum pedido, em nenhuma data. Isso é
+      // inconsistente com a suposição original de "conta operadora/colaboradora
+      // que só não possui os anúncios": uma conta operadora ainda deveria
+      // aparecer como seller.id de pedidos que ela processou. A hipótese
+      // agora é mais básica — a conexão OAuth2 pode simplesmente estar
+      // autenticada com a conta ERRADA do Mercado Livre (login secundário/de
+      // teste, nunca usado pra vender). `/users/me` é só leitura, nunca
+      // aplica nada — usado aqui só pra logar a identidade real por trás do
+      // token (id/nickname/user_type), pra confirmar ou descartar essa
+      // hipótese sem adivinhar. Nunca lança: falha aqui não muda o retorno
+      // desta função.
+      await this.logAuthenticatedUserIdentity(accessToken);
     }
     return realSellerId != null ? String(realSellerId) : null;
+  }
+
+  private async logAuthenticatedUserIdentity(accessToken: string): Promise<void> {
+    try {
+      const response = await this.request(`${BASE_URL}/users/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!response.ok) {
+        this.logger.warn(`logAuthenticatedUserIdentity: /users/me retornou HTTP ${response.status}.`);
+        return;
+      }
+      const data = (await response.json()) as {
+        id?: number | string;
+        nickname?: string;
+        user_type?: string;
+        site_status?: string;
+        seller_reputation?: { level_id?: string | null; transactions?: { total?: number } };
+      };
+      this.logger.warn(
+        `logAuthenticatedUserIdentity: token pertence a id=${data.id} nickname=${data.nickname} user_type=${data.user_type} site_status=${data.site_status} transacoes_como_vendedor=${data.seller_reputation?.transactions?.total ?? 'desconhecido'}.`,
+      );
+    } catch (error) {
+      this.logger.warn(`logAuthenticatedUserIdentity: falhou (${(error as Error).message}).`);
+    }
   }
 
   // Multiget (GET /items?ids=...) em vez de um GET /items/{id} por anúncio —
