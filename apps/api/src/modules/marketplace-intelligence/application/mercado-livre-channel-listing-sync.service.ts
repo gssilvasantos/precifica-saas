@@ -111,7 +111,18 @@ export class MercadoLivreChannelListingSyncService {
           // vinculado a um Product do Kyneti por SKU — mesma filosofia de
           // "descarta o item, não o lote" do resto do client (ver
           // resolveSellerSku em mercado-livre-api.client.ts).
-          this.logger.warn(`Anúncio Mercado Livre ${item.id} (tenant ${tenantId}) sem SKU vinculado — ignorado na sincronização de ChannelListing.`);
+          //
+          // Diagnóstico (24/09/2026, a pedido do Gui): loga também o título
+          // do anúncio — só pra permitir um humano cruzar manualmente com o
+          // nome do produto no catálogo (Kyneti/Olist) e decidir o SKU
+          // certo pra cadastrar diretamente no Mercado Livre. Nunca usado
+          // pra vincular automaticamente — combinar texto de título com
+          // nome de produto tem risco real de falso positivo (dois produtos
+          // parecidos, cor/tamanho diferente), e vincular errado contaminaria
+          // preço/concorrência desse SKU.
+          this.logger.warn(
+            `Anúncio Mercado Livre ${item.id} (tenant ${tenantId}) sem SKU vinculado — ignorado na sincronização de ChannelListing. Título: "${item.title ?? 'desconhecido'}".`,
+          );
           continue;
         }
         try {

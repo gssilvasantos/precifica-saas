@@ -112,12 +112,21 @@ export interface MlSellerItem {
   // ao Product do Kyneti por SKU, e o sync descarta o item (loga, não falha
   // o lote inteiro).
   skuCode: string | null;
+  // Diagnóstico (24/09/2026, ver comentário em
+  // MercadoLivreChannelListingSyncService sobre os anúncios "sem SKU
+  // vinculado"): só usado para o LOG desse caso — dá pra alguém humano
+  // (comparando com o catálogo do Kyneti/Olist) descobrir a que produto um
+  // anúncio sem SKU corresponde, sem precisar abrir o Mercado Livre anúncio
+  // por anúncio. Nunca usado pra decidir vínculo automático — só texto pro
+  // log.
+  title: string | null;
 }
 
 interface MlRawItemBody {
   id: string;
   price?: number | null;
   permalink?: string | null;
+  title?: string | null;
   seller_custom_field?: string | null;
   attributes?: { id: string; value_name?: string | null }[];
 }
@@ -464,6 +473,7 @@ export class MercadoLivreApiClient {
           price: typeof entry.body.price === 'number' ? entry.body.price : null,
           permalink: entry.body.permalink ?? null,
           skuCode: this.resolveSellerSku(entry.body),
+          title: entry.body.title ?? null,
         });
       }
     }
