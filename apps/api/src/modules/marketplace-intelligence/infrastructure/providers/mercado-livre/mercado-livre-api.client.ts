@@ -127,8 +127,53 @@ interface MlRawItemBody {
   price?: number | null;
   permalink?: string | null;
   title?: string | null;
+  status?: string | null;
+  category_id?: string | null;
   seller_custom_field?: string | null;
   attributes?: { id: string; value_name?: string | null }[];
+  // catalog_listing = true quando ESTE anúncio específico é (ou disputa) a
+  // ficha de catálogo do Mercado Livre; catalog_product_id identifica essa
+  // ficha (já usado por MlItem/fetchItem, para o radar de Buy Box — ver
+  // mais abaixo). Trazidos aqui também (24/09/2026, dúvida real do Gui:
+  // "como o Mercado Turbo sabe quais são catálogo e quais são clássicos") —
+  // é o MESMO dado público que qualquer ferramenta de terceiro (Mercado
+  // Turbo incluso) lê da API do Mercado Livre, não uma informação que só
+  // ferramentas de terceiro conseguem enxergar.
+  catalog_listing?: boolean | null;
+  catalog_product_id?: string | null;
+}
+
+export interface MlItemAttribute {
+  id: string;
+  value_name: string | null;
+}
+
+// Detalhe completo de um anúncio — usado pelo endpoint de administração
+// (MercadoLivreItemAdminController, 24/09/2026) exposto ao kyneti-mcp-server
+// (Gui pediu MCP com leitura E escrita de Mercado Livre disponível a
+// qualquer sessão). Superset de MlSellerItem de propósito: quem consome
+// isto é um HUMANO (via MCP) decidindo o SKU certo pra um anúncio órfão —
+// precisa ver os `attributes` crus, coisa que o sync automático
+// (MlSellerItem) nunca precisou expor. Nunca usado pelo sync automático.
+export interface MlItemDetail {
+  id: string;
+  title: string | null;
+  price: number | null;
+  permalink: string | null;
+  status: string | null;
+  categoryId: string | null;
+  // Mesma resolução de resolveSellerSku (seller_custom_field OU atributo
+  // SELLER_SKU) — nunca duas fontes de verdade pro que "é" o SKU de um
+  // anúncio neste client.
+  skuCode: string | null;
+  // true = este anúncio participa (ou é dono) de uma ficha de catálogo do
+  // Mercado Livre; false/null = anúncio "clássico" (sem ficha de catálogo
+  // por trás). Mesmo campo que qualquer app de terceiro (ex.: Mercado
+  // Turbo) lê da API pública do Mercado Livre para mostrar a etiqueta
+  // "Catálogo" — não é um dado que só eles conseguem enxergar.
+  isCatalogListing: boolean;
+  catalogProductId: string | null;
+  attributes: MlItemAttribute[];
 }
 
 // Resposta de POST /oauth/token — mesmo formato para authorization_code e
@@ -488,6 +533,72 @@ export class MercadoLivreApiClient {
     if (item.seller_custom_field) return item.seller_custom_field;
     const attribute = item.attributes?.find((a) => a.id === 'SELLER_SKU');
     return attribute?.value_name ?? null;
+  }
+
+  private toItemDetail(data: MlRawItemBody): MlItemDetail {
+    return {
+      id: data.id,
+      title: data.title ?? null,
+      price: typeof data.price === 'number' ? data.price : null,
+      permalink: data.permalink ?? null,
+      status: data.status ?? null,
+      categoryId: data.category_id ?? null,
+      skuCode: this.resolveSellerSku(data),
+      isCatalogListing: Boolean(data.catalog_listing) || Boolean(data.catalog_product_id),
+      catalogProductId: data.catalog_product_id ?? null,
+      attributes: (data.attributes ?? []).map((a) => ({ id: a.id, value_name: a.value_name ?? null })),
+    };
+  }
+
+  // --- Administração de anúncio — leitura completa (24/09/2026) ---
+  //
+  // Base de DOIS usos: (1) kyneti-mcp-server consultar um anúncio específico
+  // sem precisar decifrar o payload cru do Mercado Livre — Gui pediu MCP
+  // disponível a qualquer sessão futura, leitura E escrita (ver
+  // updateItemSellerSku abaixo); (2) confirmar o formato real de
+  // `attributes` de um item que JÁ tem SELLER_SKU preenchido antes de
+  // confiar no payload de escrita — em vez de assumir contra documentação
+  // pública que este ambiente nem sempre consegue acessar ao vivo.
+  async fetchItemDetail(itemId: string, accessToken: string): Promise<MlItemDetail> {
+    const response = await this.request(`${BASE_URL}/items/${itemId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      throw new Error(`Mercado Livre GET /items/${itemId} retornou HTTP ${response.status}`);
+    }
+    const data = (await response.json()) as MlRawItemBody;
+    return this.toItemDetail(data);
+  }
+
+  // --- Administração de anúncio — escrita do SKU do vendedor (24/09/2026) ---
+  //
+  // ESCRITA REAL em produção da loja do vendedor — segundo endpoint de
+  // escrita de LISTAGEM deste client (o primeiro é createItem, nunca
+  // exercitado contra a API real). O formato do payload
+  // { attributes: [{ id: 'SELLER_SKU', value_name }] } segue o MESMO shape
+  // já usado por MlCreateItemPayload.attributes (id/value_name) — o formato
+  // de atributo do Mercado Livre em toda a API de itens, não algo inventado
+  // para este endpoint. Defesa em profundidade além da guarda HTTP do
+  // controller (ver mercado-livre-item-admin.controller.ts): o próprio
+  // Mercado Livre recusa (403) editar um item que não pertence ao vendedor
+  // dono do access_token, então um itemId errado nunca escreve na loja de
+  // outra pessoa.
+  async updateItemSellerSku(itemId: string, accessToken: string, skuCode: string): Promise<MlItemDetail> {
+    const response = await this.request(`${BASE_URL}/items/${itemId}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attributes: [{ id: 'SELLER_SKU', value_name: skuCode }] }),
+    });
+    const data = (await response.json().catch(() => ({}))) as MlRawItemBody & {
+      message?: string;
+      error?: string;
+      cause?: unknown[];
+    };
+    if (!response.ok) {
+      const detail = data.message ?? data.error ?? JSON.stringify(data.cause ?? {});
+      throw new Error(`Mercado Livre PUT /items/${itemId} (SELLER_SKU) retornou HTTP ${response.status}: ${detail}`);
+    }
+    return this.toItemDetail(data);
   }
 
   // Troca do `code` de autorização por access_token/refresh_token — passo 2

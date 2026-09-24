@@ -1,0 +1,48 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node 'd:\\Projeto SAAS\\precifica-saas\\.codex\\hooks\\guard-sensitive-write.mjs'",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node 'd:\\Projeto SAAS\\precifica-saas\\.codex\\hooks\\guard-destructive-bash.mjs'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node 'd:\\Projeto SAAS\\precifica-saas\\.codex\\hooks\\scan-secrets.mjs'",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node 'd:\\Projeto SAAS\\precifica-saas\\.codex\\hooks\\migration-notice.mjs'",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node 'd:\\Projeto SAAS\\precifica-saas\\.codex\\hooks\\lint-changed-file.mjs'",
+            "timeout": 90
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -22,6 +22,11 @@ const servicePassword = requireEnv('KYNETI_SERVICE_PASSWORD');
 const serviceTenantId = process.env.KYNETI_SERVICE_TENANT_ID || undefined;
 const sharedSecret = requireEnv('MCP_SHARED_SECRET');
 const port = Number(process.env.PORT) || 8787;
+// v2 (24/09/2026) — desligado por padrão de propósito: ausente/qualquer
+// valor diferente de "true" mantém o servidor 100% leitura, mesmo depois do
+// deploy deste código. Ligar exige uma ação deliberada sua no painel do
+// Render (Environment) — ver README "Ativando a escrita (v2)".
+const writesEnabled = process.env.MCP_ALLOW_WRITES === 'true';
 
 const kyneti = new KyneteClient({
   baseUrl: apiBaseUrl,
@@ -31,8 +36,8 @@ const kyneti = new KyneteClient({
 });
 
 function buildServer(): McpServer {
-  const server = new McpServer({ name: 'kyneti-mcp-server', version: '0.1.0' });
-  registerKynetiTools(server, kyneti);
+  const server = new McpServer({ name: 'kyneti-mcp-server', version: '0.2.0' });
+  registerKynetiTools(server, kyneti, writesEnabled);
   return server;
 }
 
@@ -94,5 +99,7 @@ app.delete('/mcp', authMiddleware, (_req, res) => res.status(405).json({ error: 
 
 app.listen(port, () => {
   // eslint-disable-next-line no-console
-  console.log(`[kyneti-mcp-server] ouvindo na porta ${port} (base da API: ${apiBaseUrl})`);
+  console.log(
+    `[kyneti-mcp-server] ouvindo na porta ${port} (base da API: ${apiBaseUrl}, escrita ${writesEnabled ? 'HABILITADA' : 'desabilitada'})`,
+  );
 });

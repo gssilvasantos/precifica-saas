@@ -5,7 +5,7 @@ import { ChannelListingWriter } from '../../../shared/contracts/channel-listing-
 import { CHANNEL_LISTING_EVENTS } from '../domain/channel-listing-events';
 
 function buildItem(overrides: Partial<MlSellerItem> = {}): MlSellerItem {
-  return { id: 'MLB111', price: 99.9, permalink: 'https://produto.mercadolivre.com.br/MLB111', skuCode: 'SKU-1', ...overrides };
+  return { id: 'MLB111', price: 99.9, permalink: 'https://produto.mercadolivre.com.br/MLB111', skuCode: 'SKU-1', title: 'Item de teste', ...overrides };
 }
 
 describe('MercadoLivreChannelListingSyncService', () => {

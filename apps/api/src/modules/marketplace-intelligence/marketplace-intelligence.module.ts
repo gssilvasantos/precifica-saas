@@ -26,11 +26,13 @@ import { ShopeeListingProvider } from './infrastructure/providers/shopee/shopee-
 import { SyncSchedulerJob } from './infrastructure/scheduler/sync-scheduler.job';
 import { MercadoLivreChannelListingSyncService } from './application/mercado-livre-channel-listing-sync.service';
 import { MercadoLivreChannelListingSyncSchedulerJob } from './infrastructure/scheduler/mercado-livre-channel-listing-sync-scheduler.job';
+import { MercadoLivreItemAdminService } from './application/mercado-livre-item-admin.service';
 
 import { MarketplaceRulesAdminController } from './interface/controllers/marketplace-rules-admin.controller';
 import { MarketplaceChangeEventsController } from './interface/controllers/marketplace-change-events.controller';
 import { MarketplaceProvidersController } from './interface/controllers/marketplace-providers.controller';
 import { MercadoLivreConnectionController } from './interface/controllers/mercado-livre-connection.controller';
+import { MercadoLivreItemAdminController } from './interface/controllers/mercado-livre-item-admin.controller';
 import { ShopeeConnectionController } from './interface/controllers/shopee-connection.controller';
 
 import { MARKETPLACE_REPOSITORY } from './application/ports/marketplace-repository.port';
@@ -70,6 +72,7 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     MarketplaceChangeEventsController,
     MarketplaceProvidersController,
     MercadoLivreConnectionController,
+    MercadoLivreItemAdminController,
     ShopeeConnectionController,
     ChannelSellerProfilesController,
   ],
@@ -113,6 +116,11 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // mercado-livre-handshake.service.ts para o racional completo de por
     // que isto é uma classe separada de MercadoLivreConnectionService.
     MercadoLivreHandshakeService,
+    // Administração direta de anúncio (24/09/2026, MCP leitura+escrita) — ver
+    // racional completo em mercado-livre-item-admin.service.ts. Reaproveita a
+    // MESMA conexão OAuth2 (MercadoLivreConnectionService) e o MESMO client,
+    // nenhuma credencial nova.
+    MercadoLivreItemAdminService,
     { provide: MERCADO_LIVRE_CONNECTION_REPOSITORY, useClass: PrismaMercadoLivreConnectionRepository },
 
     // Ativação do radar de catálogo para tenants reais (18/09/2026, "Só

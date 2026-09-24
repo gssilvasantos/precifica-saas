@@ -127,6 +127,31 @@ export class KyneteClient {
       throw new KyneteApiError(`Kyneti API respondeu ${status ?? 'erro de rede'} em ${path}: ${extractErrorMessage(error)}`, status);
     }
   }
+
+  // v2 (24/09/2026) — primeira ESCRITA deste cliente. Mesmo padrão de retry
+  // de 401 do `get` acima; nenhum retry automático em outros status (um 403
+  // aqui normalmente é a conta de serviço ainda como VIEWER — ver README —
+  // e repetir não resolve).
+  async patch<T>(path: string, body: unknown): Promise<T> {
+    await this.ensureToken();
+    try {
+      const { data } = await this.http.patch<T>(path, body, {
+        headers: { Authorization: `Bearer ${this.token}` },
+      });
+      return data;
+    } catch (error) {
+      const status = (error as AxiosError).response?.status;
+      if (status === 401) {
+        this.token = null;
+        await this.ensureToken();
+        const { data } = await this.http.patch<T>(path, body, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
+        return data;
+      }
+      throw new KyneteApiError(`Kyneti API respondeu ${status ?? 'erro de rede'} em ${path}: ${extractErrorMessage(error)}`, status);
+    }
+  }
 }
 
 function extractErrorMessage(error: unknown): string {
