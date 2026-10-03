@@ -62,25 +62,38 @@ export class OlistApiClient {
   // "fetch failed" (a mensagem genérica do fetch do Node quando a conexão
   // falha — sem o `cause`, nunca dava pra saber se é DNS, TLS ou conexão
   // recusada), e 129 ficaram PENDURADAS PARA SEMPRE — nunca erraram, nunca
-  // terminaram (finishedAt null, até hoje). Sem timeout, uma chamada que o
-  // Tiny simplesmente não responde trava o `fetch()` indefinidamente, e como
-  // ErpSyncOrchestrator.syncsEmAndamento é uma trava em memória sem
-  // expiração, aquele tenant fica preso até o processo da API reiniciar por
-  // outro motivo qualquer (deploy, crash) — foi exatamente o que aconteceu:
-  // zero syncs bem-sucedidos desde 03/08, e o botão "Sincronizar agora"
-  // devolvendo "já existe uma sincronização em andamento" porque a tentativa
-  // anterior nunca soltou a trava. Daqui pra frente, qualquer chamada sem
-  // resposta falha de verdade em 20s (mesmo valor do Mercado Livre/Shopee) em
-  // vez de travar o processo — e a mensagem de erro passa a incluir o
-  // `cause` real do fetch (ex.: ENOTFOUND, ECONNREFUSED, ECONNRESET),
-  // nunca mais só "fetch failed" sem contexto nenhum.
+  // terminaram (finishedAt null, até hoje).
+  //
+  // CORRIGIDO DE NOVO (03/10/2026, poucas horas depois do fix acima): o
+  // primeiro fix só envolvia o `fetch(url, { signal })` em si — mas
+  // `clearTimeout` disparava no `finally` logo que esse `await` resolvia,
+  // ou seja, assim que os HEADERS chegavam. A leitura do corpo
+  // (`response.json()`) acontecia DEPOIS, em requestJson, já sem nenhum
+  // guarda-chuva de timeout. Resultado: uma chamada que conecta normalmente
+  // mas trava lendo o corpo da resposta (conexão TCP aberta, Tiny para de
+  // mandar dado no meio do stream — bem mais comum do que uma conexão que
+  // nunca nem abre) continuava pendurada pra sempre, exatamente como antes.
+  // Confirmado em produção: a sincronização das 2026-10-03 12:00:00 ficou
+  // 1h42min sem terminar e SEM NENHUM log de erro — nem do timeout, nem de
+  // falha por produto — o que só é possível se nenhuma chamada chegou a
+  // rejeitar nunca, ou seja, estava travada na leitura do corpo, não na
+  // conexão. Agora o MESMO AbortController cobre fetch() E response.json()
+  // juntos — só um dos dois pontos de travamento (abrir conexão, ler corpo)
+  // tinha guarda antes; os dois precisam da mesma janela de 20s.
   private static readonly REQUEST_TIMEOUT_MS = 20_000;
 
-  private async fetchWithTimeout(url: string): Promise<Response> {
+  private async fetchJsonWithTimeout<T>(url: string, describe: string): Promise<T> {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), OlistApiClient.REQUEST_TIMEOUT_MS);
     try {
-      return await fetch(url, { signal: controller.signal });
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`Olist ${describe} retornou HTTP ${response.status}`);
+      }
+      // `response.json()` AINDA sob o mesmo `controller.signal`: abortar
+      // depois que os headers já chegaram também corta a leitura do corpo
+      // em andamento (é o mesmo AbortSignal da chamada) — ver aviso acima.
+      return (await response.json()) as T;
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         throw new Error(`Olist não respondeu em ${OlistApiClient.REQUEST_TIMEOUT_MS}ms (timeout) para ${url}`);
@@ -94,7 +107,10 @@ export class OlistApiClient {
       // Sem `{ cause }` no construtor de propósito: o target deste projeto é
       // ES2021 (tsconfig.json), que não tem o tipo da segunda forma de Error
       // do TS — a causa real já vai embutida na própria mensagem, que é o
-      // dado que faltava (ver aviso acima de REQUEST_TIMEOUT_MS).
+      // dado que faltava (ver aviso acima de REQUEST_TIMEOUT_MS). Erro de
+      // HTTP (ex.: "retornou HTTP 500") já vem com mensagem própria — só
+      // reembrulha quando `cause` existir e for diferente disso.
+      if ((error as Error).message?.startsWith('Olist ') && causeMessage === null) throw error;
       throw new Error(`Olist: falha de rede ao chamar ${url}${causeMessage ? ` — causa: ${causeMessage}` : ''}`);
     } finally {
       clearTimeout(timeoutHandle);
@@ -108,14 +124,7 @@ export class OlistApiClient {
   // outra origem (o token é da conta inteira, não só do Kyneti).
   private async requestJson<T>(url: string, describe: string): Promise<T> {
     return withRetry(
-      () =>
-        this.rateLimiter.schedule(async () => {
-          const response = await this.fetchWithTimeout(url);
-          if (!response.ok) {
-            throw new Error(`Olist ${describe} retornou HTTP ${response.status}`);
-          }
-          return (await response.json()) as T;
-        }),
+      () => this.rateLimiter.schedule(() => this.fetchJsonWithTimeout<T>(url, describe)),
       {
         maxAttempts: 4,
         // Escalada longa de propósito: o bloqueio do Tiny é por JANELA DE
