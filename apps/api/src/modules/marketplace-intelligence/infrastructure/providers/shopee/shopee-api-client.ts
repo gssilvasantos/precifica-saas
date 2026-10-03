@@ -39,6 +39,18 @@ export interface ShopeeOAuthTokenResponse {
   message?: string;
 }
 
+// Devolvido por fetchItemBaseInfo — mesmo papel de MlSellerItem no cliente
+// do Mercado Livre. skuCode aqui é o `item_sku` da Shopee (equivalente ao
+// SELLER_SKU do Mercado Livre); null quando o vendedor nunca cadastrou um
+// SKU pra esse anúncio na própria Shopee.
+export interface ShopeeItemBaseInfo {
+  id: string;
+  title: string | null;
+  skuCode: string | null;
+  price: number | null;
+  status: string | null;
+}
+
 // Cliente sobre a API do Shopee Open Platform — autenticação por assinatura
 // HMAC-SHA256 em TODA chamada (nunca um Bearer token simples): a Shopee
 // exige `partner_id` + `timestamp` + `sign` como query params em toda
@@ -354,6 +366,159 @@ export class ShopeeApiClient {
     }
 
     return orders;
+  }
+
+  // --- Catálogo de anúncios já existentes (vínculo por SKU) ---
+  //
+  // Raiz do motivo de kyneti_list_channel_listings nunca mostrar nenhum
+  // anúncio da Shopee (03/10/2026, a pedido do Gui: "por que o Kyneti não
+  // funciona com a Shopee se eles estão conectados"): a conexão OAuth/HMAC
+  // (ShopeeConnectionService) sempre esteve ativa e funcionando — o que
+  // faltava era justamente isto, o par de chamadas que lê os anúncios JÁ
+  // publicados pelo vendedor (get_item_list + get_item_base_info), espelho
+  // de fetchSellerItemIds/fetchItemsDetails do Mercado Livre. Os quatro
+  // métodos de "Publicar anúncio novo" abaixo escrevem um anúncio NOVO —
+  // nenhum deles lê os anúncios que o vendedor já tinha antes de conectar o
+  // Kyneti, por isso não serviam para isso.
+  //
+  // AVISO DE HONESTIDADE: mesmo padrão do resto do client — shape montado a
+  // partir da documentação pública do Shopee Open Platform v2
+  // (product/get_item_list, product/get_item_base_info), nunca exercitado
+  // contra a Shopee real. O primeiro sync de verdade (ShopeeChannelListingSyncService)
+  // é quem confirma ou refuta os campos assumidos aqui.
+  //
+  // item_status: por padrão busca NORMAL (ativo) e UNLIST (pausado pelo
+  // próprio vendedor) — mesma cobertura que o Mercado Livre já tem hoje
+  // (anúncios ativos E pausados aparecem em ChannelListing). BANNED/DELETED
+  // ficam de fora de propósito: não são anúncios "do vendedor" no sentido
+  // que importa aqui (um banido não é escolha do vendedor, um deletado não
+  // existe mais).
+  private static readonly ITEM_LIST_PAGE_SIZE = 100;
+  private static readonly DEFAULT_ITEM_STATUSES = ['NORMAL', 'UNLIST'] as const;
+
+  async fetchItemList(
+    partnerId: string,
+    partnerKey: string,
+    shopId: string,
+    accessToken: string,
+    itemStatuses: readonly string[] = ShopeeApiClient.DEFAULT_ITEM_STATUSES,
+  ): Promise<string[]> {
+    const path = '/api/v2/product/get_item_list';
+    const itemIds: string[] = [];
+    let offset = 0;
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const sign = this.sign(path, timestamp, partnerId, partnerKey, accessToken, shopId);
+      const params = new URLSearchParams({
+        partner_id: partnerId,
+        timestamp: String(timestamp),
+        sign,
+        access_token: accessToken,
+        shop_id: shopId,
+        offset: String(offset),
+        page_size: String(ShopeeApiClient.ITEM_LIST_PAGE_SIZE),
+      });
+      for (const status of itemStatuses) params.append('item_status', status);
+
+      const response = await this.request(`${this.baseUrl}${path}?${params.toString()}`, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Shopee ${path} retornou HTTP ${response.status}: ${text}`);
+      }
+      const data = (await response.json()) as {
+        response?: { item?: { item_id?: number }[]; has_next_page?: boolean; next_offset?: number };
+        error?: string;
+        message?: string;
+      };
+      if (data.error) {
+        throw new Error(`Shopee ${path} retornou erro de negócio: ${data.error} — ${data.message ?? ''}`);
+      }
+
+      const batch = data.response?.item ?? [];
+      for (const item of batch) {
+        if (item.item_id != null) itemIds.push(String(item.item_id));
+      }
+
+      if (!data.response?.has_next_page) break;
+      // Fallback defensivo: se a Shopee não devolver next_offset por algum
+      // motivo, avança pelo tamanho do lote recebido — nunca trava num loop
+      // infinito, na pior hipótese para um pouco antes do fim real.
+      offset = data.response?.next_offset ?? offset + batch.length;
+    }
+
+    return itemIds;
+  }
+
+  // Limite documentado da Shopee: item_id_list de get_item_base_info aceita
+  // no máximo 50 itens por chamada — mesmo padrão de fatiamento interno de
+  // fetchOrderDetail acima.
+  private static readonly ITEM_BASE_INFO_BATCH_SIZE = 50;
+
+  async fetchItemBaseInfo(
+    partnerId: string,
+    partnerKey: string,
+    shopId: string,
+    accessToken: string,
+    itemIds: string[],
+  ): Promise<ShopeeItemBaseInfo[]> {
+    const path = '/api/v2/product/get_item_base_info';
+    const items: ShopeeItemBaseInfo[] = [];
+
+    for (let i = 0; i < itemIds.length; i += ShopeeApiClient.ITEM_BASE_INFO_BATCH_SIZE) {
+      const batch = itemIds.slice(i, i + ShopeeApiClient.ITEM_BASE_INFO_BATCH_SIZE);
+      const timestamp = Math.floor(Date.now() / 1000);
+      const sign = this.sign(path, timestamp, partnerId, partnerKey, accessToken, shopId);
+      const params = new URLSearchParams({
+        partner_id: partnerId,
+        timestamp: String(timestamp),
+        sign,
+        access_token: accessToken,
+        shop_id: shopId,
+        item_id_list: batch.join(','),
+      });
+
+      const response = await this.request(`${this.baseUrl}${path}?${params.toString()}`, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Shopee ${path} retornou HTTP ${response.status}: ${text}`);
+      }
+      const data = (await response.json()) as {
+        response?: {
+          item_list?: {
+            item_id?: number;
+            item_name?: string;
+            item_sku?: string;
+            item_status?: string;
+            price_info?: { current_price?: number }[];
+          }[];
+        };
+        error?: string;
+        message?: string;
+      };
+      if (data.error) {
+        throw new Error(`Shopee ${path} retornou erro de negócio: ${data.error} — ${data.message ?? ''}`);
+      }
+
+      const batchItems = data.response?.item_list ?? [];
+      for (const item of batchItems) {
+        if (item.item_id == null) continue;
+        items.push({
+          id: String(item.item_id),
+          title: item.item_name ?? null,
+          skuCode: item.item_sku && item.item_sku.trim() !== '' ? item.item_sku.trim() : null,
+          price: item.price_info?.[0]?.current_price ?? null,
+          status: item.item_status ?? null,
+        });
+      }
+    }
+
+    return items;
   }
 
   // --- Publicar anúncio novo em marketplace (Fase 4, benchmark Tiny ERP) ---

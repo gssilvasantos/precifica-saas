@@ -27,6 +27,8 @@ import { SyncSchedulerJob } from './infrastructure/scheduler/sync-scheduler.job'
 import { MercadoLivreChannelListingSyncService } from './application/mercado-livre-channel-listing-sync.service';
 import { MercadoLivreChannelListingSyncSchedulerJob } from './infrastructure/scheduler/mercado-livre-channel-listing-sync-scheduler.job';
 import { MercadoLivreItemAdminService } from './application/mercado-livre-item-admin.service';
+import { ShopeeChannelListingSyncService } from './application/shopee-channel-listing-sync.service';
+import { ShopeeChannelListingSyncSchedulerJob } from './infrastructure/scheduler/shopee-channel-listing-sync-scheduler.job';
 
 import { MarketplaceRulesAdminController } from './interface/controllers/marketplace-rules-admin.controller';
 import { MarketplaceChangeEventsController } from './interface/controllers/marketplace-change-events.controller';
@@ -154,6 +156,13 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // separada, reaproveita a MESMA conexão. Exportada abaixo para o futuro
     // módulo marketplace-publishing.
     ShopeeListingProvider,
+    // Fecha o gap diagnosticado em 03/10/2026 (a pedido do Gui) — mesmo
+    // racional de MercadoLivreChannelListingSyncService/SchedulerJob acima,
+    // mas sem emitir evento de reconciliação do radar de concorrência (ver
+    // racional completo no próprio serviço). Popula ChannelListing com os
+    // anúncios REAIS do vendedor na Shopee, pela primeira vez.
+    ShopeeChannelListingSyncService,
+    ShopeeChannelListingSyncSchedulerJob,
     { provide: SHOPEE_CONNECTION_REPOSITORY, useClass: PrismaShopeeConnectionRepository },
     // Registro central de providers (seção 12 do documento de arquitetura do
     // módulo): adicionar um marketplace novo = adicionar uma linha aqui,
