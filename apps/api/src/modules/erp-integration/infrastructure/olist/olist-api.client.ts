@@ -53,6 +53,54 @@ export class OlistApiClient {
   // em shared/rate-limiting/marketplace-rate-limits.ts.
   private readonly rateLimiter = new RateLimiter(getRateLimitConfig('OLIST'));
 
+  // CORRIGIDO (03/10/2026, a pedido do Gui: "porque a olist está assim,
+  // investigue"): este client nunca teve timeout — diferente de
+  // MercadoLivreApiClient/ShopeeApiClient, que já tratam isso (ver aviso de
+  // ambos: "fetch nativo do Node não tem timeout implícito e uma chamada
+  // travada trava o sync inteiro"). Investigação direto no banco (333
+  // tentativas desde 31/07, ver provider_sync_logs): 203 falharam rápido com
+  // "fetch failed" (a mensagem genérica do fetch do Node quando a conexão
+  // falha — sem o `cause`, nunca dava pra saber se é DNS, TLS ou conexão
+  // recusada), e 129 ficaram PENDURADAS PARA SEMPRE — nunca erraram, nunca
+  // terminaram (finishedAt null, até hoje). Sem timeout, uma chamada que o
+  // Tiny simplesmente não responde trava o `fetch()` indefinidamente, e como
+  // ErpSyncOrchestrator.syncsEmAndamento é uma trava em memória sem
+  // expiração, aquele tenant fica preso até o processo da API reiniciar por
+  // outro motivo qualquer (deploy, crash) — foi exatamente o que aconteceu:
+  // zero syncs bem-sucedidos desde 03/08, e o botão "Sincronizar agora"
+  // devolvendo "já existe uma sincronização em andamento" porque a tentativa
+  // anterior nunca soltou a trava. Daqui pra frente, qualquer chamada sem
+  // resposta falha de verdade em 20s (mesmo valor do Mercado Livre/Shopee) em
+  // vez de travar o processo — e a mensagem de erro passa a incluir o
+  // `cause` real do fetch (ex.: ENOTFOUND, ECONNREFUSED, ECONNRESET),
+  // nunca mais só "fetch failed" sem contexto nenhum.
+  private static readonly REQUEST_TIMEOUT_MS = 20_000;
+
+  private async fetchWithTimeout(url: string): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), OlistApiClient.REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        throw new Error(`Olist não respondeu em ${OlistApiClient.REQUEST_TIMEOUT_MS}ms (timeout) para ${url}`);
+      }
+      // `cause` carrega o erro real do Node (ENOTFOUND, ECONNREFUSED,
+      // ECONNRESET, certificado inválido etc.) — o fetch nativo só expõe
+      // "fetch failed" em error.message, escondendo exatamente a informação
+      // que faltava pra diagnosticar isto. Nunca descartar.
+      const cause = (error as { cause?: unknown }).cause;
+      const causeMessage = cause instanceof Error ? cause.message : cause ? String(cause) : null;
+      // Sem `{ cause }` no construtor de propósito: o target deste projeto é
+      // ES2021 (tsconfig.json), que não tem o tipo da segunda forma de Error
+      // do TS — a causa real já vai embutida na própria mensagem, que é o
+      // dado que faltava (ver aviso acima de REQUEST_TIMEOUT_MS).
+      throw new Error(`Olist: falha de rede ao chamar ${url}${causeMessage ? ` — causa: ${causeMessage}` : ''}`);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
   // Toda chamada passa por aqui: primeiro espera a cota (RateLimiter), e se
   // ainda assim o Tiny devolver bloqueio, tenta de novo com backoff. Os
   // dois juntos, não um ou outro — o limitador evita o bloqueio no caso
@@ -62,7 +110,7 @@ export class OlistApiClient {
     return withRetry(
       () =>
         this.rateLimiter.schedule(async () => {
-          const response = await fetch(url);
+          const response = await this.fetchWithTimeout(url);
           if (!response.ok) {
             throw new Error(`Olist ${describe} retornou HTTP ${response.status}`);
           }
