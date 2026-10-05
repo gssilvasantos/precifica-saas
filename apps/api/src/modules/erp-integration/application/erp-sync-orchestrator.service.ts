@@ -125,18 +125,32 @@ export class ErpSyncOrchestrator {
     this.syncsEmAndamento.add(tenantId);
 
     const correlationId = randomUUID();
+    // INSTRUMENTAÇÃO TEMPORÁRIA (05/10/2026) — 3 correções seguidas no
+    // timeout do OlistApiClient (AbortController cobrindo só fetch(), depois
+    // fetch()+json() juntos, depois Promise.race independente do abort) e a
+    // sincronização CONTINUA travando pra sempre, agora confirmado MESMO sem
+    // nenhum log de erro de rede — o que só faz sentido se o travamento nem
+    // está dentro do client de API. Em vez de arriscar uma 4ª correção às
+    // cegas, estes checkpoints dizem exatamente em qual `await` o processo
+    // trava na próxima tentativa (DB? decrypt? a primeira chamada de rede em
+    // si?). Remover depois que a causa real for confirmada.
+    this.logger.log(`[DIAG] syncTenant tenant=${tenantId} correlationId=${correlationId}: trava adquirida, abrindo ProviderSyncLog.`);
     const logId = await this.syncLogs.start(PROVIDER_CODE, correlationId);
+    this.logger.log(`[DIAG] syncTenant tenant=${tenantId}: ProviderSyncLog aberto (logId=${logId}), buscando OlistConnection.`);
     let candidatesFound = 0;
     let candidatesApplied = 0;
 
     try {
       const record = await this.connections.findByTenant(tenantId);
+      this.logger.log(`[DIAG] syncTenant tenant=${tenantId}: OlistConnection encontrada (isActive=${record?.isActive}), decriptando token.`);
       if (!record || !record.isActive) throw new Error('Conexão com o Olist inativa ou não encontrada.');
       const apiToken = this.credentials.decrypt(record.apiTokenEnc);
+      this.logger.log(`[DIAG] syncTenant tenant=${tenantId}: token decriptado, chamando fetchAllActiveProductDetails.`);
 
       const { details: rawProducts, failedCount } = await this.withRetry(() =>
         this.client.fetchAllActiveProductDetails(apiToken),
       );
+      this.logger.log(`[DIAG] syncTenant tenant=${tenantId}: fetchAllActiveProductDetails voltou — ${rawProducts.length} produto(s), ${failedCount} falha(s).`);
       candidatesFound = rawProducts.length + failedCount;
       await this.health.recordSuccess(PROVIDER_CODE);
 

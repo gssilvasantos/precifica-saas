@@ -105,6 +105,14 @@ export class OlistApiClient {
   private static readonly REQUEST_TIMEOUT_MS = 20_000;
 
   private async fetchJsonWithTimeout<T>(url: string, describe: string): Promise<T> {
+    // INSTRUMENTAÇÃO TEMPORÁRIA (05/10/2026) — ver aviso em
+    // ErpSyncOrchestrator.syncTenant. Este é o ÚLTIMO checkpoint antes do
+    // `fetch()` de verdade: se "chamando fetch()" aparece no log mas
+    // "fetch() voltou" nunca aparece, o travamento está dentro do próprio
+    // fetch/undici (DNS, TCP, TLS) — fora do nosso controle de timeout até
+    // agora. Se nem "chamando fetch()" aparece, o travamento é ANTES disto
+    // (RateLimiter.schedule, ou o withRetry por fora).
+    this.logger.log(`[DIAG] fetchJsonWithTimeout: chamando fetch() — ${describe}`);
     const controller = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
@@ -116,10 +124,13 @@ export class OlistApiClient {
 
     const request = (async (): Promise<T> => {
       const response = await fetch(url, { signal: controller.signal });
+      this.logger.log(`[DIAG] fetchJsonWithTimeout: fetch() voltou (HTTP ${response.status}) — ${describe}, lendo corpo.`);
       if (!response.ok) {
         throw new Error(`Olist ${describe} retornou HTTP ${response.status}`);
       }
-      return (await response.json()) as T;
+      const json = (await response.json()) as T;
+      this.logger.log(`[DIAG] fetchJsonWithTimeout: corpo lido — ${describe}`);
+      return json;
     })();
 
     try {
