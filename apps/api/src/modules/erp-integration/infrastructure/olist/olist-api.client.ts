@@ -77,27 +77,56 @@ export class OlistApiClient {
   // 1h42min sem terminar e SEM NENHUM log de erro — nem do timeout, nem de
   // falha por produto — o que só é possível se nenhuma chamada chegou a
   // rejeitar nunca, ou seja, estava travada na leitura do corpo, não na
-  // conexão. Agora o MESMO AbortController cobre fetch() E response.json()
-  // juntos — só um dos dois pontos de travamento (abrir conexão, ler corpo)
-  // tinha guarda antes; os dois precisam da mesma janela de 20s.
+  // conexão.
+  //
+  // CORRIGIDO DE NOVO DE NOVO (05/10/2026): o fix anterior unificou fetch()
+  // e response.json() sob o MESMO AbortController — certo em teoria, mas
+  // confirmado em produção que NEM ISSO bastou. Em 2 dias (03→05/10), 10
+  // tentativas novas (ver provider_sync_logs), TODAS com finishedAt null,
+  // e ZERO log de erro — nem timeout, nem "Falha ao obter detalhe do
+  // produto" (que roda por item, dentro de fetchAllActiveProductDetails) —
+  // ou seja, nem a PRIMEIRA chamada (produtos.pesquisa.php) retornou nunca.
+  // Isso só é possível se `controller.abort()` não está de fato liberando o
+  // `await fetch(...)` — plausível quando o travamento é na resolução de
+  // DNS ou na abertura do socket TCP em si: o AbortSignal do fetch nem
+  // sempre interrompe uma chamada já presa no nível do sistema
+  // operacional/libuv, dependendo de onde exatamente ela travou. Depender
+  // só do abort pra isso é depender de uma garantia que a própria chamada
+  // trava justamente não dá.
+  //
+  // A correção agora não depende do abort funcionar: `Promise.race` entre a
+  // chamada real e um timer PRÓPRIO, independente, que rejeita sozinho em
+  // 20s. `controller.abort()` continua sendo chamado (ajuda a liberar o
+  // socket quando o Node consegue), mas a função nunca mais fica esperando
+  // por isso — o `race` sempre avança no prazo, mesmo que o fetch() por
+  // baixo continue pendurado pra sempre (vira um vazamento de uma promise
+  // órfã, não um sync inteiro travado — infinitamente melhor que o estado
+  // atual).
   private static readonly REQUEST_TIMEOUT_MS = 20_000;
 
   private async fetchJsonWithTimeout<T>(url: string, describe: string): Promise<T> {
     const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), OlistApiClient.REQUEST_TIMEOUT_MS);
-    try {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`Olist não respondeu em ${OlistApiClient.REQUEST_TIMEOUT_MS}ms (timeout) para ${url}`));
+      }, OlistApiClient.REQUEST_TIMEOUT_MS);
+    });
+
+    const request = (async (): Promise<T> => {
       const response = await fetch(url, { signal: controller.signal });
       if (!response.ok) {
         throw new Error(`Olist ${describe} retornou HTTP ${response.status}`);
       }
-      // `response.json()` AINDA sob o mesmo `controller.signal`: abortar
-      // depois que os headers já chegaram também corta a leitura do corpo
-      // em andamento (é o mesmo AbortSignal da chamada) — ver aviso acima.
       return (await response.json()) as T;
+    })();
+
+    try {
+      // O primeiro a resolver/rejeitar decide — nunca o `fetch()` por si só.
+      return await Promise.race([request, timeout]);
     } catch (error) {
-      if ((error as Error).name === 'AbortError') {
-        throw new Error(`Olist não respondeu em ${OlistApiClient.REQUEST_TIMEOUT_MS}ms (timeout) para ${url}`);
-      }
+      if ((error as Error).message?.startsWith('Olist não respondeu em')) throw error;
       // `cause` carrega o erro real do Node (ENOTFOUND, ECONNREFUSED,
       // ECONNRESET, certificado inválido etc.) — o fetch nativo só expõe
       // "fetch failed" em error.message, escondendo exatamente a informação
@@ -114,6 +143,11 @@ export class OlistApiClient {
       throw new Error(`Olist: falha de rede ao chamar ${url}${causeMessage ? ` — causa: ${causeMessage}` : ''}`);
     } finally {
       clearTimeout(timeoutHandle);
+      // `request` pode continuar pendurada no event loop se o abort não
+      // surtir efeito de verdade — ver aviso acima. Isso é um vazamento
+      // aceitável (uma promise, sem retry, sem reentrância) contra a
+      // alternativa real, que era o sync inteiro travado para sempre.
+      request.catch(() => {});
     }
   }
 
