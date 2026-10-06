@@ -16,6 +16,7 @@ export class PrismaOlistConnectionRepository implements OlistConnectionRepositor
     lastSyncedAt: true,
     lastSyncStatus: true,
     lastSyncError: true,
+    resumeFromPage: true,
   } as const;
 
   findByTenant(tenantId: string): Promise<OlistConnectionRecord | null> {
@@ -62,6 +63,13 @@ export class PrismaOlistConnectionRepository implements OlistConnectionRepositor
     await this.prisma.olistConnection.update({
       where: { tenantId },
       data: { lastSyncStatus: 'FAILED', lastSyncError: error },
+    });
+  }
+
+  async saveProgress(tenantId: string, resumeFromPage: number | null): Promise<void> {
+    await this.prisma.olistConnection.update({
+      where: { tenantId },
+      data: { resumeFromPage },
     });
   }
 }

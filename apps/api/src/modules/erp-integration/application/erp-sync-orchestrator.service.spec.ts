@@ -33,6 +33,7 @@ function construirOrquestrador() {
     markSynced: jest.fn().mockResolvedValue(undefined),
     markSyncedWithWarning: jest.fn().mockResolvedValue(undefined),
     markSyncFailed: jest.fn().mockResolvedValue(undefined),
+    saveProgress: jest.fn().mockResolvedValue(undefined),
   };
   const changeEvents = { findByExternalId: jest.fn().mockResolvedValue(null), upsert: jest.fn() };
   const catalogWriter = {
@@ -235,5 +236,77 @@ describe('ErpSyncOrchestrator — sync simultâneo do mesmo tenant', () => {
     client.fetchAllActiveProductDetails.mockResolvedValueOnce({ details: [], failedCount: 0 });
     const segunda = await orchestrator.syncTenant('tenant-1');
     expect(segunda.success).toBe(true);
+  });
+});
+
+describe('ErpSyncOrchestrator — retomada do sync interrompido (06/10/2026)', () => {
+  // Causa raiz real do "sync travado pra sempre": o serviço roda no plano
+  // Free do Render, que mata o processo após 15min sem tráfego externo — e
+  // o catálogo real leva ~40min pra sincronizar. Uma interrupção no meio é
+  // o caso normal, não a exceção. Estes testes cobrem o checkpoint por
+  // página que permite retomar em vez de escanear o catálogo inteiro de
+  // novo a cada interrupção — ver `resumeFromPage` em OlistConnection.
+  it('começa da página salva em `resumeFromPage`, não da página 1', async () => {
+    const { orchestrator, connections, client } = construirOrquestrador();
+    connections.findByTenant.mockResolvedValue({ ...CONEXAO, resumeFromPage: 7 });
+    client.fetchAllActiveProductDetails.mockResolvedValue({ details: [], failedCount: 0 });
+
+    await orchestrator.syncTenant('tenant-1');
+
+    const opcoes = client.fetchAllActiveProductDetails.mock.calls[0][1];
+    expect(opcoes.startPage).toBe(7);
+  });
+
+  it('grava o checkpoint a cada página concluída e limpa ao terminar a busca inteira', async () => {
+    const { orchestrator, connections, client } = construirOrquestrador();
+    connections.findByTenant.mockResolvedValue({ ...CONEXAO, resumeFromPage: null });
+    // Simula o client real: duas páginas, avisando o checkpoint depois de
+    // cada uma antes de a busca inteira terminar.
+    client.fetchAllActiveProductDetails.mockImplementation(async (_token: string, options: any) => {
+      await options.onPageFetched(2);
+      await options.onPageFetched(3);
+      return { details: [], failedCount: 0 };
+    });
+
+    await orchestrator.syncTenant('tenant-1');
+
+    // Uma chamada por página concluída (próxima página a buscar), e por
+    // último `null` — busca inteira terminou, nada mais a retomar.
+    expect(connections.saveProgress.mock.calls).toEqual([
+      ['tenant-1', 2],
+      ['tenant-1', 3],
+      ['tenant-1', null],
+    ]);
+  });
+
+  it('não re-tenta a página inteira do zero quando o withRetry do orquestrador reage a um erro transitório', async () => {
+    jest.useFakeTimers();
+    try {
+      const { orchestrator, connections, client } = construirOrquestrador();
+      connections.findByTenant.mockResolvedValue({ ...CONEXAO, resumeFromPage: null });
+
+      client.fetchAllActiveProductDetails
+        // Primeira tentativa: avança até a página 4 e cai numa falha
+        // transitória (não é bloqueio de cota — o withRetry do orquestrador
+        // re-tenta).
+        .mockImplementationOnce(async (_token: string, options: any) => {
+          await options.onPageFetched(4);
+          throw new Error('ECONNRESET');
+        })
+        // Segunda tentativa (retry): o orquestrador deve chamar de novo com
+        // startPage=4 — o checkpoint mais recente desta MESMA execução, não
+        // o `resumeFromPage` original (null) lido do banco no início.
+        .mockResolvedValueOnce({ details: [], failedCount: 0 });
+
+      const promessa = orchestrator.syncTenant('tenant-1');
+      await jest.advanceTimersByTimeAsync(2000); // primeiro backoff do withRetry
+      const resultado = await promessa;
+
+      expect(resultado.success).toBe(true);
+      expect(client.fetchAllActiveProductDetails).toHaveBeenCalledTimes(2);
+      expect(client.fetchAllActiveProductDetails.mock.calls[1][1].startPage).toBe(4);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

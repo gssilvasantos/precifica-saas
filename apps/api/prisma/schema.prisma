@@ -1150,6 +1150,23 @@ model OlistConnection {
   // falhar), e o usuário nunca via o motivo.
   lastSyncStatus String? // SUCCESS | FAILED — null antes da 1ª tentativa
   lastSyncError  String?
+  // CHECKPOINT DE RETOMADA (06/10/2026). Causa raiz real do "sync travado
+  // pra sempre" que motivou 3 correções de timeout sem efeito nenhum (ver os
+  // 3 avisos em OlistApiClient): o serviço `precifica-saas` roda no plano
+  // FREE do Render, que mata o container inteiro depois de 15min sem
+  // tráfego HTTP externo — sem exceção, sem log, sem shutdown gracioso (ver
+  // docs/erp-integration-architecture.md). O catálogo real (1.804 SKUs a 1
+  // req/1,3s) leva uns 40min pra sincronizar, ou seja, NUNCA tinha garantia
+  // de sobreviver inteiro. `resumeFromPage` guarda a próxima página do
+  // catálogo ainda não buscada nesta tentativa — ErpSyncOrchestrator grava
+  // aqui depois de cada página completa e lê daqui ao iniciar, pra retomar
+  // de onde parou em vez de escanear o catálogo inteiro de novo a cada
+  // interrupção (spin-down, deploy, restart — qualquer motivo). NULL
+  // significa "nada para retomar": sem checkpoint pendente, ou o fetch da
+  // última tentativa terminou inteiro (a marca é limpa assim que todas as
+  // páginas são buscadas, mesmo que o PROCESSAMENTO delas falhe depois —
+  // ver comentário em ErpSyncOrchestrator.syncTenant).
+  resumeFromPage Int?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

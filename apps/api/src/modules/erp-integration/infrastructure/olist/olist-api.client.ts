@@ -102,17 +102,28 @@ export class OlistApiClient {
   // baixo continue pendurado pra sempre (vira um vazamento de uma promise
   // órfã, não um sync inteiro travado — infinitamente melhor que o estado
   // atual).
+  //
+  // CAUSA RAIZ REAL ENCONTRADA (06/10/2026) — nenhuma das 3 correções acima
+  // era o problema. Um log de diagnóstico por checkpoint (temporário,
+  // removido agora que a causa está confirmada) mostrou a sincronização
+  // avançando produto a produto normalmente, sem nenhum erro, até parar de
+  // repente. Os gráficos de CPU/memória do Render no exato momento em que
+  // os logs paravam mostravam tudo saudável — não era loop infinito nem
+  // falta de recursos. O que explicava tudo: o serviço `precifica-saas`
+  // roda no plano FREE do Render, que mata o container inteiro depois de
+  // 15min sem receber tráfego HTTP externo (spin-down de infraestrutura,
+  // sem exceção, sem log, sem shutdown gracioso — ver
+  // https://render.com/docs/free). O catálogo real (1.804 SKUs a 1
+  // req/1,3s) leva uns 40min pra sincronizar inteiro — tempo que o plano
+  // Free nunca garantiu. Fix real: mover `precifica-saas` pro plano Starter
+  // (sem spin-down). Este client e o ErpSyncOrchestrator (ver
+  // `resumeFromPage` em OlistConnection) ganharam checkpoint por página como
+  // reforço — se o processo cair por QUALQUER motivo (spin-down, deploy,
+  // crash), a próxima tentativa retoma de onde parou em vez de escanear o
+  // catálogo inteiro de novo.
   private static readonly REQUEST_TIMEOUT_MS = 20_000;
 
   private async fetchJsonWithTimeout<T>(url: string, describe: string): Promise<T> {
-    // INSTRUMENTAÇÃO TEMPORÁRIA (05/10/2026) — ver aviso em
-    // ErpSyncOrchestrator.syncTenant. Este é o ÚLTIMO checkpoint antes do
-    // `fetch()` de verdade: se "chamando fetch()" aparece no log mas
-    // "fetch() voltou" nunca aparece, o travamento está dentro do próprio
-    // fetch/undici (DNS, TCP, TLS) — fora do nosso controle de timeout até
-    // agora. Se nem "chamando fetch()" aparece, o travamento é ANTES disto
-    // (RateLimiter.schedule, ou o withRetry por fora).
-    this.logger.log(`[DIAG] fetchJsonWithTimeout: chamando fetch() — ${describe}`);
     const controller = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
@@ -124,13 +135,10 @@ export class OlistApiClient {
 
     const request = (async (): Promise<T> => {
       const response = await fetch(url, { signal: controller.signal });
-      this.logger.log(`[DIAG] fetchJsonWithTimeout: fetch() voltou (HTTP ${response.status}) — ${describe}, lendo corpo.`);
       if (!response.ok) {
         throw new Error(`Olist ${describe} retornou HTTP ${response.status}`);
       }
-      const json = (await response.json()) as T;
-      this.logger.log(`[DIAG] fetchJsonWithTimeout: corpo lido — ${describe}`);
-      return json;
+      return (await response.json()) as T;
     })();
 
     try {
@@ -240,11 +248,23 @@ export class OlistApiClient {
   // Falha de UM produto não derruba o lote (o catch já fazia isso) — mas
   // agora a contagem de falhas é devolvida junto, para o chamador conseguir
   // dizer ao usuário "importei 320 de 340" em vez de só um número solto.
-  async fetchAllActiveProductDetails(apiToken: string): Promise<{ details: unknown[]; failedCount: number }> {
+  //
+  // RETOMADA POR PÁGINA (06/10/2026 — ver aviso grande em
+  // REQUEST_TIMEOUT_MS). `startPage` permite continuar de onde uma tentativa
+  // anterior parou em vez de reiniciar do zero; `onPageFetched` é chamado
+  // depois de CADA página inteira (busca + todos os detalhes dela), com a
+  // PRÓXIMA página ainda não buscada, para o chamador persistir o
+  // checkpoint. Os dois são opcionais e não mudam o comportamento de quem
+  // não os usa (ex.: healthCheck indiretamente via pesquisarProdutos, que
+  // nem passa por aqui).
+  async fetchAllActiveProductDetails(
+    apiToken: string,
+    options?: { startPage?: number; onPageFetched?: (nextPage: number) => Promise<void> | void },
+  ): Promise<{ details: unknown[]; failedCount: number }> {
     const details: unknown[] = [];
     let failedCount = 0;
-    let pagina = 1;
-    let totalPaginas = 1;
+    let pagina = options?.startPage && options.startPage > 0 ? options.startPage : 1;
+    let totalPaginas = pagina;
 
     do {
       const { produtos, totalPaginas: total } = await this.pesquisarProdutos(apiToken, pagina);
@@ -259,6 +279,7 @@ export class OlistApiClient {
         }
       }
       pagina++;
+      await options?.onPageFetched?.(pagina);
     } while (pagina <= totalPaginas);
 
     return { details, failedCount };

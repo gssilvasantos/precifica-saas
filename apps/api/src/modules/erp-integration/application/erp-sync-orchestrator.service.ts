@@ -125,32 +125,47 @@ export class ErpSyncOrchestrator {
     this.syncsEmAndamento.add(tenantId);
 
     const correlationId = randomUUID();
-    // INSTRUMENTAÇÃO TEMPORÁRIA (05/10/2026) — 3 correções seguidas no
-    // timeout do OlistApiClient (AbortController cobrindo só fetch(), depois
-    // fetch()+json() juntos, depois Promise.race independente do abort) e a
-    // sincronização CONTINUA travando pra sempre, agora confirmado MESMO sem
-    // nenhum log de erro de rede — o que só faz sentido se o travamento nem
-    // está dentro do client de API. Em vez de arriscar uma 4ª correção às
-    // cegas, estes checkpoints dizem exatamente em qual `await` o processo
-    // trava na próxima tentativa (DB? decrypt? a primeira chamada de rede em
-    // si?). Remover depois que a causa real for confirmada.
-    this.logger.log(`[DIAG] syncTenant tenant=${tenantId} correlationId=${correlationId}: trava adquirida, abrindo ProviderSyncLog.`);
     const logId = await this.syncLogs.start(PROVIDER_CODE, correlationId);
-    this.logger.log(`[DIAG] syncTenant tenant=${tenantId}: ProviderSyncLog aberto (logId=${logId}), buscando OlistConnection.`);
     let candidatesFound = 0;
     let candidatesApplied = 0;
 
     try {
       const record = await this.connections.findByTenant(tenantId);
-      this.logger.log(`[DIAG] syncTenant tenant=${tenantId}: OlistConnection encontrada (isActive=${record?.isActive}), decriptando token.`);
       if (!record || !record.isActive) throw new Error('Conexão com o Olist inativa ou não encontrada.');
       const apiToken = this.credentials.decrypt(record.apiTokenEnc);
-      this.logger.log(`[DIAG] syncTenant tenant=${tenantId}: token decriptado, chamando fetchAllActiveProductDetails.`);
+
+      // RETOMADA (06/10/2026 — causa raiz real documentada em
+      // OlistApiClient.REQUEST_TIMEOUT_MS): `precifica-saas` roda no plano
+      // Free do Render, que mata o processo depois de 15min sem tráfego
+      // externo, e o catálogo real leva ~40min pra sincronizar inteiro — ou
+      // seja, uma interrupção no meio é o caso NORMAL, não a exceção. Se
+      // `record.resumeFromPage` tiver um checkpoint de uma tentativa
+      // anterior que não terminou de buscar, continua dali em vez de
+      // escanear o catálogo inteiro de novo. `resumePage` é uma variável
+      // local (não `record.resumeFromPage` direto) porque o callback abaixo
+      // a atualiza a cada página — se o `withRetry` logo abaixo re-tentar a
+      // busca inteira por um erro transitório, a nova tentativa já começa
+      // da página mais recente, não da original.
+      let resumePage = record.resumeFromPage ?? undefined;
 
       const { details: rawProducts, failedCount } = await this.withRetry(() =>
-        this.client.fetchAllActiveProductDetails(apiToken),
+        this.client.fetchAllActiveProductDetails(apiToken, {
+          startPage: resumePage,
+          onPageFetched: async (nextPage) => {
+            resumePage = nextPage;
+            await this.connections.saveProgress(tenantId, nextPage);
+          },
+        }),
       );
-      this.logger.log(`[DIAG] syncTenant tenant=${tenantId}: fetchAllActiveProductDetails voltou — ${rawProducts.length} produto(s), ${failedCount} falha(s).`);
+      // Busca completa — não há mais nada a retomar NESTA tentativa. Limpa
+      // mesmo que o PROCESSAMENTO abaixo (upsert no catálogo, fotos) venha a
+      // falhar depois: uma interrupção a partir daqui reinicia o catálogo do
+      // zero, igual ao comportamento de antes desta mudança — a fase de
+      // busca (rede, ~40min) é a que domina o tempo total e a que de fato
+      // sofria interrupção; vale o custo de não cobrir também a fase de
+      // processamento, bem mais rápida, em troca de nunca arriscar um
+      // checkpoint que pule produtos nunca processados.
+      await this.connections.saveProgress(tenantId, null);
       candidatesFound = rawProducts.length + failedCount;
       await this.health.recordSuccess(PROVIDER_CODE);
 
