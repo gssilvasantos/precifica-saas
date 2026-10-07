@@ -12,6 +12,7 @@ import {
   RawRuleCandidate,
 } from '../../../../../shared/contracts/marketplace-provider.contract';
 import { MercadoLivreApiClient } from './mercado-livre-api.client';
+import { MercadoLivreConnectionService } from '../../../application/mercado-livre-connection.service';
 import { buildFeeScopeKey } from '../../../domain/marketplace-rule.entity';
 
 // Grade de preços sondada para descobrir as FAIXAS de comissão
@@ -66,11 +67,35 @@ export class MercadoLivreFeeRuleProvider
 
   private readonly logger = new Logger(MercadoLivreFeeRuleProvider.name);
 
-  constructor(private readonly client: MercadoLivreApiClient) {}
+  constructor(
+    private readonly client: MercadoLivreApiClient,
+    private readonly connections: MercadoLivreConnectionService,
+  ) {}
+
+  // Bug de produção (07/10/2026): /sites/MLB/categories e listing_prices
+  // passaram a responder 403 para chamada anônima (mesmo comportamento que
+  // quebrou o radar em 19/09) — nenhuma regra de comissão do ML era
+  // importada desde julho, e sem regra o motor de preço não decide. A taxa
+  // é global (não depende do vendedor), então serve o token de QUALQUER
+  // conexão ativa. Sem nenhuma, segue anônimo e deixa o 403 aparecer no log.
+  private async resolveAnyAccessToken(): Promise<string | undefined> {
+    const tenantIds = await this.connections.listActiveTenantIds();
+    for (const tenantId of tenantIds) {
+      try {
+        return await this.connections.getValidAccessToken(tenantId);
+      } catch (error) {
+        this.logger.warn(
+          `Token do Mercado Livre do tenant ${tenantId} indisponível para importar taxas — tentando a próxima conexão. ${(error as Error).message}`,
+        );
+      }
+    }
+    this.logger.warn('Nenhuma conexão ativa com o Mercado Livre — importando taxas sem autenticação (pode retornar 403).');
+    return undefined;
+  }
 
   async healthCheck(): Promise<ProviderHealthStatus> {
     try {
-      await this.client.fetchTopLevelCategories();
+      await this.client.fetchTopLevelCategories(await this.resolveAnyAccessToken());
       return { status: 'UP' };
     } catch (error) {
       return { status: 'DOWN', message: (error as Error).message };
@@ -99,14 +124,15 @@ export class MercadoLivreFeeRuleProvider
   }
 
   async fetchFeeRules(_ctx: FetchContext): Promise<RawRuleCandidate[]> {
-    const categories = await this.client.fetchTopLevelCategories();
+    const accessToken = await this.resolveAnyAccessToken();
+    const categories = await this.client.fetchTopLevelCategories(accessToken);
     const fetchedAt = new Date();
     const candidates: RawRuleCandidate[] = [];
 
     for (const category of categories) {
       for (const listingTypeId of LISTING_TYPES) {
         try {
-          const candidate = await this.buildCandidateForListingType(category.id, listingTypeId, fetchedAt);
+          const candidate = await this.buildCandidateForListingType(category.id, listingTypeId, fetchedAt, accessToken);
           if (candidate) candidates.push(candidate);
         } catch (error) {
           // Resiliência parcial: uma categoria/tipo com erro não derruba o
@@ -128,11 +154,12 @@ export class MercadoLivreFeeRuleProvider
     categoryId: string,
     listingTypeId: string,
     fetchedAt: Date,
+    accessToken?: string,
   ): Promise<RawRuleCandidate | null> {
     const probes: { price: number; commissionPct: number; fixedFeeAmount: number }[] = [];
 
     for (const price of PROBE_PRICES) {
-      const prices = await this.client.fetchListingPrices(categoryId, price);
+      const prices = await this.client.fetchListingPrices(categoryId, price, accessToken);
       const listing = prices.find((p) => p.listing_type_id === listingTypeId);
 
       // Tipo de anúncio indisponível naquela categoria é situação normal

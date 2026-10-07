@@ -1,4 +1,4 @@
-import { groupProbesIntoTiers } from './mercado-livre-fee-rule.provider';
+import { groupProbesIntoTiers, MercadoLivreFeeRuleProvider } from './mercado-livre-fee-rule.provider';
 import { validateFeeRulePayload } from '../../../domain/rule-payload-validators';
 
 // A sondagem de preços transforma pontos amostrados numa tabela contínua —
@@ -64,5 +64,58 @@ describe('groupProbesIntoTiers', () => {
     ]);
 
     expect(() => validateFeeRulePayload({ tiers, commissionBase: 'ITEM_PRICE' })).not.toThrow();
+  });
+});
+
+// Bug de produção (07/10/2026): a API de categorias e de listing_prices do
+// Mercado Livre passou a responder 403 para chamada anônima — o mesmo
+// comportamento que quebrou o radar em 19/09. Desde julho nenhuma regra de
+// comissão do ML foi importada, e sem regra o motor de preço se recusa a
+// decidir. As regras do ML são globais (não dependem do vendedor), então
+// basta o token de QUALQUER conexão ativa.
+describe('MercadoLivreFeeRuleProvider — autenticação da importação de taxas', () => {
+  function build(tenantTokens: Record<string, string | Error>) {
+    const client = {
+      fetchTopLevelCategories: jest.fn().mockResolvedValue([{ id: 'MLB1000', name: 'Eletrônicos' }]),
+      fetchListingPrices: jest.fn().mockResolvedValue([
+        { listing_type_id: 'gold_special', sale_fee_details: { percentage_fee: 12, fixed_fee: 0 } },
+      ]),
+    };
+    const connections = {
+      listActiveTenantIds: jest.fn().mockResolvedValue(Object.keys(tenantTokens)),
+      getValidAccessToken: jest.fn(async (tenantId: string) => {
+        const token = tenantTokens[tenantId];
+        if (token instanceof Error) throw token;
+        return token;
+      }),
+    };
+    const provider = new MercadoLivreFeeRuleProvider(client as never, connections as never);
+    return { provider, client, connections };
+  }
+
+  it('usa o token de uma conexão ativa em categorias e em listing_prices', async () => {
+    const { provider, client } = build({ 'tenant-a': 'token-a' });
+
+    const candidates = await provider.fetchFeeRules({ marketplaceCode: 'MERCADO_LIVRE' });
+
+    expect(client.fetchTopLevelCategories).toHaveBeenCalledWith('token-a');
+    expect(client.fetchListingPrices).toHaveBeenCalledWith('MLB1000', expect.any(Number), 'token-a');
+    expect(candidates.length).toBeGreaterThan(0);
+  });
+
+  it('pula a conexão cujo token não renova e usa a próxima', async () => {
+    const { provider, client } = build({ 'tenant-a': new Error('refresh_token expirado'), 'tenant-b': 'token-b' });
+
+    await provider.fetchFeeRules({ marketplaceCode: 'MERCADO_LIVRE' });
+
+    expect(client.fetchTopLevelCategories).toHaveBeenCalledWith('token-b');
+  });
+
+  it('sem nenhuma conexão ativa, segue sem token (comportamento anterior)', async () => {
+    const { provider, client } = build({});
+
+    await provider.fetchFeeRules({ marketplaceCode: 'MERCADO_LIVRE' });
+
+    expect(client.fetchTopLevelCategories).toHaveBeenCalledWith(undefined);
   });
 });

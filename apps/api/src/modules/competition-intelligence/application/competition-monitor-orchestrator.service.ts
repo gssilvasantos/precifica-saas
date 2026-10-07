@@ -28,6 +28,7 @@ import {
 } from '../../../shared/sync-ops/ports/provider-health-repository.port';
 import { calculateOpportunity, InvalidOpportunityInputError, OpportunityResult } from '../domain/opportunity-calculator';
 import { COMPETITION_EVENTS } from '../domain/events/competition-events';
+import { interleaveByTenant } from '../domain/monitoring-queue';
 
 export const PROVIDER_CODE = 'COMPETITION_RADAR_MONITOR';
 
@@ -47,6 +48,13 @@ export const PROVIDER_CODE = 'COMPETITION_RADAR_MONITOR';
 export class CompetitionMonitorOrchestrator {
   private readonly logger = new Logger(CompetitionMonitorOrchestrator.name);
 
+  // Trava por instância (07/10/2026): com ~1.700 monitoramentos um ciclo
+  // passa dos 10 minutos do cron, e sem ela um ciclo novo começava por cima
+  // do anterior — os dois disputavam a cota do ML e nenhum terminava.
+  // Mesmo padrão de providersInFlight em OrderSyncOrchestrator; só vale para
+  // uma instância, que é a topologia atual.
+  private running = false;
+
   constructor(
     private readonly radars: CompetitionRadarRegistry,
     @Inject(MONITORED_LISTING_REPOSITORY) private readonly listings: MonitoredListingRepository,
@@ -59,9 +67,22 @@ export class CompetitionMonitorOrchestrator {
   ) {}
 
   async runAll(): Promise<void> {
+    if (this.running) {
+      this.logger.warn('Ciclo de monitoramento de concorrência anterior ainda em andamento — ignorando este disparo.');
+      return;
+    }
+    this.running = true;
+    try {
+      await this.runCycle();
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async runCycle(): Promise<void> {
     const correlationId = randomUUID();
     const logId = await this.syncLogs.start(PROVIDER_CODE, correlationId);
-    const active = await this.listings.findAllActive();
+    const active = interleaveByTenant(await this.listings.findAllActive());
     let found = 0;
     let applied = 0;
 

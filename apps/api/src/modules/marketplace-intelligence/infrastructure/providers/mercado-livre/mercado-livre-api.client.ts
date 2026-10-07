@@ -271,8 +271,11 @@ export class MercadoLivreApiClient {
     }
   }
 
-  async fetchTopLevelCategories(): Promise<MlCategory[]> {
-    const response = await this.request(`${BASE_URL}/sites/${SITE_ID}/categories`);
+  async fetchTopLevelCategories(accessToken?: string): Promise<MlCategory[]> {
+    const response = await this.request(
+      `${BASE_URL}/sites/${SITE_ID}/categories`,
+      accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined,
+    );
     if (!response.ok) {
       throw new Error(`Mercado Livre categories API retornou ${response.status}`);
     }
@@ -280,9 +283,9 @@ export class MercadoLivreApiClient {
     return data;
   }
 
-  async fetchListingPrices(categoryId: string, referencePrice: number): Promise<MlListingPrice[]> {
+  async fetchListingPrices(categoryId: string, referencePrice: number, accessToken?: string): Promise<MlListingPrice[]> {
     const url = `${BASE_URL}/sites/${SITE_ID}/listing_prices?price=${referencePrice}&category_id=${categoryId}`;
-    const response = await this.request(url);
+    const response = await this.request(url, accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined);
     if (!response.ok) {
       throw new Error(`Mercado Livre listing_prices API retornou ${response.status} para ${categoryId}`);
     }
