@@ -203,6 +203,51 @@ export interface MlOAuthTokenResponse {
 // persistir algo incerto. O fluxo OAuth2 (token exchange/refresh) segue o
 // padrão RFC 6749 documentado pelo ML à risca (grant_type, form-urlencoded);
 // só não foi exercitado contra credenciais reais de app aqui.
+
+// --- Tipos do planejador Buy Box + Campanhas (07/10/2026) ---
+export interface MlItemPricingContext extends MlItemDetail {
+  sellerId: string | null;
+  originalPrice: number | null;
+  availableQuantity: number;
+  listingTypeId: string | null;
+}
+
+export interface MlCatalogListingSummary {
+  id: string;
+  title: string | null;
+  price: number | null;
+  status: string | null;
+  availableQuantity: number;
+  isCatalogListing: boolean;
+  catalogProductId: string | null;
+  skuCode: string | null;
+}
+
+export interface MlPriceToWin {
+  status: string | null; // winning | sharing_first_place | competing | listed
+  priceToWin: number | null;
+  currentPrice: number | null;
+  catalogProductId: string | null;
+  reasons: string[];
+  winnerItemId: string | null;
+  winnerPrice: number | null;
+}
+
+export interface MlItemPromotion {
+  id: string;
+  type: string; // SELLER_CAMPAIGN | DEAL | SMART | ...
+  subType: string | null;
+  status: string; // candidate | started | pending | finished
+  name: string | null;
+  price: number | null;
+  originalPrice: number | null;
+  minDiscountedPrice: number | null;
+  maxDiscountedPrice: number | null;
+  suggestedDiscountedPrice: number | null;
+  startDate: string | null;
+  finishDate: string | null;
+}
+
 @Injectable()
 export class MercadoLivreApiClient {
   private readonly logger = new Logger(MercadoLivreApiClient.name);
@@ -984,5 +1029,206 @@ export class MercadoLivreApiClient {
       throw new Error(`Mercado Livre POST /items retornou HTTP ${response.status}: ${detail}`);
     }
     return data;
+  }
+
+  // --- Buy Box + Campanhas do vendedor (07/10/2026, a pedido do Gui) ---
+  //
+  // Base do planejador de catálogo (promotion-intelligence/application/
+  // ml-catalog-campaign.service.ts), que substitui a rotina manual que o
+  // Gui fazia no Mercado Turbo. AVISO DE HONESTIDADE (mesmo padrão das
+  // outras seções deste client): os shapes abaixo vêm da documentação
+  // pública (catalog-competition, seller-campaigns, traditional-campaigns)
+  // e foram escritos SEM uma chamada real neste sandbox — o parse é
+  // defensivo (todo campo opcional) e campos desconhecidos viram null.
+
+  // Dados do anúncio que o planejador precisa e que MlItemDetail não traz
+  // (estoque, tipo de anúncio, seller_id dono do item).
+  async fetchItemPricingContext(itemId: string, accessToken: string): Promise<MlItemPricingContext> {
+    const response = await this.request(`${BASE_URL}/items/${itemId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      throw new Error(`Mercado Livre GET /items/${itemId} retornou HTTP ${response.status}`);
+    }
+    const data = (await response.json()) as MlRawItemBody & {
+      seller_id?: number | null;
+      original_price?: number | null;
+      available_quantity?: number | null;
+      listing_type_id?: string | null;
+    };
+    const detail = this.toItemDetail(data);
+    return {
+      ...detail,
+      sellerId: data.seller_id != null ? String(data.seller_id) : null,
+      originalPrice: typeof data.original_price === 'number' ? data.original_price : null,
+      availableQuantity: typeof data.available_quantity === 'number' ? data.available_quantity : 0,
+      listingTypeId: data.listing_type_id ?? null,
+    };
+  }
+
+  // GET /items/{id}/price_to_win?version=v2 — status da disputa de catálogo
+  // e o preço que faria o anúncio ganhar.
+  async fetchPriceToWin(itemId: string, accessToken: string): Promise<MlPriceToWin> {
+    const response = await this.request(`${BASE_URL}/items/${itemId}/price_to_win?siteId=${SITE_ID}&version=v2`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      throw new Error(`Mercado Livre GET /items/${itemId}/price_to_win retornou HTTP ${response.status}`);
+    }
+    const data = (await response.json()) as {
+      status?: string | null;
+      price_to_win?: number | null;
+      current_price?: number | null;
+      catalog_product_id?: string | null;
+      reason?: string[] | null;
+      winner?: { item_id?: string | null; price?: number | null } | null;
+    };
+    return {
+      status: data.status ?? null,
+      priceToWin: typeof data.price_to_win === 'number' ? data.price_to_win : null,
+      currentPrice: typeof data.current_price === 'number' ? data.current_price : null,
+      catalogProductId: data.catalog_product_id ?? null,
+      reasons: Array.isArray(data.reason) ? data.reason : [],
+      winnerItemId: data.winner?.item_id ?? null,
+      winnerPrice: typeof data.winner?.price === 'number' ? data.winner.price : null,
+    };
+  }
+
+  // GET /seller-promotions/items/{id}?app_version=v2 — todas as promoções em
+  // que o anúncio participa ou é candidato.
+  async fetchItemPromotions(itemId: string, accessToken: string): Promise<MlItemPromotion[]> {
+    const response = await this.request(`${BASE_URL}/seller-promotions/items/${itemId}?app_version=v2`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      throw new Error(`Mercado Livre GET /seller-promotions/items/${itemId} retornou HTTP ${response.status}`);
+    }
+    const data = (await response.json()) as unknown;
+    const list = Array.isArray(data) ? data : Array.isArray((data as { results?: unknown[] })?.results) ? (data as { results: unknown[] }).results : [];
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : null);
+    return list
+      .filter((raw): raw is Record<string, unknown> => typeof raw === 'object' && raw !== null)
+      .map((raw) => ({
+        id: str(raw.id) ?? '',
+        type: str(raw.type) ?? 'UNKNOWN',
+        subType: str(raw.sub_type),
+        status: str(raw.status) ?? 'unknown',
+        name: str(raw.name),
+        price: num(raw.price),
+        originalPrice: num(raw.original_price),
+        minDiscountedPrice: num(raw.min_discounted_price),
+        maxDiscountedPrice: num(raw.max_discounted_price),
+        suggestedDiscountedPrice: num(raw.suggested_discounted_price),
+        startDate: str(raw.start_date),
+        finishDate: str(raw.finish_date),
+      }))
+      .filter((p) => p.id !== '');
+  }
+
+  // POST /seller-promotions/items/{id}?app_version=v2 — ESCRITA REAL: coloca
+  // o anúncio numa campanha com o preço promocional informado. Só chamado
+  // depois de o serviço recalcular a margem no servidor e ela ficar acima do
+  // mínimo (nunca confia no preço vindo do cliente sem recalcular). O próprio
+  // ML recusa item de outro vendedor (token escopado).
+  async joinItemPromotion(
+    itemId: string,
+    accessToken: string,
+    input: { promotionId: string; promotionType: string; dealPrice: number },
+  ): Promise<{ price: number | null; originalPrice: number | null }> {
+    const response = await this.request(`${BASE_URL}/seller-promotions/items/${itemId}?app_version=v2`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        promotion_id: input.promotionId,
+        promotion_type: input.promotionType,
+        deal_price: input.dealPrice,
+      }),
+    });
+    const data = (await response.json().catch(() => ({}))) as {
+      price?: number;
+      original_price?: number;
+      message?: string;
+      error?: string;
+      cause?: unknown[];
+    };
+    if (!response.ok) {
+      const detail = data.message ?? data.error ?? JSON.stringify(data.cause ?? {});
+      throw new Error(`Mercado Livre POST /seller-promotions/items/${itemId} retornou HTTP ${response.status}: ${detail}`);
+    }
+    return {
+      price: typeof data.price === 'number' ? data.price : null,
+      originalPrice: typeof data.original_price === 'number' ? data.original_price : null,
+    };
+  }
+
+  // Resumo de vários anúncios (multiget, 20 por chamada) só com o que a
+  // listagem do planejador precisa: é catálogo? está ativo? tem estoque?
+  async fetchCatalogListingSummaries(itemIds: string[], accessToken: string): Promise<MlCatalogListingSummary[]> {
+    const BATCH_SIZE = 20;
+    const results: MlCatalogListingSummary[] = [];
+    for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
+      const batchIds = itemIds.slice(i, i + BATCH_SIZE);
+      const url =
+        `${BASE_URL}/items?ids=${batchIds.join(',')}` +
+        '&attributes=id,title,price,status,available_quantity,catalog_listing,catalog_product_id,seller_custom_field,attributes';
+      const response = await this.request(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!response.ok) {
+        throw new Error(`Mercado Livre /items (multiget) retornou HTTP ${response.status} para o lote iniciando em ${batchIds[0]}`);
+      }
+      const data = (await response.json()) as {
+        code: number;
+        body?: MlRawItemBody & { available_quantity?: number | null };
+      }[];
+      for (const entry of data) {
+        if (entry.code !== 200 || !entry.body) continue;
+        results.push({
+          id: entry.body.id,
+          title: entry.body.title ?? null,
+          price: typeof entry.body.price === 'number' ? entry.body.price : null,
+          status: entry.body.status ?? null,
+          availableQuantity: typeof entry.body.available_quantity === 'number' ? entry.body.available_quantity : 0,
+          isCatalogListing: entry.body.catalog_listing === true,
+          catalogProductId: entry.body.catalog_product_id ?? null,
+          skuCode: this.resolveSellerSku(entry.body),
+        });
+      }
+    }
+    return results;
+  }
+
+  // Tarifa de venda do ML para um preço/categoria/tipo de anúncio — o valor
+  // que o Mercado Turbo mostra como "Tarifa de Venda".
+  async fetchSaleFeeAmount(categoryId: string, price: number, listingTypeId: string): Promise<number> {
+    const url =
+      `${BASE_URL}/sites/${SITE_ID}/listing_prices?price=${price}` +
+      `&category_id=${encodeURIComponent(categoryId)}&listing_type_id=${encodeURIComponent(listingTypeId)}`;
+    const response = await this.request(url);
+    if (!response.ok) {
+      throw new Error(`Mercado Livre listing_prices retornou HTTP ${response.status} para ${categoryId}/${listingTypeId}`);
+    }
+    const data = (await response.json()) as MlListingPrice | MlListingPrice[];
+    const entry = Array.isArray(data) ? data.find((d) => d.listing_type_id === listingTypeId) ?? data[0] : data;
+    if (!entry || typeof entry.sale_fee_amount !== 'number') {
+      throw new Error(`listing_prices sem sale_fee_amount para ${categoryId}/${listingTypeId} a R$ ${price}`);
+    }
+    return entry.sale_fee_amount;
+  }
+
+  // Custo de frete pago pelo VENDEDOR para enviar este anúncio (o "Frete ML"
+  // do Mercado Turbo). GET /users/{seller}/shipping_options/free?item_id=...
+  // → coverage.all_country.list_cost.
+  async fetchSellerShippingCost(sellerId: string, itemId: string, accessToken: string): Promise<number> {
+    const url = `${BASE_URL}/users/${sellerId}/shipping_options/free?item_id=${itemId}`;
+    const response = await this.request(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!response.ok) {
+      throw new Error(`Mercado Livre shipping_options/free retornou HTTP ${response.status} para ${itemId}`);
+    }
+    const data = (await response.json()) as { coverage?: { all_country?: { list_cost?: number } } };
+    const cost = data.coverage?.all_country?.list_cost;
+    if (typeof cost !== 'number') {
+      throw new Error(`shipping_options/free sem coverage.all_country.list_cost para ${itemId}`);
+    }
+    return cost;
   }
 }

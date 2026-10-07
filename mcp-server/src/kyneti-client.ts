@@ -152,6 +152,29 @@ export class KyneteClient {
       throw new KyneteApiError(`Kyneti API respondeu ${status ?? 'erro de rede'} em ${path}: ${extractErrorMessage(error)}`, status);
     }
   }
+
+  // v3 (07/10/2026) — POST para inscrever anúncio em campanha do ML. Mesmo
+  // padrão de retry de 401 do patch.
+  async post<T>(path: string, body: unknown): Promise<T> {
+    await this.ensureToken();
+    try {
+      const { data } = await this.http.post<T>(path, body, {
+        headers: { Authorization: `Bearer ${this.token}` },
+      });
+      return data;
+    } catch (error) {
+      const status = (error as AxiosError).response?.status;
+      if (status === 401) {
+        this.token = null;
+        await this.ensureToken();
+        const { data } = await this.http.post<T>(path, body, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
+        return data;
+      }
+      throw new KyneteApiError(`Kyneti API respondeu ${status ?? 'erro de rede'} em ${path}: ${extractErrorMessage(error)}`, status);
+    }
+  }
 }
 
 function extractErrorMessage(error: unknown): string {
