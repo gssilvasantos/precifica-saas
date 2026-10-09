@@ -148,3 +148,17 @@ Root Directory `mcp-server`.
   nenhum outro atributo. Uma escrita malsucedida (SKU errado) não tem
   "desfazer" automático: corrige-se chamando a mesma ferramenta de novo com
   o SKU certo.
+
+
+## v3 (07/10/2026) — Buy Box + Campanhas de catálogo do Mercado Livre
+
+Três ferramentas novas (ver `docs/product/ml-catalogo-buybox-campanhas.md`):
+
+- `kyneti_list_ml_catalog_items` (leitura)
+- `kyneti_plan_ml_catalog_campaigns` (leitura)
+- `kyneti_join_ml_promotion` (**escrita real** — mesmas travas da escrita de
+  SKU: PRICING_EDITOR + `MCP_ALLOW_WRITES=true` + `confirm:true`)
+
+**Passo extra no Kyneti:** na tela de Equipe, conceda o módulo
+**PROMOTIONS** à conta de serviço do MCP. Sem isso as três ferramentas
+respondem 403.

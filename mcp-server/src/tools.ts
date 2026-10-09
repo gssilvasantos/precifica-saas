@@ -232,6 +232,53 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
     },
   );
 
+  // --- v3 (07/10/2026): Buy Box + Campanhas de catálogo do Mercado Livre ---
+  // Substitui a rotina manual do Gui no Mercado Turbo. Leitura aqui; a
+  // escrita (inscrever em campanha) fica abaixo, atrás de writesEnabled.
+  server.registerTool(
+    'kyneti_list_ml_catalog_items',
+    {
+      description:
+        'Lista os anúncios de CATÁLOGO ativos do Mercado Livre da conta (a aba "Catálogo" do Mercado Turbo), com estoque, preço e SKU. Paginado. Fonte: GET /promotion-intelligence/mercado-livre/catalog/items.',
+      inputSchema: {
+        offset: z.number().int().min(0).optional().describe('Início da página (padrão 0)'),
+        limit: z.number().int().min(1).max(100).optional().describe('Itens por página (padrão 50, máx. 100)'),
+      },
+    },
+    async ({ offset, limit }) => {
+      try {
+        return toResult(await client.get('/promotion-intelligence/mercado-livre/catalog/items', { offset, limit }));
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    'kyneti_plan_ml_catalog_campaigns',
+    {
+      description:
+        'Planeja, para UM anúncio de catálogo do ML, em quais campanhas (Campanha do Vendedor e Tradicional: Outubro, Novembro, Dezembro, 10.10, 11.11...) entrar e a que preço. Regra: preço da buy box se a margem de contribuição ficar >= minMarginPct (padrão 5%); senão mantém o preço atual se der >= mínimo; senão não entra. Sem estoque = pula. Só leitura — não altera nada. Margem = preço − custo − imposto − tarifa ML − frete ML (igual ao Mercado Turbo). Fonte: GET /promotion-intelligence/mercado-livre/catalog/items/:itemId/plan.',
+      inputSchema: {
+        itemId: z.string().regex(/^MLB\d{6,15}$/).describe('Id do anúncio, ex.: MLB7393870900'),
+        minMarginPct: z.number().min(0).max(100).optional().describe('Margem mínima em % (padrão 5)'),
+        taxRatePct: z.number().min(0).max(99.99).optional().describe('Alíquota de imposto em % para sobrescrever a calculada (ex.: 7.3)'),
+      },
+    },
+    async ({ itemId, minMarginPct, taxRatePct }) => {
+      try {
+        return toResult(
+          await client.get(`/promotion-intelligence/mercado-livre/catalog/items/${encodeURIComponent(itemId)}/plan`, {
+            minMarginPct,
+            taxRatePct,
+          }),
+        );
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
   if (!writesEnabled) return;
 
   // --- v2: Mercado Livre — ESCRITA real no anúncio (SELLER_SKU) ---
@@ -260,6 +307,39 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
       try {
         return toResult(
           await client.patch(`/marketplace-intelligence/mercado-livre/items/${encodeURIComponent(itemId)}/sku`, { skuCode }),
+        );
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
+  // --- v3: inscrever anúncio em campanha do ML (ESCRITA real) ---
+  // Mesmas camadas da escrita de SKU (RBAC PRICING_EDITOR + MCP_ALLOW_WRITES
+  // + confirm:true). O backend recalcula a margem e recusa abaixo do mínimo.
+  server.registerTool(
+    'kyneti_join_ml_promotion',
+    {
+      description:
+        'ESCREVE no Mercado Livre real: inscreve um anúncio numa campanha (SELLER_CAMPAIGN ou DEAL) com o preço promocional informado. Use kyneti_plan_ml_catalog_campaigns antes e passe o plannedPrice de uma campanha com action JOIN. O servidor recalcula a margem e recusa se ficar abaixo de minMarginPct (padrão 5%), se o preço estiver fora da faixa da campanha, se o item estiver sem estoque ou já participar. Exige confirm:true. Fonte: POST /promotion-intelligence/mercado-livre/catalog/items/:itemId/promotions.',
+      inputSchema: {
+        itemId: z.string().regex(/^MLB\d{6,15}$/).describe('Id do anúncio, ex.: MLB7393870900'),
+        promotionId: z.string().min(1).max(64).describe('promotionId vindo do plano'),
+        dealPrice: z.number().positive().describe('Preço promocional (plannedPrice do plano)'),
+        minMarginPct: z.number().min(0).max(100).optional().describe('Margem mínima em % (padrão 5)'),
+        taxRatePct: z.number().min(0).max(99.99).optional().describe('Mesma alíquota usada no plano, se foi sobrescrita'),
+        confirm: z.literal(true).describe('Precisa ser exatamente true — escrita real e intencional em produção.'),
+      },
+    },
+    async ({ itemId, promotionId, dealPrice, minMarginPct, taxRatePct }) => {
+      try {
+        return toResult(
+          await client.post(`/promotion-intelligence/mercado-livre/catalog/items/${encodeURIComponent(itemId)}/promotions`, {
+            promotionId,
+            dealPrice,
+            ...(minMarginPct !== undefined ? { minMarginPct } : {}),
+            ...(taxRatePct !== undefined ? { taxRatePct } : {}),
+          }),
         );
       } catch (error) {
         return toErrorResult(error);

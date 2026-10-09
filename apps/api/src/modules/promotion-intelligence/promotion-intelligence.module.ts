@@ -6,6 +6,8 @@ import { PrismaPromotionCampaignRepository } from './infrastructure/prisma-promo
 import { PrismaPromotionEnrollmentRepository } from './infrastructure/prisma-promotion-enrollment.repository';
 
 import { PromotionCampaignsController } from './interface/controllers/promotion-campaigns.controller';
+import { MlCatalogCampaignsController } from './interface/controllers/ml-catalog-campaigns.controller';
+import { MlCatalogCampaignService } from './application/ml-catalog-campaign.service';
 
 import { PROMOTION_CAMPAIGN_REPOSITORY } from './application/ports/promotion-campaign-repository.port';
 import { PROMOTION_ENROLLMENT_REPOSITORY } from './application/ports/promotion-enrollment-repository.port';
@@ -13,6 +15,8 @@ import { PROMOTION_ENROLLMENT_REPOSITORY } from './application/ports/promotion-e
 import { CatalogModule } from '../catalog/catalog.module';
 import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marketplace-intelligence.module';
 import { LogisticsFulfillmentModule } from '../logistics-fulfillment/logistics-fulfillment.module';
+// Alíquota por produto para o planejador Buy Box + Campanhas (07/10/2026).
+import { TaxIntelligenceModule } from '../tax-intelligence/public-api';
 
 // "Motor de Cálculo de Margem" para promoções (Sprint 26) — ver
 // docs/promotion-intelligence-architecture.md. Bounded context PRÓPRIO:
@@ -27,11 +31,12 @@ import { LogisticsFulfillmentModule } from '../logistics-fulfillment/logistics-f
 // dois aqui criaria duas fontes da verdade divergentes. Sem dependência
 // circular: nenhum dos três módulos importados conhece este de volta.
 @Module({
-  imports: [CatalogModule, MarketplaceIntelligenceModule, LogisticsFulfillmentModule],
-  controllers: [PromotionCampaignsController],
+  imports: [CatalogModule, MarketplaceIntelligenceModule, LogisticsFulfillmentModule, TaxIntelligenceModule],
+  controllers: [PromotionCampaignsController, MlCatalogCampaignsController],
   providers: [
     PromotionCampaignService,
     PromotionIntelligenceService,
+    MlCatalogCampaignService,
 
     { provide: PROMOTION_CAMPAIGN_REPOSITORY, useClass: PrismaPromotionCampaignRepository },
     { provide: PROMOTION_ENROLLMENT_REPOSITORY, useClass: PrismaPromotionEnrollmentRepository },
