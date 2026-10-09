@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -117,6 +119,11 @@ function toCampaignOption(p: MlItemPromotion): CampaignOption {
 @Injectable()
 export class MlCatalogCampaignService {
   private readonly logger = new Logger(MlCatalogCampaignService.name);
+  // Trava de duplo envio (tenant+anúncio+campanha) enquanto uma inscrição está em
+  // andamento. Em memória: protege requisições concorrentes dentro da mesma
+  // instância da API (hoje 1 instância no Render). Com mais instâncias, trocar
+  // por trava no banco — limitação conhecida, registrada em docs/product.
+  private readonly joinsInFlight = new Set<string>();
 
   constructor(
     @Inject(PRODUCT_CATALOG_READER) private readonly catalog: ProductCatalogReader,
@@ -184,10 +191,40 @@ export class MlCatalogCampaignService {
     itemId: string,
     input: { promotionId: string; dealPrice: number; minMarginPct?: number; taxRatePct?: number },
   ): Promise<JoinResult> {
+    // Falha fechada (fail-closed): sem ML_CAMPAIGN_WRITES_ENABLED=true no ambiente da
+    // API, nenhuma inscrição é escrita no Mercado Livre, por REST ou MCP.
+    if (process.env.ML_CAMPAIGN_WRITES_ENABLED !== 'true') {
+      throw new ForbiddenException({
+        code: 'ML_CAMPAIGN_WRITES_DISABLED',
+        message: 'Escrita em campanhas do Mercado Livre está desativada neste ambiente.',
+      });
+    }
     const minMarginPct = this.resolveMinMargin(input.minMarginPct);
     const dealPrice = round2(input.dealPrice);
     if (!(dealPrice > 0)) throw new BadRequestException('dealPrice deve ser maior que zero.');
 
+    const lockKey = `${tenantId}:${itemId}:${input.promotionId}`;
+    if (this.joinsInFlight.has(lockKey)) {
+      throw new ConflictException({
+        code: 'ML_CAMPAIGN_JOIN_IN_PROGRESS',
+        message: `Já existe uma inscrição em andamento do anúncio ${itemId} na campanha ${input.promotionId}.`,
+      });
+    }
+    this.joinsInFlight.add(lockKey);
+    try {
+      return await this.joinLocked(tenantId, itemId, input, minMarginPct, dealPrice);
+    } finally {
+      this.joinsInFlight.delete(lockKey);
+    }
+  }
+
+  private async joinLocked(
+    tenantId: string,
+    itemId: string,
+    input: { promotionId: string; taxRatePct?: number },
+    minMarginPct: number,
+    dealPrice: number,
+  ): Promise<JoinResult> {
     const ctx = await this.load(tenantId, itemId, input.taxRatePct);
     if (ctx.snapshot.availableQuantity <= 0) {
       throw new UnprocessableEntityException(`Anúncio ${itemId} sem estoque — a rotina não altera preço de item sem estoque.`);
@@ -242,8 +279,9 @@ export class MlCatalogCampaignService {
 
   private resolveMinMargin(value: number | undefined): number {
     const v = value ?? DEFAULT_MIN_MARGIN_PCT;
-    if (!Number.isFinite(v) || v < 0 || v > 100) {
-      throw new BadRequestException('minMarginPct deve estar entre 0 e 100.');
+    // Piso fixo: o cliente (usuário ou LLM) pode exigir margem MAIOR, nunca menor.
+    if (!Number.isFinite(v) || v < DEFAULT_MIN_MARGIN_PCT || v > 100) {
+      throw new BadRequestException(`minMarginPct deve estar entre ${DEFAULT_MIN_MARGIN_PCT} e 100.`);
     }
     return v;
   }

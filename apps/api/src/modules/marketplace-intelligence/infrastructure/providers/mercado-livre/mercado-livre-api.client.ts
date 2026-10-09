@@ -288,7 +288,11 @@ export class MercadoLivreApiClient {
   // timeout de rede (ver aviso acima — igualmente transitório, vale a
   // pena tentar de novo). Qualquer outro status (404/500/...) é devolvido
   // normalmente — cada método decide como reagir, exatamente como antes.
-  private async request(url: string, init?: RequestInit): Promise<Response> {
+  // retryOnTimeout=false: para POST não idempotente (ex.: inscrição em campanha) um
+  // timeout NÃO prova que o ML não processou — reenviar poderia duplicar o efeito.
+  // Rate limit (429) continua retentando: o ML rejeitou antes de processar.
+  private async request(url: string, init?: RequestInit, opts: { retryOnTimeout?: boolean } = {}): Promise<Response> {
+    const retryOnTimeout = opts.retryOnTimeout ?? true;
     return withRetry(
       async () => {
         const response = await this.rateLimiter.schedule(() => this.fetchWithTimeout(url, init));
@@ -297,7 +301,7 @@ export class MercadoLivreApiClient {
         }
         return response;
       },
-      { shouldRetry: (error) => isRateLimitError(error) || isTimeoutError(error) },
+      { shouldRetry: (error) => isRateLimitError(error) || (retryOnTimeout && isTimeoutError(error)) },
     );
   }
 
@@ -1144,7 +1148,7 @@ export class MercadoLivreApiClient {
         promotion_type: input.promotionType,
         deal_price: input.dealPrice,
       }),
-    });
+    }, { retryOnTimeout: false });
     const data = (await response.json().catch(() => ({}))) as {
       price?: number;
       original_price?: number;

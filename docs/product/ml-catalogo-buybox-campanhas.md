@@ -56,3 +56,19 @@ MCP: `kyneti_list_ml_catalog_items`, `kyneti_plan_ml_catalog_campaigns`,
   R$ 79 o custo real do vendedor pode variar.
 - Listagem de catálogo herda o teto de 1.000 anúncios de `fetchSellerItemIds`.
 - Conta de serviço do MCP precisa do módulo PROMOTIONS (antes não tinha).
+
+## Travas de escrita (09/10/2026, após revisão de segurança do PR #1)
+
+- **Flag de backend, falha fechada:** `ML_CAMPAIGN_WRITES_ENABLED=true` na API é obrigatória para inscrever
+  em campanha (REST e MCP). Sem ela, `join()` responde 403 `ML_CAMPAIGN_WRITES_DISABLED` antes de qualquer
+  chamada ao ML. `MCP_ALLOW_WRITES` continua só registrando/ocultando a tool no MCP; **não** protege o REST.
+- **Piso de margem fixo em 5%:** `minMarginPct` abaixo de 5 é recusado (400, DTO e serviço). O cliente só pode
+  exigir margem maior.
+- **Sem reenvio em timeout no POST:** `joinItemPromotion` retenta apenas HTTP 429; timeout não é retentado
+  (o ML pode ter processado). Antes de reenviar, o status da campanha é relido (`candidate`).
+- **Trava de duplo envio:** inscrições simultâneas do mesmo tenant+anúncio+campanha → 409
+  `ML_CAMPAIGN_JOIN_IN_PROGRESS`. **Limitação:** a trava é em memória (uma instância da API). Com mais de
+  uma instância, é preciso trava no banco.
+- Continuam abertos (não corrigidos): conferência de que o anúncio pertence ao vendedor da conexão, tradução
+  do erro bruto do ML + `AlertService` na falha de inscrição, cache da listagem, auditoria persistente,
+  rate limit de entrada. Contrato com a API real do ML segue **não exercitado**.

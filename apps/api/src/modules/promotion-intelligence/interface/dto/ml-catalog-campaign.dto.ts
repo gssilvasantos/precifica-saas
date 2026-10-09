@@ -24,7 +24,7 @@ export class MlCatalogPlanQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
+  @Min(5)
   @Max(100)
   minMarginPct?: number;
 
@@ -51,7 +51,7 @@ export class MlJoinPromotionDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
+  @Min(5)
   @Max(100)
   minMarginPct?: number;
 

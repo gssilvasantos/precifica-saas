@@ -1,4 +1,4 @@
-import { UnprocessableEntityException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, UnprocessableEntityException, NotFoundException } from '@nestjs/common';
 import { MlCatalogCampaignService } from './ml-catalog-campaign.service';
 import { MercadoLivreApiClient } from '../../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-api.client';
 import { MercadoLivreConnectionService } from '../../marketplace-intelligence/application/mercado-livre-connection.service';
@@ -89,6 +89,62 @@ describe('MlCatalogCampaignService.plan', () => {
 });
 
 describe('MlCatalogCampaignService.join', () => {
+  const originalFlag = process.env.ML_CAMPAIGN_WRITES_ENABLED;
+  beforeEach(() => {
+    process.env.ML_CAMPAIGN_WRITES_ENABLED = 'true';
+  });
+  afterAll(() => {
+    if (originalFlag === undefined) delete process.env.ML_CAMPAIGN_WRITES_ENABLED;
+    else process.env.ML_CAMPAIGN_WRITES_ENABLED = originalFlag;
+  });
+
+  it('com a flag ausente ou diferente de "true", recusa (403) e NÃO escreve no ML', async () => {
+    const { service, client } = build();
+    for (const value of [undefined, '', 'false', '1', 'TRUE']) {
+      if (value === undefined) delete process.env.ML_CAMPAIGN_WRITES_ENABLED;
+      else process.env.ML_CAMPAIGN_WRITES_ENABLED = value;
+      await expect(service.join('tenant-1', 'MLB7393870900', { promotionId: 'P-DEZ', dealPrice: 55.9 })).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    }
+    expect(client.joinItemPromotion).not.toHaveBeenCalled();
+  });
+
+  it('não aceita piso de margem abaixo de 5% (minMarginPct: 0) e NÃO escreve no ML', async () => {
+    const { service, client } = build();
+    await expect(
+      service.join('tenant-1', 'MLB7393870900', { promotionId: 'P-DEZ', dealPrice: 52.4, minMarginPct: 0 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(client.joinItemPromotion).not.toHaveBeenCalled();
+  });
+
+  it('aceita exigir margem maior que 5% e recusa quando o preço não atinge', async () => {
+    const { service, client } = build();
+    await expect(
+      service.join('tenant-1', 'MLB7393870900', { promotionId: 'P-DEZ', dealPrice: 55.9, minMarginPct: 10 }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(client.joinItemPromotion).not.toHaveBeenCalled();
+  });
+
+  it('duas inscrições simultâneas do mesmo anúncio/campanha: só uma escreve, a outra recebe 409', async () => {
+    const { service, client } = build();
+    let release!: () => void;
+    (client.joinItemPromotion as jest.Mock).mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve({ price: 55.9, originalPrice: 69.9 }); }),
+    );
+    const first = service.join('tenant-1', 'MLB7393870900', { promotionId: 'P-DEZ', dealPrice: 55.9 });
+    await new Promise((r) => setImmediate(r));
+    await expect(service.join('tenant-1', 'MLB7393870900', { promotionId: 'P-DEZ', dealPrice: 55.9 })).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    release();
+    await first;
+    expect(client.joinItemPromotion).toHaveBeenCalledTimes(1);
+    // Liberada a trava, uma nova tentativa volta a ser avaliada normalmente.
+    await service.join('tenant-1', 'MLB7393870900', { promotionId: 'P-DEZ', dealPrice: 55.9 });
+    expect(client.joinItemPromotion).toHaveBeenCalledTimes(2);
+  });
+
   it('inscreve quando a margem recalculada no servidor fica >= 5%', async () => {
     const { service, client } = build();
     const result = await service.join('tenant-1', 'MLB7393870900', { promotionId: 'P-DEZ', dealPrice: 55.9 });
