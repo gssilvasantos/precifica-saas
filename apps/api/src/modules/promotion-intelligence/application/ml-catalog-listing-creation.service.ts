@@ -105,6 +105,26 @@ export interface BatchPlanResult {
 
 // Sinal interno: a ficha já tem catálogo ativo na conta — o lote não gasta
 // chamadas calculando preço para quem não vai criar.
+// Consultas ao ML que se repetem entre as variações de um mesmo lote (10/10/2026):
+// o frete vem do anúncio de origem (igual para todas as variações) e a tarifa
+// depende só de categoria + tipo + preço. Sem isso, um anúncio com ~15 variações
+// refazia dezenas de chamadas idênticas e estourava os 90 s do MCP.
+interface BatchSharedLookups {
+  freight: Map<string, Promise<number>>;
+  fees: Map<string, Promise<number>>;
+}
+
+function memoized<T>(cache: Map<string, Promise<T>>, key: string, load: () => Promise<T>): Promise<T> {
+  let hit = cache.get(key);
+  if (!hit) {
+    hit = load();
+    cache.set(key, hit);
+    // Falha não fica guardada: a próxima unidade tenta de novo.
+    hit.catch(() => cache.delete(key));
+  }
+  return hit;
+}
+
 class ExistingCatalogSignal extends Error {
   constructor(
     readonly gtin: string,
@@ -265,8 +285,11 @@ export class MlCatalogListingCreationService {
     const traditional = summaries.filter((x) => !hasCatalog(x) && x.status === 'active').sort((a, b) => a.id.localeCompare(b.id));
 
     const rows: BatchPlanRow[] = [];
+    const shared: BatchSharedLookups = { freight: new Map(), fees: new Map() };
     // Em série: rate limit do ML.
     for (const summary of traditional.slice(offset, offset + limit)) {
+      const startedAt = Date.now();
+      const rowsBefore = rows.length;
       const item = await this.client.fetchItemPricingContext(summary.id, accessToken);
       try {
         await this.assertSourceItem(tenantId, summary.id, item);
@@ -280,7 +303,7 @@ export class MlCatalogListingCreationService {
         let unit: CreationUnit | null = null;
         try {
           unit = this.pickUnit(summary.id, item, variationId);
-          const plan = await this.buildPlan(tenantId, accessToken, summary.id, item, unit, options, targetMarginPct, catalogListings, true);
+          const plan = await this.buildPlan(tenantId, accessToken, summary.id, item, unit, options, targetMarginPct, catalogListings, true, shared);
           rows.push({
             itemId: summary.id,
             variationId: unit.variationId,
@@ -314,6 +337,9 @@ export class MlCatalogListingCreationService {
           }
         }
       }
+      this.logger.log(
+        `Lote de catálogo: anúncio=${summary.id} unidades=${rows.length - rowsBefore} duracaoMs=${Date.now() - startedAt}`,
+      );
     }
     const counts: Record<BatchRowStatus, number> = { READY: 0, ALREADY_HAS_CATALOG: 0, BLOCKED: 0 };
     for (const r of rows) counts[r.status] += 1;
@@ -394,6 +420,7 @@ export class MlCatalogListingCreationService {
     targetMarginPct: number,
     catalogListings: MlCatalogListingSummary[],
     stopIfExisting = false,
+    shared?: BatchSharedLookups,
   ): Promise<CatalogCreationPlan> {
     if (!unit.skuCode) {
       throw new UnprocessableEntityException(`${unit.where} não tem SKU do vendedor — sem SKU não há custo nem vínculo com o Olist.${unit.diagnostic ? ` (${unit.diagnostic})` : ''}`);
@@ -459,9 +486,14 @@ export class MlCatalogListingCreationService {
     }
 
     // Frete estimado a partir do anúncio de origem (o novo ainda não existe).
-    const freightAmount = await this.client.fetchSellerShippingCost(item.sellerId, sourceItemId, accessToken);
+    const sellerId = item.sellerId;
+    const loadFreight = () => this.client.fetchSellerShippingCost(sellerId, sourceItemId, accessToken);
+    const freightAmount = shared ? await memoized(shared.freight, `${sellerId}|${sourceItemId}`, loadFreight) : await loadFreight();
     const categoryId = item.categoryId;
     const listingTypeId = item.listingTypeId;
+    const loadFee = (price: number) => this.client.fetchSaleFeeAmount(categoryId, price, listingTypeId, accessToken);
+    const feeAt = (price: number) =>
+      shared ? memoized(shared.fees, `${categoryId}|${listingTypeId}|${price}`, () => loadFee(price)) : loadFee(price);
 
     let solved;
     try {
@@ -470,7 +502,7 @@ export class MlCatalogListingCreationService {
         taxRate,
         freightAmount,
         targetMarginPct,
-        feeAt: (price) => this.client.fetchSaleFeeAmount(categoryId, price, listingTypeId, accessToken),
+        feeAt,
       });
     } catch (error) {
       throw new UnprocessableEntityException(`Não foi possível calcular preço com ${targetMarginPct}% de margem: ${(error as Error).message}`);
