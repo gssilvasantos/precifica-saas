@@ -52,7 +52,36 @@ export class TaxRateResolverService implements TaxRateResolver {
       );
     }
 
-    const calculada = await this.resolvePorRegime(perfil, query);
+    let calculada: ResolvedTaxRate;
+    try {
+      calculada = await this.resolvePorRegime(perfil, query);
+    } catch (error) {
+      // RBT12 INCOMPLETO (09/10/2026): quem mantém a alíquota à mão não precisa
+      // do cálculo para ter resposta — o número dele é a política. Só esse
+      // bloqueio é tolerado, e só no Simples; qualquer outro (regime ou Anexo
+      // ausente, perfil do produto, limite do Simples) continua lançando.
+      // Sem RBT12 não existe alíquota calculada: o breakdown não inventa uma.
+      if (
+        error instanceof TaxRateUnavailableError &&
+        error.reason === 'RBT12_INCOMPLETO' &&
+        perfil.regime === 'SIMPLES_NACIONAL' &&
+        typeof perfil.aliquotaManual === 'number'
+      ) {
+        this.logger.warn(
+          `RBT12 incompleto para o tenant ${query.tenantId}; usando a alíquota mantida à mão (sem cálculo para comparar).`,
+        );
+        return {
+          effectiveRate: perfil.aliquotaManual,
+          incidence: 'POR_DENTRO',
+          creditableRate: 0,
+          regime: 'SIMPLES_NACIONAL',
+          source: 'MANUAL_OVERRIDE',
+          breakdown: { anexo: perfil.anexo ?? undefined },
+          fixedMonthlyTaxAmount: null,
+        };
+      }
+      throw error;
+    }
 
     // ALÍQUOTA MANTIDA À MÃO (13/08/2026) vence a calculada.
     //

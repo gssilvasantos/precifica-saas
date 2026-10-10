@@ -94,6 +94,16 @@ terceiro item bloqueou por **alíquota não resolvida** (Tax Intelligence com RB
 2025-10 a 2026-04 do PGDAS-D) — enquanto isso, o plano exige `taxRatePct` (override); a escolha da
 alíquota é do dono e a criação deve usar a mesma do plano.
 
+**Correção da alíquota (09/10/2026):** a alíquota mantida à mão (Configurações fiscais, 7,3%) estava
+salva, mas `TaxRateResolverService.resolve` calculava a alíquota pelo RBT12 **antes** de olhar a manual
+e lançava `RBT12_INCOMPLETO`, ignorando-a. Agora, no Simples Nacional, esse bloqueio específico é
+tolerado quando há `aliquotaManual` (fonte `MANUAL_OVERRIDE`, sem `aliquotaCheia` no breakdown, pois não
+há cálculo para comparar). Sem alíquota manual o bloqueio continua; outros bloqueios (regime/Anexo
+ausente, perfil do produto, limite do Simples) também. Efeito colateral: sem RBT12 completo, a sugestão
+de reajuste de alíquota (que compara com a calculada) não tem base até o faturamento anterior ser
+preenchido. Cobertura: 3 testes novos em `tax-rate-resolver.service.spec.ts`. Mudança em regra
+tributária compartilhada (pricing, DRE, promoções) — vale para todos os consumidores da porta.
+
 ## 5.1 Endpoints (prefixo `/api/promotion-intelligence/mercado-livre/catalog-creation`)
 
 Auth: JWT + módulo Promoções. `POST .../create` aceita `variationId` no corpo. O `tenantId` vem do token.
