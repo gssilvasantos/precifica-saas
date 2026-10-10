@@ -417,6 +417,71 @@ describe('tarifa do ML com token (09/10/2026)', () => {
   });
 });
 
+describe('leitura lenta da conta: lista antiga serve e primeira chamada devolve 202 (10/10/2026)', () => {
+  const originalFlag = process.env[CATALOG_CREATE_FLAG];
+  beforeEach(() => {
+    process.env[CATALOG_CREATE_FLAG] = 'true';
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+  afterAll(() => {
+    if (originalFlag === undefined) delete process.env[CATALOG_CREATE_FLAG];
+    else process.env[CATALOG_CREATE_FLAG] = originalFlag;
+  });
+
+  const deferred = <T,>() => {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+
+  it('sem cache e leitura lenta: devolve 202 ML_CATALOG_LIST_LOADING e a leitura continua; a repetição já acha o resultado', async () => {
+    jest.useFakeTimers();
+    const { service, client } = build();
+    const slow = deferred<string[]>();
+    client.fetchSellerItemIds.mockReturnValueOnce(slow.promise);
+
+    const first = service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 10 });
+    const outcome = first.then(() => null, (e) => e);
+    await jest.advanceTimersByTimeAsync(46_000);
+    const error = await outcome;
+    expect(error.getStatus()).toBe(202);
+    expect(error.getResponse()).toMatchObject({ code: 'ML_CATALOG_LIST_LOADING' });
+
+    slow.resolve(['MLB111']);
+    await jest.advanceTimersByTimeAsync(0);
+    const again = await service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 10 });
+    expect(again.total).toBe(1);
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(1);
+  });
+
+  it('cache vencido (30 min a 12 h): responde na hora com a lista antiga e atualiza em segundo plano', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-10T10:00:00Z') });
+    const { service, client } = build();
+    await service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 10 });
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(1);
+
+    jest.setSystemTime(new Date('2026-10-10T11:00:00Z'));
+    const slow = deferred<string[]>();
+    client.fetchSellerItemIds.mockReturnValueOnce(slow.promise);
+    const stale = await service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 10 });
+    expect(stale.total).toBe(1);
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(2);
+    slow.resolve(['MLB111']);
+    await jest.advanceTimersByTimeAsync(0);
+  });
+
+  it('a criação não usa lista antiga: lê de novo', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-10T10:00:00Z') });
+    const { service, client } = build();
+    await service.plan('tenant-1', 'MLB111');
+    jest.setSystemTime(new Date('2026-10-10T10:05:00Z'));
+    await service.create('tenant-1', 'MLB111');
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('leitura da lista de anúncios em andamento', () => {
   it('chamadas simultâneas de leitura compartilham UMA leitura da conta', async () => {
     const { service, client } = build();

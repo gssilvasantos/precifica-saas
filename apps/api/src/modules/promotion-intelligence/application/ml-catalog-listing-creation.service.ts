@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -42,6 +43,13 @@ function hasCatalog(s: { isCatalogListing: boolean; catalogProductId: string | n
 }
 
 const SUMMARIES_CACHE_TTL_MS = 30 * 60 * 1000;
+// Depois do TTL, a lista antiga ainda serve as leituras (plano/lote) enquanto uma
+// atualização roda em segundo plano — a leitura completa da conta leva 65–145 s
+// (medido em 09/10/2026), mais que o timeout de 90 s do MCP. A criação não usa isso.
+const SUMMARIES_STALE_MAX_MS = 12 * 60 * 60 * 1000;
+// Sem lista nenhuma (1ª chamada após deploy), espera até aqui e devolve 202
+// "carregando" em vez de deixar o cliente estourar o timeout.
+const SUMMARIES_WAIT_MS = 45 * 1000;
 
 export interface CatalogCreationOptions {
   targetMarginPct?: number;
@@ -563,25 +571,65 @@ export class MlCatalogListingCreationService {
   }
 
   // Listar todos os anúncios da conta é a parte cara (centenas de chamadas ao
-  // ML). Cache em memória POR TENANT por 5 min para as consultas de leitura
-  // (lista e planos); a criação passa fresh=true. Aceita defasagem de minutos.
+  // ML, 65–145 s medido). Para as leituras (lista e planos):
+  //  - cache < 30 min: usa;
+  //  - cache entre 30 min e 12 h: usa a lista antiga e atualiza em segundo plano;
+  //  - sem cache: espera até 45 s; se não terminar, devolve 202 (ML_CATALOG_LIST_LOADING)
+  //    e a leitura continua no servidor — a próxima chamada já encontra o resultado.
+  // A criação passa fresh=true: lê de novo, sem cache e sem entrar em leitura alheia.
   private async loadSellerSummaries(tenantId: string, fresh = false): Promise<MlCatalogListingSummary[]> {
+    if (fresh) return this.loadAndCacheSummaries(tenantId);
     const cached = this.summariesCache.get(tenantId);
-    if (!fresh && cached && Date.now() - cached.at < SUMMARIES_CACHE_TTL_MS) return cached.data;
-    // Leituras que chegam durante uma leitura em andamento (ex.: o MCP desistiu
-    // aos 90s e o usuário repetiu) ENTRAM nela em vez de começar outra leitura
-    // completa da conta. A criação (fresh) nunca entra: precisa do estado de agora.
-    const running = this.summariesInFlight.get(tenantId);
-    if (!fresh && running) return running;
-    const load = this.loadAndCacheSummaries(tenantId);
-    if (!fresh) {
+    const age = cached ? Date.now() - cached.at : Infinity;
+    if (cached && age < SUMMARIES_CACHE_TTL_MS) return cached.data;
+
+    // Entra na leitura em andamento (ex.: o cliente desistiu e repetiu) ou começa uma.
+    let load = this.summariesInFlight.get(tenantId);
+    if (!load) {
+      load = this.loadAndCacheSummaries(tenantId);
       this.summariesInFlight.set(tenantId, load);
       const clear = () => {
         if (this.summariesInFlight.get(tenantId) === load) this.summariesInFlight.delete(tenantId);
       };
       load.then(clear, clear);
     }
-    return load;
+    if (cached && age < SUMMARIES_STALE_MAX_MS) {
+      load.catch((error: Error) =>
+        this.logger.warn(`Atualização em segundo plano da lista de anúncios falhou: tenant=${tenantId} ${error.message}`),
+      );
+      return cached.data;
+    }
+    return this.waitOrAccept(load);
+  }
+
+  private waitOrAccept(load: Promise<MlCatalogListingSummary[]>): Promise<MlCatalogListingSummary[]> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () =>
+          reject(
+            new HttpException(
+              {
+                code: 'ML_CATALOG_LIST_LOADING',
+                message:
+                  'Lendo a lista de anúncios da conta no Mercado Livre (leva 1 a 3 minutos). A leitura continua no servidor: ' +
+                  'repita esta mesma chamada em cerca de 2 minutos.',
+              },
+              HttpStatus.ACCEPTED,
+            ),
+          ),
+        SUMMARIES_WAIT_MS,
+      );
+      load.then(
+        (data) => {
+          clearTimeout(timer);
+          resolve(data);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
   }
 
   private async loadAndCacheSummaries(tenantId: string): Promise<MlCatalogListingSummary[]> {
