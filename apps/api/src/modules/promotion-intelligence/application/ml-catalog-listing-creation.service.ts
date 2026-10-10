@@ -125,6 +125,29 @@ function memoized<T>(cache: Map<string, Promise<T>>, key: string, load: () => Pr
   return hit;
 }
 
+// Plano em lote por anúncio (10/10/2026): o cálculo de um anúncio com muitas variações
+// passa dos 90 s do MCP, e o servidor terminava o trabalho e descartava o resultado —
+// cada nova tentativa recomeçava do zero. Agora o resultado (inclusive o que ainda
+// está sendo calculado) fica guardado por pouco tempo, e a nova tentativa o reaproveita.
+// Só vale para a LEITURA do lote; criar anúncio nunca usa isto (relê tudo).
+const BATCH_ITEM_CACHE_TTL_MS = 5 * 60 * 1000;
+// Variações do mesmo anúncio calculadas em paralelo (tarifa/frete já são compartilhados;
+// o limitador de saída para o ML continua valendo).
+const BATCH_UNIT_CONCURRENCY = 3;
+
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 class ExistingCatalogSignal extends Error {
   constructor(
     readonly gtin: string,
@@ -195,6 +218,8 @@ export class MlCatalogListingCreationService {
   private readonly createsInFlight = new Set<string>();
   private readonly summariesCache = new Map<string, { at: number; data: MlCatalogListingSummary[] }>();
   private readonly summariesInFlight = new Map<string, Promise<MlCatalogListingSummary[]>>();
+  // Resultado do plano em lote por anúncio (ver BATCH_ITEM_CACHE_TTL_MS).
+  private readonly batchItemCache = new Map<string, { at: number; rows: Promise<BatchPlanRow[]> }>();
 
   constructor(
     @Inject(PRODUCT_CATALOG_READER) private readonly catalog: ProductCatalogReader,
@@ -288,64 +313,83 @@ export class MlCatalogListingCreationService {
 
     const rows: BatchPlanRow[] = [];
     const shared: BatchSharedLookups = { freight: new Map(), fees: new Map() };
-    // Em série: rate limit do ML.
+    // Anúncios em série (rate limit do ML); as variações de cada um, em paralelo limitado.
     for (const summary of traditional.slice(offset, offset + limit)) {
-      const startedAt = Date.now();
-      const rowsBefore = rows.length;
-      const item = await this.client.fetchItemPricingContext(summary.id, accessToken);
-      try {
-        await this.assertSourceItem(tenantId, summary.id, item);
-      } catch (error) {
-        if (!(error instanceof HttpException)) throw error;
-        rows.push(this.blockedRow(summary.id, null, summary.skuCode, null, error.message));
-        continue;
+      const key = `${tenantId}|${summary.id}|${targetMarginPct}|${options.taxRatePct ?? ''}`;
+      const now = Date.now();
+      let cached = this.batchItemCache.get(key);
+      if (!cached || now - cached.at > BATCH_ITEM_CACHE_TTL_MS) {
+        const rowsPromise = this.planBatchItem(tenantId, accessToken, summary, catalogListings, options, targetMarginPct, shared);
+        cached = { at: now, rows: rowsPromise };
+        this.batchItemCache.set(key, cached);
+        // Falha não fica guardada.
+        rowsPromise.catch(() => this.batchItemCache.delete(key));
       }
-      const variationIds: (string | undefined)[] = item.variations.length > 0 ? item.variations.map((v) => v.id) : [undefined];
-      for (const variationId of variationIds) {
-        let unit: CreationUnit | null = null;
-        try {
-          unit = this.pickUnit(summary.id, item, variationId);
-          const plan = await this.buildPlan(tenantId, accessToken, summary.id, item, unit, options, targetMarginPct, catalogListings, true, shared);
-          rows.push({
-            itemId: summary.id,
-            variationId: unit.variationId,
-            skuCode: plan.skuCode,
-            label: unit.label,
-            status: 'READY',
-            gtin: plan.gtin,
-            catalogProductId: plan.catalogProductId,
-            existingCatalogListingId: null,
-            plan,
-            reason: null,
-          });
-        } catch (error) {
-          if (error instanceof ExistingCatalogSignal) {
-            rows.push({
-              itemId: summary.id,
-              variationId: unit?.variationId ?? null,
-              skuCode: unit?.skuCode ?? null,
-              label: unit?.label ?? null,
-              status: 'ALREADY_HAS_CATALOG',
-              gtin: error.gtin,
-              catalogProductId: error.catalogProductId,
-              existingCatalogListingId: error.existingCatalogListingId,
-              plan: null,
-              reason: null,
-            });
-          } else if (error instanceof HttpException) {
-            rows.push(this.blockedRow(summary.id, unit?.variationId ?? variationId ?? null, unit?.skuCode ?? null, unit?.label ?? null, error.message));
-          } else {
-            throw error;
-          }
-        }
-      }
-      this.logger.log(
-        `Lote de catálogo: anúncio=${summary.id} unidades=${rows.length - rowsBefore} duracaoMs=${Date.now() - startedAt}`,
-      );
+      rows.push(...(await cached.rows));
     }
     const counts: Record<BatchRowStatus, number> = { READY: 0, ALREADY_HAS_CATALOG: 0, BLOCKED: 0 };
     for (const r of rows) counts[r.status] += 1;
     return { total: traditional.length, offset, limit, counts, rows };
+  }
+
+  private async planBatchItem(
+    tenantId: string,
+    accessToken: string,
+    summary: { id: string; skuCode: string | null },
+    catalogListings: MlCatalogListingSummary[],
+    options: CatalogCreationOptions,
+    targetMarginPct: number,
+    shared: BatchSharedLookups,
+  ): Promise<BatchPlanRow[]> {
+    const startedAt = Date.now();
+    const item = await this.client.fetchItemPricingContext(summary.id, accessToken);
+    try {
+      await this.assertSourceItem(tenantId, summary.id, item);
+    } catch (error) {
+      if (!(error instanceof HttpException)) throw error;
+      return [this.blockedRow(summary.id, null, summary.skuCode, null, error.message)];
+    }
+    const variationIds: (string | undefined)[] = item.variations.length > 0 ? item.variations.map((v) => v.id) : [undefined];
+    const rows = await mapWithConcurrency(variationIds, BATCH_UNIT_CONCURRENCY, async (variationId): Promise<BatchPlanRow> => {
+      let unit: CreationUnit | null = null;
+      try {
+        unit = this.pickUnit(summary.id, item, variationId);
+        const plan = await this.buildPlan(tenantId, accessToken, summary.id, item, unit, options, targetMarginPct, catalogListings, true, shared);
+        return {
+          itemId: summary.id,
+          variationId: unit.variationId,
+          skuCode: plan.skuCode,
+          label: unit.label,
+          status: 'READY',
+          gtin: plan.gtin,
+          catalogProductId: plan.catalogProductId,
+          existingCatalogListingId: null,
+          plan,
+          reason: null,
+        };
+      } catch (error) {
+        if (error instanceof ExistingCatalogSignal) {
+          return {
+            itemId: summary.id,
+            variationId: unit?.variationId ?? null,
+            skuCode: unit?.skuCode ?? null,
+            label: unit?.label ?? null,
+            status: 'ALREADY_HAS_CATALOG',
+            gtin: error.gtin,
+            catalogProductId: error.catalogProductId,
+            existingCatalogListingId: error.existingCatalogListingId,
+            plan: null,
+            reason: null,
+          };
+        }
+        if (error instanceof HttpException) {
+          return this.blockedRow(summary.id, unit?.variationId ?? variationId ?? null, unit?.skuCode ?? null, unit?.label ?? null, error.message);
+        }
+        throw error;
+      }
+    });
+    this.logger.log(`Lote de catálogo: anúncio=${summary.id} unidades=${rows.length} duracaoMs=${Date.now() - startedAt}`);
+    return rows;
   }
 
   private blockedRow(itemId: string, variationId: string | null, skuCode: string | null, label: string | null, reason: string): BatchPlanRow {

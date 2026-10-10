@@ -163,3 +163,14 @@ ficha, mais de uma ficha, sem SKU, sem custo, item de outra conta).
 Pré-requisitos (módulo Promoções concedido, flag, permissão ML), fluxo plano → um item → lote, formato
 do relatório (criados / pulados e por quê), e checklist pós-criação (vincular Olist, conferir estoque,
 promoção). Será consolidada quando a funcionalidade estiver implementada e exercitada.
+
+## Plano em lote: cache por anúncio e variações em paralelo (10/10/2026)
+
+- **Problema medido:** anúncio com 8 variações levou 70 s e, na tentativa seguinte, 116 s (logs `Lote de catálogo`).
+  O servidor terminava o cálculo depois que o MCP desistia (90 s) e descartava o resultado; cada tentativa recomeçava.
+- **Mudança:** o resultado de cada anúncio (inclusive o que ainda está sendo calculado) fica em memória por 5 min,
+  chave = tenant + anúncio + margem alvo + alíquota informada. Nova tentativa depois de um timeout reaproveita o
+  trabalho. Falha não é guardada. As variações do anúncio são calculadas até 3 em paralelo (frete e tarifa já eram compartilhados).
+- **Só leitura:** `create()` nunca usa esse cache. **Limites conhecidos:** cache em memória (uma instância; some no
+  redeploy); dentro dos 5 min, mudança de MAP, custo ou anúncio criado não aparece no plano em lote.
+- **Não medido ainda em produção:** o ganho de tempo das variações em paralelo.
