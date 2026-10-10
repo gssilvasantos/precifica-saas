@@ -229,6 +229,13 @@ export interface MlItemVariation {
   // Ex.: "Cor: Rosa" — só para o humano identificar a variação.
   label: string | null;
   availableQuantity: number;
+  // Modelo "User Products" do ML: SKU e EAN da variação podem morar no produto
+  // do usuário, não na variação (caso real: 09/10/2026, a tela do ML mostra SKU
+  // e EAN das variações mas o GET /items não devolveu). Suposição NÃO verificada.
+  userProductId: string | null;
+  // Só os NOMES dos campos que o ML devolveu na variação (sem valores): vão na
+  // mensagem de erro para diagnosticar o formato real sem expor dado.
+  rawKeys: string[];
 }
 
 export interface MlCatalogListingSummary {
@@ -1123,6 +1130,7 @@ export class MercadoLivreApiClient {
       listing_type_id?: string | null;
       variations?: {
         id?: number | string;
+        user_product_id?: string | null;
         seller_custom_field?: string | null;
         available_quantity?: number | null;
         attributes?: { id: string; value_name?: string | null }[];
@@ -1145,7 +1153,22 @@ export class MercadoLivreApiClient {
             .filter(Boolean)
             .join(' / ') || null,
         availableQuantity: typeof v.available_quantity === 'number' ? v.available_quantity : 0,
+        userProductId: typeof v.user_product_id === 'string' && v.user_product_id ? v.user_product_id : null,
+        rawKeys: Object.keys(v).sort(),
       }));
+    // Variação sem SKU ou sem EAN na resposta do item: tenta o produto do usuário
+    // (em série, 1 chamada por variação incompleta; falha é silenciosa — o plano
+    // então bloqueia a variação com o diagnóstico).
+    for (const variation of variations) {
+      const hasGtin = variation.attributes.some((a) => a.id === 'GTIN' && a.value_name);
+      if ((variation.skuCode && hasGtin) || !variation.userProductId) continue;
+      const extra = await this.fetchUserProductAttributes(variation.userProductId, accessToken);
+      if (!variation.skuCode) variation.skuCode = extra.find((a) => a.id === 'SELLER_SKU')?.value_name ?? null;
+      if (!hasGtin) {
+        const gtin = extra.find((a) => a.id === 'GTIN')?.value_name;
+        if (gtin) variation.attributes.push({ id: 'GTIN', value_name: gtin });
+      }
+    }
     return {
       ...detail,
       sellerId: data.seller_id != null ? String(data.seller_id) : null,
@@ -1154,6 +1177,23 @@ export class MercadoLivreApiClient {
       listingTypeId: data.listing_type_id ?? null,
       variations,
     };
+  }
+
+  // GET /user-products/{id} — atributos do produto do usuário (SELLER_SKU, GTIN).
+  // Endpoint NÃO exercitado: falha devolve [] em vez de derrubar o plano.
+  async fetchUserProductAttributes(userProductId: string, accessToken: string): Promise<MlItemAttribute[]> {
+    try {
+      const response = await this.request(`${BASE_URL}/user-products/${encodeURIComponent(userProductId)}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok) return [];
+      const data = (await response.json()) as { attributes?: { id?: string; value_name?: string | null }[] };
+      return (data.attributes ?? [])
+        .filter((a): a is { id: string; value_name?: string | null } => typeof a.id === 'string')
+        .map((a) => ({ id: a.id, value_name: a.value_name ?? null }));
+    } catch {
+      return [];
+    }
   }
 
   // GET /items/{id}/price_to_win?version=v2 — status da disputa de catálogo
