@@ -33,6 +33,13 @@ export const CATALOG_CREATE_FLAG = 'ML_CATALOG_LISTING_CREATE_ENABLED';
 const MIN_TARGET_MARGIN_PCT = 5;
 // Anúncios por chamada do plano em lote (cada um faz várias chamadas ao ML).
 const BATCH_MAX_ITEMS = 5;
+// Mesmo critério do detalhe do anúncio (catalog_listing OU catalog_product_id):
+// o resumo em lote do ML traz só catalog_listing, e anúncios ligados a uma ficha
+// apareciam como "tradicionais" e depois eram barrados como "já é catálogo".
+function hasCatalog(s: { isCatalogListing: boolean; catalogProductId: string | null }): boolean {
+  return s.isCatalogListing || Boolean(s.catalogProductId);
+}
+
 const SUMMARIES_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export interface CatalogCreationOptions {
@@ -171,10 +178,10 @@ export class MlCatalogListingCreationService {
     const offset = Math.max(page.offset, 0);
     const summaries = await this.loadSellerSummaries(tenantId);
     const catalogSkus = new Set(
-      summaries.filter((s) => s.isCatalogListing && s.status === 'active' && s.skuCode).map((s) => s.skuCode as string),
+      summaries.filter((s) => hasCatalog(s) && s.status === 'active' && s.skuCode).map((s) => s.skuCode as string),
     );
     const rows = summaries
-      .filter((s) => !s.isCatalogListing && s.status === 'active')
+      .filter((s) => !hasCatalog(s) && s.status === 'active')
       .sort((a, b) => a.id.localeCompare(b.id))
       .map<TraditionalWithoutCatalogRow>((s) => ({
         itemId: s.id,
@@ -242,8 +249,8 @@ export class MlCatalogListingCreationService {
     const targetMarginPct = this.resolveTargetMargin(options.targetMarginPct);
     const accessToken = await this.connections.getValidAccessToken(tenantId);
     const summaries = await this.loadSellerSummaries(tenantId);
-    const catalogListings = summaries.filter((x) => x.isCatalogListing && x.status === 'active');
-    const traditional = summaries.filter((x) => !x.isCatalogListing && x.status === 'active').sort((a, b) => a.id.localeCompare(b.id));
+    const catalogListings = summaries.filter((x) => hasCatalog(x) && x.status === 'active');
+    const traditional = summaries.filter((x) => !hasCatalog(x) && x.status === 'active').sort((a, b) => a.id.localeCompare(b.id));
 
     const rows: BatchPlanRow[] = [];
     // Em série: rate limit do ML.
@@ -539,7 +546,7 @@ export class MlCatalogListingCreationService {
 
   private async loadActiveCatalogListings(tenantId: string, fresh = false): Promise<MlCatalogListingSummary[]> {
     const all = await this.loadSellerSummaries(tenantId, fresh);
-    return all.filter((x) => x.isCatalogListing && x.status === 'active');
+    return all.filter((x) => hasCatalog(x) && x.status === 'active');
   }
 
   // Listar todos os anúncios da conta é a parte cara (centenas de chamadas ao
