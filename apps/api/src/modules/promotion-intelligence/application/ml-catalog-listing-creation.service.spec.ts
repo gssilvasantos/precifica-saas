@@ -335,7 +335,7 @@ describe('anúncio ligado a uma ficha (catalogProductId) não é tradicional', (
   });
 });
 
-describe('cache da lista de anúncios da conta (5 min, por tenant)', () => {
+describe('cache da lista de anúncios da conta (30 min, por tenant)', () => {
   const originalFlag = process.env[CATALOG_CREATE_FLAG];
   beforeEach(() => {
     process.env[CATALOG_CREATE_FLAG] = 'true';
@@ -355,6 +355,26 @@ describe('cache da lista de anúncios da conta (5 min, por tenant)', () => {
     expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(2); // outro tenant: outra chave
     await service.create('tenant-1', 'MLB111');
     expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(3); // fresh
+  });
+});
+
+describe('leitura da lista de anúncios em andamento', () => {
+  it('chamadas simultâneas de leitura compartilham UMA leitura da conta', async () => {
+    const { service, client } = build();
+    await Promise.all([
+      service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 10 }),
+      service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 10 }),
+      service.planBatch('tenant-1', { offset: 0, limit: 1 }),
+    ]);
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(1);
+  });
+
+  it('falha na leitura não fica presa: a próxima chamada tenta de novo', async () => {
+    const { service, client } = build();
+    client.fetchSellerItemIds.mockRejectedValueOnce(new Error('ML fora do ar'));
+    await expect(service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 10 })).rejects.toThrow('ML fora do ar');
+    await service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 10 });
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(2);
   });
 });
 
