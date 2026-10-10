@@ -1,4 +1,4 @@
-import { buildCatalogItemPayload, extractGtin, solvePriceForMargin } from './ml-catalog-listing-creation';
+import { buildCatalogItemPayload, catalogNameRelatesToTitle, extractGtin, solvePriceForMargin } from './ml-catalog-listing-creation';
 
 // Tarifa realista do ML: 13% + R$ 6,00 fixos (faixa < R$ 79).
 const feeAt = async (price: number) => Math.round((price * 0.13 + (price < 79 ? 6 : 0)) * 100) / 100;
@@ -36,6 +36,28 @@ describe('solvePriceForMargin — consultas de tarifa', () => {
     await solvePriceForMargin({ costPrice: 32.64, taxRate: 0.073, freightAmount: 8.15, targetMarginPct: 40, feeAt: counting });
     expect(seen.size).toBeGreaterThan(0);
     for (const calls of seen.values()) expect(calls).toBe(1);
+  });
+});
+
+describe('catalogNameRelatesToTitle', () => {
+  it('recusa o caso real: pincel de maquiagem com ficha de microfone', () => {
+    expect(
+      catalogNameRelatesToTitle('Plncel Y01 Para Pó Seven Colors', 'Microfone de Lapela Condensador Elephant Profissional 1.5m Omnidirecional'),
+    ).toBe(false);
+  });
+
+  it('aceita quando há palavra em comum, ignorando acento e caixa', () => {
+    expect(catalogNameRelatesToTitle('Pincel Y01 Para Pó Seven Colors', 'Pincel Para Pó Seven Colors Y01')).toBe(true);
+    expect(catalogNameRelatesToTitle('PINCEL PÓ', 'pincel po facial')).toBe(true);
+  });
+
+  it('não ignora a palavra só por erro de digitação do resto do título', () => {
+    expect(catalogNameRelatesToTitle('Plncel Y01 Seven Colors', 'Pincel Seven Colors')).toBe(true);
+  });
+
+  it('sem título ou sem nome não há como comparar: não bloqueia', () => {
+    expect(catalogNameRelatesToTitle(null, 'Pincel')).toBe(true);
+    expect(catalogNameRelatesToTitle('Pincel', null)).toBe(true);
   });
 });
 
