@@ -33,6 +33,7 @@ export const CATALOG_CREATE_FLAG = 'ML_CATALOG_LISTING_CREATE_ENABLED';
 const MIN_TARGET_MARGIN_PCT = 5;
 // Anúncios por chamada do plano em lote (cada um faz várias chamadas ao ML).
 const BATCH_MAX_ITEMS = 5;
+const SUMMARIES_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export interface CatalogCreationOptions {
   targetMarginPct?: number;
@@ -152,6 +153,7 @@ export class MlCatalogListingCreationService {
   // Trava de duplo envio em memória (1 instância hoje) — mesma limitação
   // conhecida da inscrição em campanhas; ver docs.
   private readonly createsInFlight = new Set<string>();
+  private readonly summariesCache = new Map<string, { at: number; data: MlCatalogListingSummary[] }>();
 
   constructor(
     @Inject(PRODUCT_CATALOG_READER) private readonly catalog: ProductCatalogReader,
@@ -185,12 +187,18 @@ export class MlCatalogListingCreationService {
   }
 
   async plan(tenantId: string, sourceItemId: string, options: CatalogCreationOptions = {}): Promise<CatalogCreationPlan> {
+    return this.planWith(tenantId, sourceItemId, options, false);
+  }
+
+  // fresh=true ignora o cache de anúncios da conta (a criação precisa do
+  // estado de agora para a trava de duplicidade).
+  private async planWith(tenantId: string, sourceItemId: string, options: CatalogCreationOptions, fresh: boolean): Promise<CatalogCreationPlan> {
     const targetMarginPct = this.resolveTargetMargin(options.targetMarginPct);
     const accessToken = await this.connections.getValidAccessToken(tenantId);
     const item = await this.client.fetchItemPricingContext(sourceItemId, accessToken);
     await this.assertSourceItem(tenantId, sourceItemId, item);
     const unit = this.pickUnit(sourceItemId, item, options.variationId);
-    const catalogListings = await this.loadActiveCatalogListings(tenantId);
+    const catalogListings = await this.loadActiveCatalogListings(tenantId, fresh);
     return this.buildPlan(tenantId, accessToken, sourceItemId, item, unit, options, targetMarginPct, catalogListings);
   }
 
@@ -489,7 +497,7 @@ export class MlCatalogListingCreationService {
     }
     this.createsInFlight.add(lockKey);
     try {
-      const plan = await this.plan(tenantId, sourceItemId, options);
+      const plan = await this.planWith(tenantId, sourceItemId, options, true);
 
       // Anti-duplicidade: o plano acabou de conferir (por ficha e SKU) se já existe
       // catálogo ativo desta variação/EAN.
@@ -529,12 +537,23 @@ export class MlCatalogListingCreationService {
     return v;
   }
 
-  private async loadActiveCatalogListings(tenantId: string): Promise<MlCatalogListingSummary[]> {
-    const all = await this.loadSellerSummaries(tenantId);
+  private async loadActiveCatalogListings(tenantId: string, fresh = false): Promise<MlCatalogListingSummary[]> {
+    const all = await this.loadSellerSummaries(tenantId, fresh);
     return all.filter((x) => x.isCatalogListing && x.status === 'active');
   }
 
-  private async loadSellerSummaries(tenantId: string): Promise<MlCatalogListingSummary[]> {
+  // Listar todos os anúncios da conta é a parte cara (centenas de chamadas ao
+  // ML). Cache em memória POR TENANT por 5 min para as consultas de leitura
+  // (lista e planos); a criação passa fresh=true. Aceita defasagem de minutos.
+  private async loadSellerSummaries(tenantId: string, fresh = false): Promise<MlCatalogListingSummary[]> {
+    const cached = this.summariesCache.get(tenantId);
+    if (!fresh && cached && Date.now() - cached.at < SUMMARIES_CACHE_TTL_MS) return cached.data;
+    const data = await this.fetchSellerSummaries(tenantId);
+    this.summariesCache.set(tenantId, { at: Date.now(), data });
+    return data;
+  }
+
+  private async fetchSellerSummaries(tenantId: string): Promise<MlCatalogListingSummary[]> {
     const accessToken = await this.connections.getValidAccessToken(tenantId);
     const sellerId = await this.connections.getSellerId(tenantId);
     if (!sellerId) {

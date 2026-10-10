@@ -102,11 +102,14 @@ export class KyneteClient {
     }
   }
 
-  async get<T>(path: string, params?: Record<string, unknown>): Promise<T> {
+  // timeoutMs: leituras pesadas (ex.: plano em lote, que consulta o ML várias
+  // vezes) passam um limite maior que os 20s padrão.
+  async get<T>(path: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
     await this.ensureToken();
     try {
       const { data } = await this.http.get<T>(path, {
         params,
+        timeout: timeoutMs,
         headers: { Authorization: `Bearer ${this.token}` },
       });
       return data;
@@ -120,6 +123,7 @@ export class KyneteClient {
         await this.ensureToken();
         const { data } = await this.http.get<T>(path, {
           params,
+          timeout: timeoutMs,
           headers: { Authorization: `Bearer ${this.token}` },
         });
         return data;

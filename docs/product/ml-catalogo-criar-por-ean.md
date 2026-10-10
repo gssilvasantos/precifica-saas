@@ -50,7 +50,7 @@ anúncio de catálogo independente por esse EAN.
 
 ## 5. Executado x não executado (09/10/2026)
 
-- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 83 testes passando
+- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 84 testes passando
   (inclui solver, GTIN, payload e o serviço de plano/criação com fakes: isolamento de conta,
   flag desligada, duplicidade, trava de concorrência). `npm run typecheck` sem erros.
   `npm run lint`: 0 erros, 5 avisos (= baseline, não subiu).
@@ -80,6 +80,11 @@ o Gui encontrou anúncios nela que têm catálogo. A fonte confiável é o plano
 (`plan-batch`), que consulta o Mercado Livre por EAN: `READY`, `ALREADY_HAS_CATALOG` ou `BLOCKED` (com
 motivo). Página de no máximo 5 anúncios por chamada (várias chamadas ao ML por unidade); percorrer
 com `offset` até `total`. Não exercitado contra o ML real.
+
+**Desempenho (09/10/2026):** o primeiro `plan-batch` real estourou o timeout de 20s do MCP — listar todos
+os anúncios da conta é caro. Correções: cache em memória por tenant (5 min) da lista de anúncios nos
+planos de leitura (a criação sempre relê); timeout de 90s no MCP para os planos. Tempo real do lote
+não medido; se ainda estourar, reduzir `limit` ou mover para processamento assíncrono.
 
 ## 5.1 Endpoints (prefixo `/api/promotion-intelligence/mercado-livre/catalog-creation`)
 
