@@ -366,7 +366,7 @@ export class MlCatalogCampaignService {
     const fees = new Map<number, number>();
     await Promise.all(
       prices.map(async (price) => {
-        fees.set(price, await this.client.fetchSaleFeeAmount(ctx.item.categoryId as string, price, ctx.item.listingTypeId as string));
+        fees.set(price, await this.client.fetchSaleFeeAmount(ctx.item.categoryId as string, price, ctx.item.listingTypeId as string, ctx.accessToken));
       }),
     );
     return (price: number) => {

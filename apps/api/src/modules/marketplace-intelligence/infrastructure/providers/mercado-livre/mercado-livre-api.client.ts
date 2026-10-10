@@ -1289,11 +1289,16 @@ export class MercadoLivreApiClient {
 
   // Tarifa de venda do ML para um preço/categoria/tipo de anúncio — o valor
   // que o Mercado Turbo mostra como "Tarifa de Venda".
-  async fetchSaleFeeAmount(categoryId: string, price: number, listingTypeId: string): Promise<number> {
+  //
+  // accessToken (09/10/2026): sem token o ML responde 403
+  // PA_UNAUTHORIZED_RESULT_FROM_POLICIES (PolicyAgent) — confirmado com
+  // chamada sem autenticação a este endpoint. Com token, o endpoint NÃO foi
+  // exercitado ainda.
+  async fetchSaleFeeAmount(categoryId: string, price: number, listingTypeId: string, accessToken?: string): Promise<number> {
     const url =
       `${BASE_URL}/sites/${SITE_ID}/listing_prices?price=${price}` +
       `&category_id=${encodeURIComponent(categoryId)}&listing_type_id=${encodeURIComponent(listingTypeId)}`;
-    const response = await this.request(url);
+    const response = await this.request(url, accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : undefined);
     if (!response.ok) {
       throw new Error(`Mercado Livre listing_prices retornou HTTP ${response.status} para ${categoryId}/${listingTypeId}`);
     }
