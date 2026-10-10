@@ -52,7 +52,20 @@ export interface PriceSolveResult {
 // centavo até a margem recalculada ficar >= alvo (arredondamento nunca deixa
 // o preço abaixo do pedido).
 export async function solvePriceForMargin(input: PriceSolveInput): Promise<PriceSolveResult> {
-  const { costPrice, taxRate, freightAmount, targetMarginPct, feeAt } = input;
+  const { costPrice, taxRate, freightAmount, targetMarginPct } = input;
+  // Memoiza a tarifa por preço (09/10/2026): o ponto fixo, o ajuste fino e a
+  // descida revisitam os mesmos centavos, e cada consulta é uma chamada ao ML.
+  // Menos chamadas = menos chance de bater no limite do ML (403 visto em
+  // produção no primeiro lote real).
+  const feeCache = new Map<number, number>();
+  const feeAt = async (price: number): Promise<number> => {
+    const key = round2(price);
+    const cached = feeCache.get(key);
+    if (cached !== undefined) return cached;
+    const fee = await input.feeAt(key);
+    feeCache.set(key, fee);
+    return fee;
+  };
   const target = targetMarginPct / 100;
   if (!(costPrice > 0)) throw new Error('costPrice deve ser maior que zero.');
   if (taxRate < 0 || taxRate >= 1) throw new Error('taxRate fora de 0-1.');

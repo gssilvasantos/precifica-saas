@@ -26,6 +26,19 @@ describe('solvePriceForMargin', () => {
   });
 });
 
+describe('solvePriceForMargin — consultas de tarifa', () => {
+  it('consulta cada preço uma única vez (menos chamadas ao ML)', async () => {
+    const seen = new Map<number, number>();
+    const counting = async (price: number) => {
+      seen.set(price, (seen.get(price) ?? 0) + 1);
+      return feeAt(price);
+    };
+    await solvePriceForMargin({ costPrice: 32.64, taxRate: 0.073, freightAmount: 8.15, targetMarginPct: 40, feeAt: counting });
+    expect(seen.size).toBeGreaterThan(0);
+    for (const calls of seen.values()) expect(calls).toBe(1);
+  });
+});
+
 describe('extractGtin', () => {
   it('lê GTIN e normaliza dígitos', () => {
     expect(extractGtin([{ id: 'GTIN', value_name: '7896016000799' }])).toBe('7896016000799');
