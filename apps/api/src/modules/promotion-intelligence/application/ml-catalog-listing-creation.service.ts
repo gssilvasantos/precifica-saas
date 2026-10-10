@@ -57,6 +57,8 @@ interface CreationUnit {
   skuCode: string | null;
   attributes: MlItemAttribute[];
   where: string;
+  // Só para variação: nomes dos campos recebidos do ML (sem valores).
+  diagnostic?: string;
 }
 
 export interface VariationPlanRow {
@@ -370,6 +372,7 @@ export class MlCatalogListingCreationService {
       skuCode: variation.skuCode,
       attributes: variation.attributes,
       where: `Variação ${variation.id} do anúncio ${sourceItemId}`,
+      diagnostic: `campos da variação no ML: ${variation.rawKeys.join(', ')}; user_product_id: ${variation.userProductId ?? 'ausente'}`,
     };
   }
 
@@ -385,7 +388,7 @@ export class MlCatalogListingCreationService {
     stopIfExisting = false,
   ): Promise<CatalogCreationPlan> {
     if (!unit.skuCode) {
-      throw new UnprocessableEntityException(`${unit.where} não tem SKU do vendedor — sem SKU não há custo nem vínculo com o Olist.`);
+      throw new UnprocessableEntityException(`${unit.where} não tem SKU do vendedor — sem SKU não há custo nem vínculo com o Olist.${unit.diagnostic ? ` (${unit.diagnostic})` : ''}`);
     }
     const skuCode = unit.skuCode;
     const gtin = extractGtin(unit.attributes);

@@ -208,9 +208,9 @@ describe('MlCatalogListingCreationService.create', () => {
 
 describe('anúncio com variações (um catálogo por variação, pelo EAN de cada uma)', () => {
   const variations = [
-    { id: '111', skuCode: 'RM0130', label: 'Cor: Rosa', availableQuantity: 4, attributes: [{ id: 'GTIN', value_name: '7908254900097' }] },
-    { id: '222', skuCode: 'RM0134', label: 'Cor: Nude', availableQuantity: 2, attributes: [{ id: 'GTIN', value_name: '7908254900004' }] },
-    { id: '333', skuCode: 'RM0999', label: 'Cor: Preto', availableQuantity: 1, attributes: [] },
+    { id: '111', skuCode: 'RM0130', label: 'Cor: Rosa', availableQuantity: 4, attributes: [{ id: 'GTIN', value_name: '7908254900097' }], userProductId: null, rawKeys: ['id', 'attribute_combinations'] },
+    { id: '222', skuCode: 'RM0134', label: 'Cor: Nude', availableQuantity: 2, attributes: [{ id: 'GTIN', value_name: '7908254900004' }], userProductId: null, rawKeys: ['id', 'attribute_combinations'] },
+    { id: '333', skuCode: 'RM0999', label: 'Cor: Preto', availableQuantity: 1, attributes: [], userProductId: null, rawKeys: ['id', 'attribute_combinations'] },
   ];
   const itemWithVariations = { skuCode: null, attributes: [], variations };
 
@@ -282,8 +282,8 @@ describe('MlCatalogListingCreationService.planBatch (só leitura, por EAN)', () 
           : { id, title: 'pai', status: 'active', categoryId: 'MLB1234', skuCode: null, isCatalogListing: false, catalogProductId: null,
               attributes: [], sellerId: '123', originalPrice: null, availableQuantity: 5, listingTypeId: 'gold_special',
               variations: [
-                { id: '1', skuCode: 'RM0134', label: 'Rosa', availableQuantity: 1, attributes: [{ id: 'GTIN', value_name: '7908254900004' }] },
-                { id: '2', skuCode: 'RM0999', label: 'Preto', availableQuantity: 1, attributes: [] },
+                { id: '1', skuCode: 'RM0134', label: 'Rosa', availableQuantity: 1, attributes: [{ id: 'GTIN', value_name: '7908254900004' }], userProductId: null, rawKeys: ['id', 'attribute_combinations'] },
+                { id: '2', skuCode: 'RM0999', label: 'Preto', availableQuantity: 1, attributes: [], userProductId: null, rawKeys: ['id', 'attribute_combinations'] },
               ] },
       ),
     );
@@ -393,6 +393,18 @@ describe('EAN que leva a ficha de outro produto não cria (09/10/2026)', () => {
     const { service, client } = build();
     await service.create('tenant-1', 'MLB111');
     expect(client.createCatalogItem).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('variação sem SKU na resposta do ML (09/10/2026)', () => {
+  it('bloqueia e diz quais campos o ML devolveu (sem valores), para diagnosticar o formato real', async () => {
+    const { service, client } = build();
+    (client.fetchItemPricingContext as jest.Mock).mockResolvedValue({
+      id: 'MLB111', title: 'Corretivo', status: 'active', categoryId: 'MLB1234', skuCode: null, isCatalogListing: false, catalogProductId: null,
+      attributes: [], sellerId: '123', originalPrice: null, availableQuantity: 5, listingTypeId: 'gold_special',
+      variations: [{ id: '9', skuCode: null, label: 'Cor: A1', availableQuantity: 3, attributes: [], userProductId: 'MLBU1', rawKeys: ['id', 'user_product_id'] }],
+    });
+    await expect(service.plan('tenant-1', 'MLB111', { variationId: '9' })).rejects.toThrow(/sem SKU.*campos da variação no ML: id, user_product_id; user_product_id: MLBU1/);
   });
 });
 
