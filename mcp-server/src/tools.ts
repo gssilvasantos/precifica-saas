@@ -477,4 +477,41 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
       }
     },
   );
+
+  // --- v5: cadastrar o MAP (preço mínimo da marca) de UM SKU (ESCRITA no Kyneti) ---
+  // Não escreve em marketplace: grava Product.mapPrice no próprio Kyneti pelo
+  // mesmo PATCH /products/:id da tela (RBAC ADMIN/PRICING_EDITOR + módulo
+  // CATALOG), então a trilha de auditoria (ProductAuditLog) registra o usuário
+  // do MCP, o valor anterior e o novo. Um SKU por chamada, de propósito.
+  server.registerTool(
+    'kyneti_set_product_map_price',
+    {
+      description:
+        'ESCREVE no Kyneti (não no marketplace): define o MAP — preço mínimo anunciado pela marca — de UM SKU, ou limpa com mapPrice null. Só use com o valor informado pelo dono (tabela do fornecedor); nunca estime. Devolve o valor anterior e o novo. A mudança entra na trilha de auditoria do produto. Exige confirm:true. Fonte: PATCH /products/:id.',
+      inputSchema: {
+        skuCode: z.string().min(1).max(70).describe('SKU exato no Kyneti, ex.: RM0026-9'),
+        mapPrice: z.number().positive().nullable().describe('Preço mínimo em R$ (ex.: 89.9) ou null para limpar o MAP do SKU'),
+        confirm: z.literal(true).describe('Precisa ser exatamente true — escrita real e intencional em produção.'),
+      },
+    },
+    async ({ skuCode, mapPrice }) => {
+      try {
+        const products = (await client.get('/products')) as Array<{ id: string; skuCode: string; mapPrice?: number | string | null }>;
+        const matches = products.filter((p) => p.skuCode === skuCode);
+        if (matches.length !== 1) {
+          throw new Error(
+            matches.length === 0
+              ? `SKU ${skuCode} não existe no catálogo do Kyneti — nada foi gravado.`
+              : `SKU ${skuCode} aparece ${matches.length} vezes no catálogo — nada foi gravado.`,
+          );
+        }
+        const product = matches[0];
+        const before = product.mapPrice ?? null;
+        const updated = (await client.patch(`/products/${encodeURIComponent(product.id)}`, { mapPrice })) as { mapPrice?: number | string | null };
+        return toResult({ skuCode, mapPriceBefore: before, mapPriceAfter: updated.mapPrice ?? null });
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
 }
