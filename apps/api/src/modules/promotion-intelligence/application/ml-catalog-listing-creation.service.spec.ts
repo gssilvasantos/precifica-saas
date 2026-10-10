@@ -320,6 +320,29 @@ describe('MlCatalogListingCreationService.planBatch (só leitura, por EAN)', () 
   });
 });
 
+describe('cache da lista de anúncios da conta (5 min, por tenant)', () => {
+  const originalFlag = process.env[CATALOG_CREATE_FLAG];
+  beforeEach(() => {
+    process.env[CATALOG_CREATE_FLAG] = 'true';
+  });
+  afterAll(() => {
+    if (originalFlag === undefined) delete process.env[CATALOG_CREATE_FLAG];
+    else process.env[CATALOG_CREATE_FLAG] = originalFlag;
+  });
+
+  it('planos de leitura reaproveitam a lista; a criação sempre relê (trava de duplicidade com dado fresco)', async () => {
+    const { service, client } = build();
+    await service.plan('tenant-1', 'MLB111');
+    await service.plan('tenant-1', 'MLB111');
+    await service.planBatch('tenant-1', { offset: 0, limit: 1 });
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(1);
+    await service.plan('tenant-2', 'MLB111');
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(2); // outro tenant: outra chave
+    await service.create('tenant-1', 'MLB111');
+    expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(3); // fresh
+  });
+});
+
 describe('MlCatalogListingCreationService.listTraditionalWithoutCatalog', () => {
   it('lista só tradicionais ativos, marca SKU que já tem catálogo e limita a página', async () => {
     const { service } = build({

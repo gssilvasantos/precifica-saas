@@ -46,6 +46,9 @@ function toErrorResult(error: unknown) {
 // kyneti_get_order_margin e kyneti_get_financial_dre, com shapes
 // equivalentes, não). registerTool tem uma única assinatura e não sofre
 // disso.
+// Planos de criação de catálogo consultam o ML várias vezes por anúncio: 20s não basta.
+const HEAVY_READ_TIMEOUT_MS = 90_000;
+
 export function registerKynetiTools(server: McpServer, client: KyneteClient, writesEnabled: boolean): void {
   server.registerTool(
     'kyneti_list_products',
@@ -320,7 +323,7 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
             variationId,
             targetMarginPct,
             taxRatePct,
-          }),
+          }, HEAVY_READ_TIMEOUT_MS),
         );
       } catch (error) {
         return toErrorResult(error);
@@ -345,7 +348,7 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
           await client.get(`/promotion-intelligence/mercado-livre/catalog-creation/items/${encodeURIComponent(itemId)}/variations/plan`, {
             targetMarginPct,
             taxRatePct,
-          }),
+          }, HEAVY_READ_TIMEOUT_MS),
         );
       } catch (error) {
         return toErrorResult(error);
@@ -368,7 +371,7 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
     async ({ offset, limit, targetMarginPct, taxRatePct }) => {
       try {
         return toResult(
-          await client.get('/promotion-intelligence/mercado-livre/catalog-creation/plan-batch', { offset, limit, targetMarginPct, taxRatePct }),
+          await client.get('/promotion-intelligence/mercado-livre/catalog-creation/plan-batch', { offset, limit, targetMarginPct, taxRatePct }, HEAVY_READ_TIMEOUT_MS),
         );
       } catch (error) {
         return toErrorResult(error);
