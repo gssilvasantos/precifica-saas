@@ -357,6 +357,67 @@ describe('MlCatalogListingCreationService.planBatch (só leitura, por EAN)', () 
     expect(new Set(res.rows.map((r) => r.plan?.price)).size).toBe(1);
   });
 
+  describe('cache do plano em lote por anúncio (timeout de 90 s, 10/10/2026)', () => {
+    const variation = (id: string, sku: string, gtin: string) => ({
+      id, skuCode: sku, label: `Tom ${id}`, availableQuantity: 1, attributes: [{ id: 'GTIN', value_name: gtin }], userProductId: null, rawKeys: ['id'],
+    });
+    const item = {
+      id: 'MLB1', title: 'Batom Tradicional', status: 'active', categoryId: 'MLB1234', skuCode: null, isCatalogListing: false, catalogProductId: null,
+      attributes: [], sellerId: '123', originalPrice: null, availableQuantity: 5, listingTypeId: 'gold_special',
+      variations: [variation('1', 'RM0130', '7908254900097'), variation('2', 'RM0131', '7908254900004'), variation('3', 'RM0132', '7908254900011')],
+    };
+
+    it('repetir a mesma página reaproveita o resultado: o ML não é consultado de novo', async () => {
+      const { service, client } = build({ summaries: rows('MLB1') });
+      (client.fetchItemPricingContext as jest.Mock).mockResolvedValue(item);
+      const first = await service.planBatch('tenant-1', { offset: 0, limit: 1 });
+      const second = await service.planBatch('tenant-1', { offset: 0, limit: 1 });
+      expect(second.rows).toEqual(first.rows);
+      expect(client.fetchItemPricingContext).toHaveBeenCalledTimes(1);
+      expect(client.fetchSellerShippingCost).toHaveBeenCalledTimes(1);
+    });
+
+    it('nova tentativa durante o cálculo entra no mesmo trabalho em vez de recomeçar', async () => {
+      const { service, client } = build({ summaries: rows('MLB1') });
+      let release!: () => void;
+      (client.fetchItemPricingContext as jest.Mock).mockImplementation(
+        () => new Promise((resolve) => { release = () => resolve(item); }),
+      );
+      const first = service.planBatch('tenant-1', { offset: 0, limit: 1 });
+      await new Promise((r) => setImmediate(r));
+      const retry = service.planBatch('tenant-1', { offset: 0, limit: 1 });
+      await new Promise((r) => setImmediate(r));
+      release();
+      const [a, b] = await Promise.all([first, retry]);
+      expect(b.rows).toEqual(a.rows);
+      expect(client.fetchItemPricingContext).toHaveBeenCalledTimes(1);
+    });
+
+    it('falha não fica guardada: a próxima tentativa calcula de novo', async () => {
+      const { service, client } = build({ summaries: rows('MLB1') });
+      (client.fetchItemPricingContext as jest.Mock).mockRejectedValueOnce(new Error('ML fora do ar')).mockResolvedValue(item);
+      await expect(service.planBatch('tenant-1', { offset: 0, limit: 1 })).rejects.toThrow('ML fora do ar');
+      const res = await service.planBatch('tenant-1', { offset: 0, limit: 1 });
+      expect(res.counts.READY).toBe(3);
+    });
+
+    it('margem alvo diferente não reaproveita o cache', async () => {
+      const { service, client } = build({ summaries: rows('MLB1') });
+      (client.fetchItemPricingContext as jest.Mock).mockResolvedValue(item);
+      const a = await service.planBatch('tenant-1', { offset: 0, limit: 1 }, { targetMarginPct: 40 });
+      const b = await service.planBatch('tenant-1', { offset: 0, limit: 1 }, { targetMarginPct: 50 });
+      expect(client.fetchItemPricingContext).toHaveBeenCalledTimes(2);
+      expect(b.rows[0].plan!.price).toBeGreaterThan(a.rows[0].plan!.price);
+    });
+
+    it('variações em paralelo mantêm a ordem do anúncio', async () => {
+      const { service, client } = build({ summaries: rows('MLB1') });
+      (client.fetchItemPricingContext as jest.Mock).mockResolvedValue(item);
+      const res = await service.planBatch('tenant-1', { offset: 0, limit: 1 });
+      expect(res.rows.map((r) => r.variationId)).toEqual(['1', '2', '3']);
+    });
+  });
+
   it('plano avulso (fora do lote) continua sem cache entre chamadas', async () => {
     const { service, client } = build();
     await service.plan('tenant-1', 'MLB111');
