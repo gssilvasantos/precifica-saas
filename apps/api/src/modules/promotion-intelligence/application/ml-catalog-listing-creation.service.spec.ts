@@ -304,6 +304,32 @@ describe('MlCatalogListingCreationService.planBatch (só leitura, por EAN)', () 
     expect(client.createCatalogItem).not.toHaveBeenCalled();
   });
 
+  it('anúncio com várias variações consulta frete uma vez e reaproveita tarifas de preços repetidos (estouro de 90 s, 10/10/2026)', async () => {
+    const { service, client } = build({ summaries: rows('MLB1') });
+    const variation = (id: string, sku: string, gtin: string) => ({
+      id, skuCode: sku, label: `Tom ${id}`, availableQuantity: 1, attributes: [{ id: 'GTIN', value_name: gtin }], userProductId: null, rawKeys: ['id'],
+    });
+    (client.fetchItemPricingContext as jest.Mock).mockResolvedValue({
+      id: 'MLB1', title: 'Batom Tradicional', status: 'active', categoryId: 'MLB1234', skuCode: null, isCatalogListing: false, catalogProductId: null,
+      attributes: [], sellerId: '123', originalPrice: null, availableQuantity: 5, listingTypeId: 'gold_special',
+      variations: [variation('1', 'RM0130', '7908254900097'), variation('2', 'RM0131', '7908254900004'), variation('3', 'RM0132', '7908254900011')],
+    });
+    // Mesmo custo nas três variações => mesmo preço de equilíbrio => mesmas tarifas.
+    const res = await service.planBatch('tenant-1', { offset: 0, limit: 1 });
+    expect(res.counts.READY).toBe(3);
+    expect(client.fetchSellerShippingCost).toHaveBeenCalledTimes(1);
+    const pricesAsked = (client.fetchSaleFeeAmount as jest.Mock).mock.calls.map((c) => c[1] as number);
+    expect(new Set(pricesAsked).size).toBe(pricesAsked.length); // nenhum preço consultado duas vezes
+    expect(new Set(res.rows.map((r) => r.plan?.price)).size).toBe(1);
+  });
+
+  it('plano avulso (fora do lote) continua sem cache entre chamadas', async () => {
+    const { service, client } = build();
+    await service.plan('tenant-1', 'MLB111');
+    await service.plan('tenant-1', 'MLB111');
+    expect(client.fetchSellerShippingCost).toHaveBeenCalledTimes(2);
+  });
+
   it('limita a página a 5 anúncios, respeita offset e bloqueia item de outra conta sem derrubar o lote', async () => {
     const { service, client } = build({ summaries: rows('MLB1', 'MLB2', 'MLB3', 'MLB4', 'MLB5', 'MLB6', 'MLB7') });
     (client.fetchItemPricingContext as jest.Mock).mockImplementation((id: string) =>
