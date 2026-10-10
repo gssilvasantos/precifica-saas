@@ -49,6 +49,7 @@ export interface ItemCampaignPlanResponse extends ItemPlan {
   skuCode: string | null;
   isCatalogListing: boolean;
   costPrice: number;
+  mapPrice: number | null;
   taxRatePct: number;
   taxRateSource: 'OVERRIDE' | 'TAX_INTELLIGENCE';
   freightAmount: number;
@@ -71,6 +72,8 @@ interface LoadedContext {
   options: CampaignOption[];
   rawPromotions: MlItemPromotion[];
   costPrice: number;
+  // MAP (preço mínimo da marca) do SKU; null = sem restrição.
+  mapPrice: number | null;
   taxRate: number;
   taxRateSource: 'OVERRIDE' | 'TAX_INTELLIGENCE';
   freightAmount: number;
@@ -141,7 +144,7 @@ export class MlCatalogCampaignService {
       if (o.currentDealPrice !== null) prices.add(round2(o.currentDealPrice));
     }
     const marginAt = await this.buildMarginFunction(ctx, [...prices]);
-    const plan = planItem(ctx.snapshot, ctx.options, marginAt, minMarginPct);
+    const plan = planItem(ctx.snapshot, ctx.options, marginAt, minMarginPct, undefined, ctx.mapPrice);
 
     return {
       ...plan,
@@ -149,6 +152,7 @@ export class MlCatalogCampaignService {
       skuCode: ctx.item.skuCode,
       isCatalogListing: ctx.item.isCatalogListing,
       costPrice: ctx.costPrice,
+      mapPrice: ctx.mapPrice,
       taxRatePct: round2(ctx.taxRate * 100),
       taxRateSource: ctx.taxRateSource,
       freightAmount: ctx.freightAmount,
@@ -245,6 +249,17 @@ export class MlCatalogCampaignService {
       throw new UnprocessableEntityException(
         `Preço R$ ${dealPrice.toFixed(2)} fora da faixa aceita pela campanha (R$ ${range.low?.toFixed(2) ?? '?'} a R$ ${range.high?.toFixed(2) ?? '?'}).`,
       );
+    }
+
+    // Trava de MAP no servidor: o preço da promoção é preço anunciado, então
+    // nunca pode ficar abaixo do mínimo da marca, não importa o que o cliente pediu.
+    if (ctx.mapPrice !== null && dealPrice < ctx.mapPrice - 0.005) {
+      throw new UnprocessableEntityException({
+        code: 'MAP_PRICE_VIOLATION',
+        message:
+          `Preço R$ ${dealPrice.toFixed(2)} fica abaixo do MAP de R$ ${ctx.mapPrice.toFixed(2)} do SKU ${ctx.item.skuCode ?? '?'} ` +
+          `(preço mínimo da marca). Adesão recusada.`,
+      });
     }
 
     const marginAt = await this.buildMarginFunction(ctx, [dealPrice]);
@@ -351,6 +366,7 @@ export class MlCatalogCampaignService {
       // Custo do produto SEM embalagem — é o mesmo número que o Mercado Turbo
       // usa ("Custo"), vindo do Olist.
       costPrice: product.productCostPrice,
+      mapPrice: product.mapPrice ?? null,
       taxRate,
       taxRateSource,
       freightAmount,

@@ -5,7 +5,7 @@ import { MercadoLivreConnectionService } from '../../marketplace-intelligence/ap
 
 // Batom Maria Clara (MLB7393870900) — números reais da gravação do Gui no
 // Mercado Turbo: custo 32,64, imposto 7,3%, tarifa 13%, frete 8,15.
-function build(overrides: { stock?: number; promotions?: unknown[]; taxThrows?: boolean } = {}) {
+function build(overrides: { stock?: number; promotions?: unknown[]; taxThrows?: boolean; mapPrice?: number | null } = {}) {
   const client = {
     fetchItemPricingContext: jest.fn().mockResolvedValue({
       id: 'MLB7393870900',
@@ -49,7 +49,7 @@ function build(overrides: { stock?: number; promotions?: unknown[]; taxThrows?: 
   } as unknown as jest.Mocked<MercadoLivreConnectionService>;
 
   const catalog = {
-    findBySku: jest.fn().mockResolvedValue({ productId: 'prod-1', skuCode: 'RM0299-1', productCostPrice: 32.64 }),
+    findBySku: jest.fn().mockResolvedValue({ productId: 'prod-1', skuCode: 'RM0299-1', productCostPrice: 32.64, mapPrice: overrides.mapPrice ?? null }),
   };
   const taxRates = {
     resolve: overrides.taxThrows
@@ -74,6 +74,13 @@ describe('MlCatalogCampaignService.plan', () => {
     expect(dez?.priceReason).toBe('KEEP_CURRENT_PRICE');
     expect(dez?.margin?.marginAmount).toBe(3.76);
     expect(plan.campaigns.find((c) => c.promotionId === 'P-SMART')?.action).toBe('SKIP_NOT_ELIGIBLE');
+  });
+
+  it('com MAP acima de todo preço possível: SKIP_MAP e o plano expõe o MAP', async () => {
+    const { service } = build({ mapPrice: 70 });
+    const plan = await service.plan('tenant-1', 'MLB7393870900');
+    expect(plan.mapPrice).toBe(70);
+    expect(plan.campaigns.find((c) => c.promotionId === 'P-DEZ')?.action).toBe('SKIP_MAP');
   });
 
   it('sem alíquota no Tax Intelligence e sem taxRatePct: 422 pedindo a alíquota', async () => {
@@ -108,6 +115,20 @@ describe('MlCatalogCampaignService.join', () => {
       );
     }
     expect(client.joinItemPromotion).not.toHaveBeenCalled();
+  });
+
+  it('preço abaixo do MAP: 422 MAP_PRICE_VIOLATION e NÃO escreve no ML, mesmo com margem OK', async () => {
+    const { service, client } = build({ mapPrice: 60 });
+    await expect(
+      service.join('tenant-1', 'MLB7393870900', { promotionId: 'P-DEZ', dealPrice: 55.9 }),
+    ).rejects.toMatchObject({ response: { code: 'MAP_PRICE_VIOLATION' } });
+    expect(client.joinItemPromotion).not.toHaveBeenCalled();
+  });
+
+  it('preço igual ao MAP é inscrito normalmente', async () => {
+    const { service, client } = build({ mapPrice: 55.9 });
+    await service.join('tenant-1', 'MLB7393870900', { promotionId: 'P-DEZ', dealPrice: 55.9 });
+    expect(client.joinItemPromotion).toHaveBeenCalledTimes(1);
   });
 
   it('não aceita piso de margem abaixo de 5% (minMarginPct: 0) e NÃO escreve no ML', async () => {

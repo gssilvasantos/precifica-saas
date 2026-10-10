@@ -71,6 +71,19 @@ PricingDecisionService.dispatchDecision()
 
 `validatePriceAgainstMap(skuCode, price, mapPrice)` é uma função pura de domínio (`domain/pricing-strategist.ts`), reaproveitada nas três camadas de teste. As camadas 1 e 2 **corrigem** silenciosamente o preço para o MAP (mesmo comportamento dos outros dois pisos); a camada 3 é a única que **lança exceção** — porque naquele ponto o preço já deveria estar correto, e se não está, é um bug, não uma decisão de negócio a corrigir.
 
+### 2.1 Extensão (10/10/2026): criação de anúncio de catálogo e adesão a campanha do ML
+
+O módulo `promotion-intelligence` também respeita o MAP, lendo `mapPrice` de `ProductCatalogReader.findBySku`
+(sem tocar tabela de outro contexto):
+
+- **Criação de anúncio de catálogo por EAN** (`MlCatalogListingCreationService`): preço inicial sobe até o MAP
+  quando a margem alvo dá menos; gate final em `create()` (422 `MAP_PRICE_VIOLATION`).
+- **Adesão a campanha** (`MlCatalogCampaignService` + `planItem`): preço abaixo do MAP nunca é escolhido
+  (`SKIP_MAP`); `join()` recusa com 422 `MAP_PRICE_VIOLATION`.
+- SKU sem MAP (`null`) mantém o comportamento anterior; na criação o plano avisa que o piso não foi verificado.
+- O MAP também é gravável pelo MCP (`kyneti_set_product_map_price`, exige `MCP_ALLOW_WRITES` + `confirm:true`
+  + papel ADMIN/PRICING_EDITOR e módulo Catálogo), pelo mesmo `PATCH /products/:id` — logo com auditoria.
+
 ## 3. Auditoria
 
 `ProductAuditLogService.record(tenantId, entries, actor)` é chamado de um único lugar: `ProductsService.update()`, DEPOIS que o update persiste com sucesso (nunca antes — um registro de auditoria não pode descrever uma mudança que na verdade falhou, ex. violação de unique constraint). `diffGovernanceFields(current, input)` (função pura) compara o valor **atual persistido** contra o **input recebido**, não por presença de chave: `undefined` = campo não tocado (PATCH parcial), `null` explícito = "limpar o MAP" (uma mudança real, se o valor anterior não era `null`). Reenviar o mesmo valor não gera um registro de auditoria vazio.

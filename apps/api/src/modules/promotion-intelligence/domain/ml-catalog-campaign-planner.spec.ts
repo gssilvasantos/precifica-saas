@@ -56,6 +56,43 @@ describe('contributionMargin', () => {
 });
 
 describe('planItem', () => {
+  describe('MAP (preço mínimo da marca)', () => {
+    const corretivo: CatalogItemSnapshot = {
+      itemId: 'MLB6987841986',
+      availableQuantity: 7,
+      currentSellingPrice: 49.12,
+      buyBoxStatus: 'competing',
+      priceToWin: 47.58,
+    };
+    const faixa = [campaign({ allowedPriceA: 46.66, allowedPriceB: 15.02 })];
+
+    it('preço da buy box abaixo do MAP: cai para o preço atual, se este respeita o MAP', () => {
+      const larga = [campaign({ allowedPriceA: 60, allowedPriceB: 15.02 })];
+      const plan = planItem(corretivo, larga, marginFn(22.51, 6.85), 5, undefined, 48);
+      expect(plan.campaigns[0].action).toBe('JOIN');
+      expect(plan.campaigns[0].plannedPrice).toBe(49.12);
+      expect(plan.campaigns[0].priceReason).toBe('KEEP_CURRENT_PRICE');
+    });
+
+    it('todo preço possível abaixo do MAP: SKIP_MAP, nunca entra', () => {
+      const plan = planItem(corretivo, faixa, marginFn(22.51, 6.85), 5, undefined, 60);
+      expect(plan.campaigns[0].action).toBe('SKIP_MAP');
+      expect(plan.campaigns[0].plannedPrice).toBeNull();
+      expect(plan.campaigns[0].note).toMatch(/MAP de R\$ 60\.00/);
+    });
+
+    it('preço exatamente igual ao MAP é aceito (mínimo inclusivo)', () => {
+      const plan = planItem(corretivo, faixa, marginFn(22.51, 6.85), 5, undefined, 46.66);
+      expect(plan.campaigns[0].plannedPrice).toBe(46.66);
+    });
+
+    it('sem MAP (null) o resultado é idêntico ao de antes', () => {
+      const a = planItem(corretivo, faixa, marginFn(22.51, 6.85), 5);
+      const b = planItem(corretivo, faixa, marginFn(22.51, 6.85), 5, undefined, null);
+      expect(b).toEqual(a);
+    });
+  });
+
   it('Corretivo perdendo a buy box: entra pelo preço máximo aceito pela campanha, abaixo do price_to_win, com margem OK', () => {
     const item: CatalogItemSnapshot = {
       itemId: 'MLB6987841986',
