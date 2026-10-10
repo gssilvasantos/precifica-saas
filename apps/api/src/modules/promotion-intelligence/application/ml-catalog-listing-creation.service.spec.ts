@@ -320,6 +320,21 @@ describe('MlCatalogListingCreationService.planBatch (só leitura, por EAN)', () 
   });
 });
 
+describe('anúncio ligado a uma ficha (catalogProductId) não é tradicional', () => {
+  it('fica fora da lista e do lote, e conta como catálogo existente da ficha', async () => {
+    const { service } = build({
+      summaries: [
+        { id: 'MLB1', title: 'a', price: 1, status: 'active', isCatalogListing: false, catalogProductId: 'FICHA-X', skuCode: 'S1' },
+        { id: 'MLB2', title: 'b', price: 1, status: 'active', isCatalogListing: false, catalogProductId: null, skuCode: 'S2' },
+      ],
+    });
+    const list = await service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 50 });
+    expect(list.items.map((i) => i.itemId)).toEqual(['MLB2']);
+    const batch = await service.planBatch('tenant-1', { offset: 0, limit: 5 });
+    expect(batch.total).toBe(1);
+  });
+});
+
 describe('cache da lista de anúncios da conta (5 min, por tenant)', () => {
   const originalFlag = process.env[CATALOG_CREATE_FLAG];
   beforeEach(() => {

@@ -50,7 +50,7 @@ anúncio de catálogo independente por esse EAN.
 
 ## 5. Executado x não executado (09/10/2026)
 
-- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 84 testes passando
+- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 85 testes passando
   (inclui solver, GTIN, payload e o serviço de plano/criação com fakes: isolamento de conta,
   flag desligada, duplicidade, trava de concorrência). `npm run typecheck` sem erros.
   `npm run lint`: 0 erros, 5 avisos (= baseline, não subiu).
@@ -85,6 +85,14 @@ com `offset` até `total`. Não exercitado contra o ML real.
 os anúncios da conta é caro. Correções: cache em memória por tenant (5 min) da lista de anúncios nos
 planos de leitura (a criação sempre relê); timeout de 90s no MCP para os planos. Tempo real do lote
 não medido; se ainda estourar, reduzir `limit` ou mover para processamento assíncrono.
+
+**Primeiro teste real (09/10/2026, offset 0, limit 3, total 318):** o lote respondeu (sem timeout), mas
+2 de 3 itens eram anúncios já ligados a ficha (têm `catalog_product_id`, ainda que o resumo em lote
+não marque `catalog_listing`) e entraram na lista de "tradicionais" por engano. Corrigido: a lista e o
+lote tratam `catalog_listing` OU `catalog_product_id` como catálogo, igual ao detalhe do anúncio. O
+terceiro item bloqueou por **alíquota não resolvida** (Tax Intelligence com RBT12 incompleto: faltam
+2025-10 a 2026-04 do PGDAS-D) — enquanto isso, o plano exige `taxRatePct` (override); a escolha da
+alíquota é do dono e a criação deve usar a mesma do plano.
 
 ## 5.1 Endpoints (prefixo `/api/promotion-intelligence/mercado-livre/catalog-creation`)
 
