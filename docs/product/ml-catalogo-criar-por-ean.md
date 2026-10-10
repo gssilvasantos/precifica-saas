@@ -50,7 +50,7 @@ anúncio de catálogo independente por esse EAN.
 
 ## 5. Executado x não executado (09/10/2026)
 
-- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 81 testes passando
+- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 83 testes passando
   (inclui solver, GTIN, payload e o serviço de plano/criação com fakes: isolamento de conta,
   flag desligada, duplicidade, trava de concorrência). `npm run typecheck` sem erros.
   `npm run lint`: 0 erros, 5 avisos (= baseline, não subiu).
@@ -75,6 +75,12 @@ Mercado Turbo sempre inclui os pais. A verificação certa é **por EAN** (cada 
 traz `existingCatalogListingId` quando a conta já tem catálogo ativo da mesma ficha/SKU, e a criação
 recusa (409) nesse caso.
 
+**Fonte da lista (09/10/2026):** a planilha "sem catálogo" levantada no Mercado Turbo foi descartada —
+o Gui encontrou anúncios nela que têm catálogo. A fonte confiável é o plano em lote do Kyneti
+(`plan-batch`), que consulta o Mercado Livre por EAN: `READY`, `ALREADY_HAS_CATALOG` ou `BLOCKED` (com
+motivo). Página de no máximo 5 anúncios por chamada (várias chamadas ao ML por unidade); percorrer
+com `offset` até `total`. Não exercitado contra o ML real.
+
 ## 5.1 Endpoints (prefixo `/api/promotion-intelligence/mercado-livre/catalog-creation`)
 
 Auth: JWT + módulo Promoções. `POST .../create` aceita `variationId` no corpo. O `tenantId` vem do token.
@@ -82,6 +88,7 @@ Auth: JWT + módulo Promoções. `POST .../create` aceita `variationId` no corpo
 | Método | Rota | Papel | O que faz |
 |---|---|---|---|
 | GET | `/traditional-items?offset&limit` | qualquer com módulo | Tradicionais ativos (limite 100), marca SKU que já tem catálogo |
+| GET | `/plan-batch?offset&limit(≤5)&targetMarginPct&taxRatePct` | qualquer com módulo | Plano em lote por EAN (lista confiável do que falta) |
 | GET | `/items/:itemId/variations/plan` | qualquer com módulo | Plano de todas as variações (linha por variação, com erro quando não dá) |
 | GET | `/items/:itemId/plan?variationId&targetMarginPct&taxRatePct` | qualquer com módulo | Plano: EAN, ficha, SKU, preço, margem. Só lê |
 | POST | `/items/:itemId/create` | ADMIN ou PRICING_EDITOR | Cria 1 anúncio. 403 `ML_CATALOG_CREATE_DISABLED` sem a flag; 409 se já existe ou em andamento |

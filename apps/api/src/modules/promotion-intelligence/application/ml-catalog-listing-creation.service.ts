@@ -31,6 +31,8 @@ import {
 export const CATALOG_CREATE_FLAG = 'ML_CATALOG_LISTING_CREATE_ENABLED';
 // Piso: a criação nunca aceita margem alvo abaixo disto (o padrão é 40).
 const MIN_TARGET_MARGIN_PCT = 5;
+// Anúncios por chamada do plano em lote (cada um faz várias chamadas ao ML).
+const BATCH_MAX_ITEMS = 5;
 
 export interface CatalogCreationOptions {
   targetMarginPct?: number;
@@ -55,6 +57,43 @@ export interface VariationPlanRow {
   plan: CatalogCreationPlan | null;
   // Motivo quando não dá para criar (sem EAN, sem ficha, sem custo...).
   error: string | null;
+}
+
+export type BatchRowStatus = 'READY' | 'ALREADY_HAS_CATALOG' | 'BLOCKED';
+
+export interface BatchPlanRow {
+  itemId: string;
+  variationId: string | null;
+  skuCode: string | null;
+  label: string | null;
+  status: BatchRowStatus;
+  gtin: string | null;
+  catalogProductId: string | null;
+  existingCatalogListingId: string | null;
+  // Presente só quando status = READY.
+  plan: CatalogCreationPlan | null;
+  // Motivo quando BLOCKED.
+  reason: string | null;
+}
+
+export interface BatchPlanResult {
+  total: number;
+  offset: number;
+  limit: number;
+  counts: Record<BatchRowStatus, number>;
+  rows: BatchPlanRow[];
+}
+
+// Sinal interno: a ficha já tem catálogo ativo na conta — o lote não gasta
+// chamadas calculando preço para quem não vai criar.
+class ExistingCatalogSignal extends Error {
+  constructor(
+    readonly gtin: string,
+    readonly catalogProductId: string,
+    readonly existingCatalogListingId: string,
+  ) {
+    super('existing catalog listing');
+  }
 }
 
 export interface CatalogCreationPlan {
@@ -181,6 +220,94 @@ export class MlCatalogListingCreationService {
     return rows;
   }
 
+  // Plano em LOTE (só leitura): percorre uma página dos tradicionais ativos da
+  // conta e planeja cada anúncio simples / cada variação, pelo EAN. É a lista
+  // confiável de "o que ainda não tem catálogo" (substitui a do Mercado Turbo).
+  // Página pequena de propósito (cada unidade faz várias chamadas ao ML).
+  async planBatch(
+    tenantId: string,
+    page: { offset: number; limit: number },
+    options: CatalogCreationOptions = {},
+  ): Promise<BatchPlanResult> {
+    const limit = Math.min(Math.max(page.limit, 1), BATCH_MAX_ITEMS);
+    const offset = Math.max(page.offset, 0);
+    const targetMarginPct = this.resolveTargetMargin(options.targetMarginPct);
+    const accessToken = await this.connections.getValidAccessToken(tenantId);
+    const summaries = await this.loadSellerSummaries(tenantId);
+    const catalogListings = summaries.filter((x) => x.isCatalogListing && x.status === 'active');
+    const traditional = summaries.filter((x) => !x.isCatalogListing && x.status === 'active').sort((a, b) => a.id.localeCompare(b.id));
+
+    const rows: BatchPlanRow[] = [];
+    // Em série: rate limit do ML.
+    for (const summary of traditional.slice(offset, offset + limit)) {
+      const item = await this.client.fetchItemPricingContext(summary.id, accessToken);
+      try {
+        await this.assertSourceItem(tenantId, summary.id, item);
+      } catch (error) {
+        if (!(error instanceof HttpException)) throw error;
+        rows.push(this.blockedRow(summary.id, null, summary.skuCode, null, error.message));
+        continue;
+      }
+      const variationIds: (string | undefined)[] = item.variations.length > 0 ? item.variations.map((v) => v.id) : [undefined];
+      for (const variationId of variationIds) {
+        let unit: CreationUnit | null = null;
+        try {
+          unit = this.pickUnit(summary.id, item, variationId);
+          const plan = await this.buildPlan(tenantId, accessToken, summary.id, item, unit, options, targetMarginPct, catalogListings, true);
+          rows.push({
+            itemId: summary.id,
+            variationId: unit.variationId,
+            skuCode: plan.skuCode,
+            label: unit.label,
+            status: 'READY',
+            gtin: plan.gtin,
+            catalogProductId: plan.catalogProductId,
+            existingCatalogListingId: null,
+            plan,
+            reason: null,
+          });
+        } catch (error) {
+          if (error instanceof ExistingCatalogSignal) {
+            rows.push({
+              itemId: summary.id,
+              variationId: unit?.variationId ?? null,
+              skuCode: unit?.skuCode ?? null,
+              label: unit?.label ?? null,
+              status: 'ALREADY_HAS_CATALOG',
+              gtin: error.gtin,
+              catalogProductId: error.catalogProductId,
+              existingCatalogListingId: error.existingCatalogListingId,
+              plan: null,
+              reason: null,
+            });
+          } else if (error instanceof HttpException) {
+            rows.push(this.blockedRow(summary.id, unit?.variationId ?? variationId ?? null, unit?.skuCode ?? null, unit?.label ?? null, error.message));
+          } else {
+            throw error;
+          }
+        }
+      }
+    }
+    const counts: Record<BatchRowStatus, number> = { READY: 0, ALREADY_HAS_CATALOG: 0, BLOCKED: 0 };
+    for (const r of rows) counts[r.status] += 1;
+    return { total: traditional.length, offset, limit, counts, rows };
+  }
+
+  private blockedRow(itemId: string, variationId: string | null, skuCode: string | null, label: string | null, reason: string): BatchPlanRow {
+    return {
+      itemId,
+      variationId,
+      skuCode,
+      label,
+      status: 'BLOCKED',
+      gtin: null,
+      catalogProductId: null,
+      existingCatalogListingId: null,
+      plan: null,
+      reason,
+    };
+  }
+
   // Dono do anúncio de origem: o ML recusa ler dado privado de outro
   // vendedor, mas conferimos aqui para não planejar sobre item alheio.
   private async assertSourceItem(tenantId: string, sourceItemId: string, item: MlItemPricingContext): Promise<void> {
@@ -238,6 +365,7 @@ export class MlCatalogListingCreationService {
     options: CatalogCreationOptions,
     targetMarginPct: number,
     catalogListings: MlCatalogListingSummary[],
+    stopIfExisting = false,
   ): Promise<CatalogCreationPlan> {
     if (!unit.skuCode) {
       throw new UnprocessableEntityException(`${unit.where} não tem SKU do vendedor — sem SKU não há custo nem vínculo com o Olist.`);
@@ -264,6 +392,7 @@ export class MlCatalogListingCreationService {
     }
     const product = hits[0];
     const existing = catalogListings.find((s) => s.catalogProductId === product.id || s.skuCode === skuCode);
+    if (existing && stopIfExisting) throw new ExistingCatalogSignal(gtin, product.id, existing.id);
 
     const cost = await this.catalog.findBySku(tenantId, skuCode);
     if (!cost) {

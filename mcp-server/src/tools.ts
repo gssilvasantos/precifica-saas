@@ -353,6 +353,29 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
     },
   );
 
+  server.registerTool(
+    'kyneti_plan_ml_catalog_creation_batch',
+    {
+      description:
+        'Plano em LOTE (só leitura) do que falta ter catálogo, POR EAN: percorre uma página dos anúncios tradicionais ativos e, para cada anúncio simples ou variação, devolve status READY (pode criar; traz preço e margem), ALREADY_HAS_CATALOG (a conta já tem catálogo da ficha) ou BLOCKED (com o motivo: sem EAN, sem ficha, sem SKU, sem custo...). Página pequena (máx. 5 anúncios; cada um faz várias chamadas ao ML) — chame uma página por vez, aumentando offset até cobrir total. Substitui a lista "sem catálogo" do Mercado Turbo. Fonte: GET /promotion-intelligence/mercado-livre/catalog-creation/plan-batch.',
+      inputSchema: {
+        offset: z.number().int().min(0).optional().describe('Início da página (padrão 0)'),
+        limit: z.number().int().min(1).max(5).optional().describe('Anúncios por página (padrão 3, máx. 5)'),
+        targetMarginPct: z.number().min(5).max(99).optional().describe('Margem alvo em % (padrão 40)'),
+        taxRatePct: z.number().min(0).max(99.99).optional().describe('Alíquota de imposto em % para sobrescrever a calculada'),
+      },
+    },
+    async ({ offset, limit, targetMarginPct, taxRatePct }) => {
+      try {
+        return toResult(
+          await client.get('/promotion-intelligence/mercado-livre/catalog-creation/plan-batch', { offset, limit, targetMarginPct, taxRatePct }),
+        );
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
   if (!writesEnabled) return;
 
   // --- v2: Mercado Livre — ESCRITA real no anúncio (SELLER_SKU) ---

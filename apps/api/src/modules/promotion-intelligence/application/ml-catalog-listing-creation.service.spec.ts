@@ -263,6 +263,63 @@ describe('anúncio com variações (um catálogo por variação, pelo EAN de cad
   });
 });
 
+describe('MlCatalogListingCreationService.planBatch (só leitura, por EAN)', () => {
+  const rows = (...ids: string[]) =>
+    ids.map((id) => ({ id, title: id, price: 10, status: 'active', isCatalogListing: false, catalogProductId: null, skuCode: null }));
+
+  it('planeja anúncio simples e variações, separando pronto / já tem catálogo / bloqueado', async () => {
+    const { service, client } = build({
+      summaries: [
+        ...rows('MLB1', 'MLB2'),
+        { id: 'MLB9', title: 'cat', price: 1, status: 'active', isCatalogListing: true, catalogProductId: 'FICHA-EXISTENTE', skuCode: null },
+      ],
+    });
+    (client.fetchItemPricingContext as jest.Mock).mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'MLB1'
+          ? { id, title: 'simples', status: 'active', categoryId: 'MLB1234', skuCode: 'RM0130', isCatalogListing: false, catalogProductId: null,
+              attributes: [{ id: 'GTIN', value_name: '7908254900097' }], sellerId: '123', originalPrice: null, availableQuantity: 5, listingTypeId: 'gold_special', variations: [] }
+          : { id, title: 'pai', status: 'active', categoryId: 'MLB1234', skuCode: null, isCatalogListing: false, catalogProductId: null,
+              attributes: [], sellerId: '123', originalPrice: null, availableQuantity: 5, listingTypeId: 'gold_special',
+              variations: [
+                { id: '1', skuCode: 'RM0134', label: 'Rosa', availableQuantity: 1, attributes: [{ id: 'GTIN', value_name: '7908254900004' }] },
+                { id: '2', skuCode: 'RM0999', label: 'Preto', availableQuantity: 1, attributes: [] },
+              ] },
+      ),
+    );
+    // A ficha da variação 1 do MLB2 já tem catálogo na conta.
+    (client.searchCatalogProductsByGtin as jest.Mock).mockImplementation((gtin: string) =>
+      Promise.resolve([{ id: gtin === '7908254900004' ? 'FICHA-EXISTENTE' : 'MLB999', name: 'n', domainId: null, status: 'active' }]),
+    );
+    const res = await service.planBatch('tenant-1', { offset: 0, limit: 5 });
+    expect(res.total).toBe(2);
+    expect(res.counts).toEqual({ READY: 1, ALREADY_HAS_CATALOG: 1, BLOCKED: 1 });
+    expect(res.rows.map((r) => [r.itemId, r.variationId, r.status])).toEqual([
+      ['MLB1', null, 'READY'],
+      ['MLB2', '1', 'ALREADY_HAS_CATALOG'],
+      ['MLB2', '2', 'BLOCKED'],
+    ]);
+    expect(res.rows[1].existingCatalogListingId).toBe('MLB9');
+    expect(res.rows[2].reason).toMatch(/sem EAN/);
+    expect(client.createCatalogItem).not.toHaveBeenCalled();
+  });
+
+  it('limita a página a 5 anúncios, respeita offset e bloqueia item de outra conta sem derrubar o lote', async () => {
+    const { service, client } = build({ summaries: rows('MLB1', 'MLB2', 'MLB3', 'MLB4', 'MLB5', 'MLB6', 'MLB7') });
+    (client.fetchItemPricingContext as jest.Mock).mockImplementation((id: string) =>
+      Promise.resolve({
+        id, title: id, status: 'active', categoryId: 'MLB1234', skuCode: 'RM0130', isCatalogListing: false, catalogProductId: null,
+        attributes: [{ id: 'GTIN', value_name: '7908254900097' }], sellerId: id === 'MLB3' ? '999' : '123', originalPrice: null,
+        availableQuantity: 5, listingTypeId: 'gold_special', variations: [],
+      }),
+    );
+    const res = await service.planBatch('tenant-1', { offset: 1, limit: 1000 });
+    expect(res.limit).toBe(5);
+    expect(res.rows.map((r) => r.itemId)).toEqual(['MLB2', 'MLB3', 'MLB4', 'MLB5', 'MLB6']);
+    expect(res.rows.find((r) => r.itemId === 'MLB3')?.status).toBe('BLOCKED');
+  });
+});
+
 describe('MlCatalogListingCreationService.listTraditionalWithoutCatalog', () => {
   it('lista só tradicionais ativos, marca SKU que já tem catálogo e limita a página', async () => {
     const { service } = build({
