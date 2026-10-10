@@ -79,6 +79,11 @@ export class MlCatalogCreationOptionsDto {
   @Min(0)
   @Max(99.99)
   taxRatePct?: number;
+
+  // Id da variação (anúncios com variações geram um catálogo POR variação).
+  @IsOptional()
+  @Matches(/^\d{1,20}$/, { message: 'variationId deve conter só dígitos.' })
+  variationId?: string;
 }
 
 export const ML_ITEM_ID_PATTERN = /^MLB\d{6,15}$/;

@@ -27,8 +27,9 @@ anúncio de catálogo independente por esse EAN.
 ## 3. Procedimento
 
 1. Listar anúncios tradicionais ativos sem anúncio de catálogo correspondente.
-2. Ler o GTIN/EAN do tradicional (`extractGtin`: atributo GTIN, senão EAN; 8/12/13/14 dígitos).
-   Sem EAN válido → pular e reportar.
+2. Ler o GTIN/EAN (`extractGtin`: atributo GTIN, senão EAN; 8/12/13/14 dígitos). **Anúncio com
+   variações: cada variação tem SKU e EAN próprios e gera o SEU anúncio de catálogo** (decisão do
+   Gui, 09/10/2026) — o EAN e o SKU vêm da variação, nunca do anúncio. Sem EAN válido → pular e reportar.
 3. Buscar a ficha de catálogo pelo GTIN. Sem ficha → pular (não existe catálogo para criar).
 4. Obter SKU, custo (catálogo interno), alíquota (Tax Intelligence), categoria e tipo de anúncio.
 5. Frete (`shipping_options/free`) e tarifa (`listing_prices`) vêm do ML.
@@ -49,7 +50,7 @@ anúncio de catálogo independente por esse EAN.
 
 ## 5. Executado x não executado (09/10/2026)
 
-- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 74 testes passando
+- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 79 testes passando
   (inclui solver, GTIN, payload e o serviço de plano/criação com fakes: isolamento de conta,
   flag desligada, duplicidade, trava de concorrência). `npm run typecheck` sem erros.
   `npm run lint`: 0 erros, 5 avisos (= baseline, não subiu).
@@ -59,14 +60,24 @@ anúncio de catálogo independente por esse EAN.
 - **Pendente**: linha `ML_CATALOG_LISTING_CREATE_ENABLED` em `apps/api/.env.example` — o acesso a
   esse arquivo foi negado nesta sessão; adicionar à mão (vazio = desligado, só "true" liga).
 
+## 4.1 Variações (09/10/2026)
+
+Planilha "sem catálogo" do Mercado Turbo (09/10/2026): 352 tradicionais (239 ativos, 113 pausados);
+79 têm variações. Regra: um catálogo por EAN, ou seja, por variação. O plano de um anúncio com
+variações exige `variationId` (422 `ML_ITEM_HAS_VARIATIONS` lista as variações); `variations/plan`
+planeja todas de uma vez, com o motivo das que não dá. Anúncios repetidos do mesmo produto (ex.:
+RM0242-1 a -6) caem na trava de duplicidade (mesma ficha/SKU) — cria-se um por ficha.
+Formato das variações no `GET /items/:id` é suposição da documentação, não exercitado.
+
 ## 5.1 Endpoints (prefixo `/api/promotion-intelligence/mercado-livre/catalog-creation`)
 
-Auth: JWT + módulo Promoções. O `tenantId` vem do token.
+Auth: JWT + módulo Promoções. `POST .../create` aceita `variationId` no corpo. O `tenantId` vem do token.
 
 | Método | Rota | Papel | O que faz |
 |---|---|---|---|
 | GET | `/traditional-items?offset&limit` | qualquer com módulo | Tradicionais ativos (limite 100), marca SKU que já tem catálogo |
-| GET | `/items/:itemId/plan?targetMarginPct&taxRatePct` | qualquer com módulo | Plano: EAN, ficha, SKU, preço, margem. Só lê |
+| GET | `/items/:itemId/variations/plan` | qualquer com módulo | Plano de todas as variações (linha por variação, com erro quando não dá) |
+| GET | `/items/:itemId/plan?variationId&targetMarginPct&taxRatePct` | qualquer com módulo | Plano: EAN, ficha, SKU, preço, margem. Só lê |
 | POST | `/items/:itemId/create` | ADMIN ou PRICING_EDITOR | Cria 1 anúncio. 403 `ML_CATALOG_CREATE_DISABLED` sem a flag; 409 se já existe ou em andamento |
 
 Flag: `ML_CATALOG_LISTING_CREATE_ENABLED=true` (separada de `ML_CAMPAIGN_WRITES_ENABLED`).

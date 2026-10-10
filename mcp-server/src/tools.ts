@@ -308,6 +308,33 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
         'Planeja a criação de um anúncio de CATÁLOGO a partir de UM anúncio tradicional: lê o EAN do tradicional, acha a ficha de catálogo, e calcula o menor preço com a margem alvo (padrão 40%) sobre custo + imposto + tarifa + frete. Estoque inicial 1 e SKU do produto. Só leitura — não cria nada. Devolve erro 422 com o motivo quando não dá (sem EAN, sem ficha, mais de uma ficha, sem SKU, sem custo). Fonte: GET /promotion-intelligence/mercado-livre/catalog-creation/items/:itemId/plan.',
       inputSchema: {
         itemId: z.string().regex(/^MLB\d{6,15}$/).describe('Id do anúncio TRADICIONAL de origem, ex.: MLB7393870900'),
+        variationId: z.string().regex(/^\d{1,20}$/).optional().describe('Id da variação. Obrigatório quando o anúncio tem variações (cada variação gera o SEU catálogo, pelo EAN dela)'),
+        targetMarginPct: z.number().min(5).max(99).optional().describe('Margem alvo em % (padrão 40)'),
+        taxRatePct: z.number().min(0).max(99.99).optional().describe('Alíquota de imposto em % para sobrescrever a calculada (ex.: 7.3)'),
+      },
+    },
+    async ({ itemId, variationId, targetMarginPct, taxRatePct }) => {
+      try {
+        return toResult(
+          await client.get(`/promotion-intelligence/mercado-livre/catalog-creation/items/${encodeURIComponent(itemId)}/plan`, {
+            variationId,
+            targetMarginPct,
+            taxRatePct,
+          }),
+        );
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    'kyneti_plan_ml_catalog_creation_variations',
+    {
+      description:
+        'Planeja a criação de catálogo de TODAS as variações de um anúncio tradicional de uma vez: uma linha por variação (variationId, SKU, EAN, ficha, preço, margem) ou o motivo de não dar (sem EAN, sem ficha, sem custo...). Só leitura. Fonte: GET /promotion-intelligence/mercado-livre/catalog-creation/items/:itemId/variations/plan.',
+      inputSchema: {
+        itemId: z.string().regex(/^MLB\d{6,15}$/).describe('Id do anúncio TRADICIONAL com variações, ex.: MLB6223019912'),
         targetMarginPct: z.number().min(5).max(99).optional().describe('Margem alvo em % (padrão 40)'),
         taxRatePct: z.number().min(0).max(99.99).optional().describe('Alíquota de imposto em % para sobrescrever a calculada (ex.: 7.3)'),
       },
@@ -315,7 +342,7 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
     async ({ itemId, targetMarginPct, taxRatePct }) => {
       try {
         return toResult(
-          await client.get(`/promotion-intelligence/mercado-livre/catalog-creation/items/${encodeURIComponent(itemId)}/plan`, {
+          await client.get(`/promotion-intelligence/mercado-livre/catalog-creation/items/${encodeURIComponent(itemId)}/variations/plan`, {
             targetMarginPct,
             taxRatePct,
           }),
@@ -404,15 +431,17 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
         'ESCREVE no Mercado Livre real: cria UM anúncio de catálogo (ficha do EAN do tradicional de origem), com estoque 1, SKU do produto e o preço que dá a margem alvo. Rode kyneti_plan_ml_catalog_creation antes e só crie com a confirmação explícita do dono. O servidor recalcula tudo, recusa se já existir catálogo ativo com o mesmo SKU/ficha e não repete a chamada em timeout. Exige confirm:true. Fonte: POST /promotion-intelligence/mercado-livre/catalog-creation/items/:itemId/create.',
       inputSchema: {
         itemId: z.string().regex(/^MLB\d{6,15}$/).describe('Id do anúncio TRADICIONAL de origem, ex.: MLB7393870900'),
+        variationId: z.string().regex(/^\d{1,20}$/).optional().describe('Id da variação (obrigatório se o anúncio tem variações): cria o catálogo DESTA variação'),
         targetMarginPct: z.number().min(5).max(99).optional().describe('Margem alvo em % (padrão 40) — a mesma do plano'),
         taxRatePct: z.number().min(0).max(99.99).optional().describe('Mesma alíquota usada no plano, se foi sobrescrita'),
         confirm: z.literal(true).describe('Precisa ser exatamente true — escrita real e intencional em produção.'),
       },
     },
-    async ({ itemId, targetMarginPct, taxRatePct }) => {
+    async ({ itemId, variationId, targetMarginPct, taxRatePct }) => {
       try {
         return toResult(
           await client.post(`/promotion-intelligence/mercado-livre/catalog-creation/items/${encodeURIComponent(itemId)}/create`, {
+            ...(variationId !== undefined ? { variationId } : {}),
             ...(targetMarginPct !== undefined ? { targetMarginPct } : {}),
             ...(taxRatePct !== undefined ? { taxRatePct } : {}),
           }),

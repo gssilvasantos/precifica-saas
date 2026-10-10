@@ -165,10 +165,11 @@ respondem 403.
 
 ## v4 (09/10/2026) — Criar anúncio de catálogo pelo EAN
 
-Três ferramentas novas (ver `docs/product/ml-catalogo-criar-por-ean.md`):
+Quatro ferramentas novas (ver `docs/product/ml-catalogo-criar-por-ean.md`):
 
 - `kyneti_list_ml_traditional_items` (leitura)
-- `kyneti_plan_ml_catalog_creation` (leitura — não cria nada)
+- `kyneti_plan_ml_catalog_creation` (leitura — não cria nada; `variationId` para anúncio com variações)
+- `kyneti_plan_ml_catalog_creation_variations` (leitura — plano de todas as variações de um anúncio)
 - `kyneti_create_ml_catalog_listing` (**escrita real**, só registrada com
   `MCP_ALLOW_WRITES=true`; exige `confirm:true`, PRICING_EDITOR e, na API,
   `ML_CATALOG_LISTING_CREATE_ENABLED=true`). Um anúncio por chamada.

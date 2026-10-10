@@ -29,6 +29,7 @@ function build(o: Overrides = {}) {
       originalPrice: null,
       availableQuantity: 5,
       listingTypeId: 'gold_special',
+      variations: [],
       ...o.item,
     }),
     searchCatalogProductsByGtin: jest.fn().mockResolvedValue(o.hits ?? [{ id: 'MLB999', name: 'Batom', domainId: 'MLB-LIPSTICKS', status: 'active' }]),
@@ -187,6 +188,63 @@ describe('MlCatalogListingCreationService.create', () => {
     await expect(service.create('tenant-1', 'MLB111')).rejects.toBeInstanceOf(ConflictException);
     release();
     await first;
+    expect(client.createCatalogItem).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('anúncio com variações (um catálogo por variação, pelo EAN de cada uma)', () => {
+  const variations = [
+    { id: '111', skuCode: 'RM0130', label: 'Cor: Rosa', availableQuantity: 4, attributes: [{ id: 'GTIN', value_name: '7908254900097' }] },
+    { id: '222', skuCode: 'RM0134', label: 'Cor: Nude', availableQuantity: 2, attributes: [{ id: 'GTIN', value_name: '7908254900004' }] },
+    { id: '333', skuCode: 'RM0999', label: 'Cor: Preto', availableQuantity: 1, attributes: [] },
+  ];
+  const itemWithVariations = { skuCode: null, attributes: [], variations };
+
+  it('plan sem variationId recusa (422) e lista as variações', async () => {
+    const { service } = build({ item: itemWithVariations });
+    await expect(service.plan('tenant-1', 'MLB111')).rejects.toThrow(/3 variações/);
+  });
+
+  it('plan com variationId usa o SKU e o EAN DA VARIAÇÃO', async () => {
+    const { service, client } = build({ item: itemWithVariations });
+    const plan = await service.plan('tenant-1', 'MLB111', { variationId: '222' });
+    expect(client.searchCatalogProductsByGtin).toHaveBeenCalledWith('7908254900004', 'token');
+    expect(plan.skuCode).toBe('RM0134');
+    expect(plan.variationId).toBe('222');
+    expect(plan.variationLabel).toBe('Cor: Nude');
+  });
+
+  it('variação inexistente e variationId em anúncio sem variações são recusados', async () => {
+    await expect(build({ item: itemWithVariations }).service.plan('tenant-1', 'MLB111', { variationId: '999' })).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+    await expect(build().service.plan('tenant-1', 'MLB111', { variationId: '111' })).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('planVariations devolve uma linha por variação, com o motivo das que não dá', async () => {
+    const { service } = build({ item: itemWithVariations });
+    const rows = await service.planVariations('tenant-1', 'MLB111');
+    expect(rows.map((r) => [r.variationId, r.plan ? 'ok' : 'erro'])).toEqual([['111', 'ok'], ['222', 'ok'], ['333', 'erro']]);
+    expect(rows[2].error).toMatch(/sem EAN/);
+  });
+
+  const originalFlag = process.env[CATALOG_CREATE_FLAG];
+  beforeEach(() => {
+    process.env[CATALOG_CREATE_FLAG] = 'true';
+  });
+  afterAll(() => {
+    if (originalFlag === undefined) delete process.env[CATALOG_CREATE_FLAG];
+    else process.env[CATALOG_CREATE_FLAG] = originalFlag;
+  });
+
+  it('create de variação escreve com o SKU da variação e recusa anúncio com variações sem variationId', async () => {
+    const { service, client } = build({ item: itemWithVariations });
+    await service.create('tenant-1', 'MLB111', { variationId: '111' });
+    expect(client.createCatalogItem).toHaveBeenCalledWith(
+      'token',
+      expect.objectContaining({ attributes: [{ id: 'SELLER_SKU', value_name: 'RM0130' }] }),
+    );
+    await expect(service.create('tenant-1', 'MLB111')).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(client.createCatalogItem).toHaveBeenCalledTimes(1);
   });
 });

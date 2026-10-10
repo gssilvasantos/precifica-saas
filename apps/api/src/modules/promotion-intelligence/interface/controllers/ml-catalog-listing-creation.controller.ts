@@ -32,6 +32,11 @@ export class MlCatalogListingCreationController {
     return this.service.plan(user.tenantId, params.itemId, query);
   }
 
+  @Get('items/:itemId/variations/plan')
+  planVariations(@CurrentUser() user: AuthenticatedUser, @Param() params: MlItemIdParam, @Query() query: MlCatalogCreationOptionsDto) {
+    return this.service.planVariations(user.tenantId, params.itemId, query);
+  }
+
   @Roles(UserRole.ADMIN, UserRole.PRICING_EDITOR)
   @Post('items/:itemId/create')
   create(@CurrentUser() user: AuthenticatedUser, @Param() params: MlItemIdParam, @Body() dto: MlCatalogCreationOptionsDto) {

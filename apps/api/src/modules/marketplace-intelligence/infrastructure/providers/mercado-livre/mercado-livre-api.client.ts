@@ -217,6 +217,18 @@ export interface MlItemPricingContext extends MlItemDetail {
   originalPrice: number | null;
   availableQuantity: number;
   listingTypeId: string | null;
+  // Variações do anúncio (vazio = anúncio sem variação). Cada variação tem
+  // SKU e GTIN próprios — é por elas que se cria anúncio de catálogo.
+  variations: MlItemVariation[];
+}
+
+export interface MlItemVariation {
+  id: string;
+  skuCode: string | null;
+  attributes: MlItemAttribute[];
+  // Ex.: "Cor: Rosa" — só para o humano identificar a variação.
+  label: string | null;
+  availableQuantity: number;
 }
 
 export interface MlCatalogListingSummary {
@@ -1109,14 +1121,38 @@ export class MercadoLivreApiClient {
       original_price?: number | null;
       available_quantity?: number | null;
       listing_type_id?: string | null;
+      variations?: {
+        id?: number | string;
+        seller_custom_field?: string | null;
+        available_quantity?: number | null;
+        attributes?: { id: string; value_name?: string | null }[];
+        attribute_combinations?: { name?: string | null; value_name?: string | null }[];
+      }[];
     };
     const detail = this.toItemDetail(data);
+    // Parse defensivo: formato da variação vem da documentação, nunca
+    // exercitado contra o ML real (ver docs/product/ml-catalogo-criar-por-ean.md).
+    const variations: MlItemVariation[] = (data.variations ?? [])
+      .filter((v) => v.id !== undefined && v.id !== null)
+      .map((v) => ({
+        id: String(v.id),
+        skuCode:
+          v.seller_custom_field ?? v.attributes?.find((a) => a.id === 'SELLER_SKU')?.value_name ?? null,
+        attributes: (v.attributes ?? []).map((a) => ({ id: a.id, value_name: a.value_name ?? null })),
+        label:
+          (v.attribute_combinations ?? [])
+            .map((c) => [c.name, c.value_name].filter(Boolean).join(': '))
+            .filter(Boolean)
+            .join(' / ') || null,
+        availableQuantity: typeof v.available_quantity === 'number' ? v.available_quantity : 0,
+      }));
     return {
       ...detail,
       sellerId: data.seller_id != null ? String(data.seller_id) : null,
       originalPrice: typeof data.original_price === 'number' ? data.original_price : null,
       availableQuantity: typeof data.available_quantity === 'number' ? data.available_quantity : 0,
       listingTypeId: data.listing_type_id ?? null,
+      variations,
     };
   }
 
