@@ -92,6 +92,20 @@ describe('MlCatalogListingCreationService.plan', () => {
     expect(client.searchCatalogProductsByGtin).not.toHaveBeenCalled();
   });
 
+  it('sinaliza no plano quando já existe catálogo ativo da conta para a ficha (verificação pelo EAN)', async () => {
+    const { service } = build({
+      summaries: [{ id: 'MLB777', title: 'c', price: 1, status: 'active', isCatalogListing: true, catalogProductId: 'MLB999', skuCode: null }],
+    });
+    const plan = await service.plan('tenant-1', 'MLB111');
+    expect(plan.existingCatalogListingId).toBe('MLB777');
+    expect(plan.warnings[0]).toMatch(/Já existe o anúncio de catálogo MLB777/);
+  });
+
+  it('sem catálogo existente, existingCatalogListingId é null', async () => {
+    const { service } = build();
+    expect((await service.plan('tenant-1', 'MLB111')).existingCatalogListingId).toBeNull();
+  });
+
   it('recusa quando não há ficha de catálogo para o EAN', async () => {
     const { service } = build({ hits: [] });
     await expect(service.plan('tenant-1', 'MLB111')).rejects.toThrow(/Não existe ficha/);

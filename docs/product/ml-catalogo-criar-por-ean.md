@@ -50,7 +50,7 @@ anúncio de catálogo independente por esse EAN.
 
 ## 5. Executado x não executado (09/10/2026)
 
-- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 79 testes passando
+- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 81 testes passando
   (inclui solver, GTIN, payload e o serviço de plano/criação com fakes: isolamento de conta,
   flag desligada, duplicidade, trava de concorrência). `npm run typecheck` sem erros.
   `npm run lint`: 0 erros, 5 avisos (= baseline, não subiu).
@@ -68,6 +68,12 @@ variações exige `variationId` (422 `ML_ITEM_HAS_VARIATIONS` lista as variaçõ
 planeja todas de uma vez, com o motivo das que não dá. Anúncios repetidos do mesmo produto (ex.:
 RM0242-1 a -6) caem na trava de duplicidade (mesma ficha/SKU) — cria-se um por ficha.
 Formato das variações no `GET /items/:id` é suposição da documentação, não exercitado.
+
+Esclarecimento do Gui (09/10/2026): o **anúncio-pai com variações nunca terá catálogo** — o catálogo
+é por variação; o anúncio simples (sem variação) tem o seu. Por isso a listagem "sem catálogo" do
+Mercado Turbo sempre inclui os pais. A verificação certa é **por EAN** (cada EAN tem seu SKU): o plano
+traz `existingCatalogListingId` quando a conta já tem catálogo ativo da mesma ficha/SKU, e a criação
+recusa (409) nesse caso.
 
 ## 5.1 Endpoints (prefixo `/api/promotion-intelligence/mercado-livre/catalog-creation`)
 

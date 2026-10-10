@@ -66,6 +66,10 @@ export interface CatalogCreationPlan {
   gtin: string;
   catalogProductId: string;
   catalogProductName: string | null;
+  // Já existe anúncio de catálogo ATIVO da conta com esta ficha ou este SKU?
+  // (verificação pelo EAN: cada EAN/variação é um catálogo.) Se sim, a
+  // criação é recusada (409).
+  existingCatalogListingId: string | null;
   categoryId: string;
   listingTypeId: string;
   costPrice: number;
@@ -147,7 +151,8 @@ export class MlCatalogListingCreationService {
     const item = await this.client.fetchItemPricingContext(sourceItemId, accessToken);
     await this.assertSourceItem(tenantId, sourceItemId, item);
     const unit = this.pickUnit(sourceItemId, item, options.variationId);
-    return this.buildPlan(tenantId, accessToken, sourceItemId, item, unit, options, targetMarginPct);
+    const catalogListings = await this.loadActiveCatalogListings(tenantId);
+    return this.buildPlan(tenantId, accessToken, sourceItemId, item, unit, options, targetMarginPct, catalogListings);
   }
 
   // Plano de TODAS as variações de um anúncio (uma linha por variação, com o
@@ -160,12 +165,13 @@ export class MlCatalogListingCreationService {
     if (item.variations.length === 0) {
       throw new UnprocessableEntityException(`Anúncio ${sourceItemId} não tem variações — use o plano simples.`);
     }
+    const catalogListings = await this.loadActiveCatalogListings(tenantId);
     const rows: VariationPlanRow[] = [];
     // Em série: cada plano faz várias chamadas ao ML (rate limit).
     for (const variation of item.variations) {
       try {
         const unit = this.pickUnit(sourceItemId, item, variation.id);
-        const plan = await this.buildPlan(tenantId, accessToken, sourceItemId, item, unit, options, targetMarginPct);
+        const plan = await this.buildPlan(tenantId, accessToken, sourceItemId, item, unit, options, targetMarginPct, catalogListings);
         rows.push({ variationId: variation.id, skuCode: variation.skuCode, label: variation.label, plan, error: null });
       } catch (error) {
         if (!(error instanceof HttpException)) throw error;
@@ -231,6 +237,7 @@ export class MlCatalogListingCreationService {
     unit: CreationUnit,
     options: CatalogCreationOptions,
     targetMarginPct: number,
+    catalogListings: MlCatalogListingSummary[],
   ): Promise<CatalogCreationPlan> {
     if (!unit.skuCode) {
       throw new UnprocessableEntityException(`${unit.where} não tem SKU do vendedor — sem SKU não há custo nem vínculo com o Olist.`);
@@ -256,6 +263,7 @@ export class MlCatalogListingCreationService {
       );
     }
     const product = hits[0];
+    const existing = catalogListings.find((s) => s.catalogProductId === product.id || s.skuCode === skuCode);
 
     const cost = await this.catalog.findBySku(tenantId, skuCode);
     if (!cost) {
@@ -312,6 +320,7 @@ export class MlCatalogListingCreationService {
       gtin,
       catalogProductId: product.id,
       catalogProductName: product.name,
+      existingCatalogListingId: existing?.id ?? null,
       categoryId,
       listingTypeId,
       costPrice: cost.productCostPrice,
@@ -326,6 +335,7 @@ export class MlCatalogListingCreationService {
       marginPct: solved.marginPct,
       initialStock: INITIAL_STOCK,
       warnings: [
+        ...(existing ? [`Já existe o anúncio de catálogo ${existing.id} para esta ficha/SKU — a criação será recusada.`] : []),
         'Categoria do tradicional usada na criação: o ML pode recusar se divergir da ficha de catálogo.',
         'Piso de preço de marca (ex.: Catharine Hill) NÃO é verificado aqui — confira antes de criar.',
         'Preço inicial de cadastro (margem alvo); o preço de venda real vem depois, de uma promoção.',
@@ -352,18 +362,12 @@ export class MlCatalogListingCreationService {
     try {
       const plan = await this.plan(tenantId, sourceItemId, options);
 
-      // Anti-duplicidade: já existe anúncio de catálogo ativo com este SKU ou esta ficha?
-      const summaries = await this.loadSellerSummaries(tenantId);
-      const duplicate = summaries.find(
-        (s) =>
-          s.isCatalogListing &&
-          s.status === 'active' &&
-          (s.skuCode === plan.skuCode || s.catalogProductId === plan.catalogProductId),
-      );
-      if (duplicate) {
+      // Anti-duplicidade: o plano acabou de conferir (por ficha e SKU) se já existe
+      // catálogo ativo desta variação/EAN.
+      if (plan.existingCatalogListingId) {
         throw new ConflictException({
           code: 'ML_CATALOG_LISTING_ALREADY_EXISTS',
-          message: `Já existe o anúncio de catálogo ${duplicate.id} para o SKU ${plan.skuCode} / ficha ${plan.catalogProductId}.`,
+          message: `Já existe o anúncio de catálogo ${plan.existingCatalogListingId} para o SKU ${plan.skuCode} / ficha ${plan.catalogProductId}.`,
         });
       }
 
@@ -394,6 +398,11 @@ export class MlCatalogListingCreationService {
       throw new BadRequestException(`targetMarginPct deve estar entre ${MIN_TARGET_MARGIN_PCT} e 99.`);
     }
     return v;
+  }
+
+  private async loadActiveCatalogListings(tenantId: string): Promise<MlCatalogListingSummary[]> {
+    const all = await this.loadSellerSummaries(tenantId);
+    return all.filter((x) => x.isCatalogListing && x.status === 'active');
   }
 
   private async loadSellerSummaries(tenantId: string): Promise<MlCatalogListingSummary[]> {
