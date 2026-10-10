@@ -47,6 +47,13 @@ export interface MlCreateItemPayload {
   attributes: { id: string; value_name: string }[];
 }
 
+export interface MlCatalogProductHit {
+  id: string;
+  name: string | null;
+  domainId: string | null;
+  status: string | null;
+}
+
 export interface MlCreateItemResult {
   id?: string;
   status?: string;
@@ -1031,6 +1038,49 @@ export class MercadoLivreApiClient {
     if (!response.ok) {
       const detail = data.message ?? data.error ?? JSON.stringify(data.cause ?? {});
       throw new Error(`Mercado Livre POST /items retornou HTTP ${response.status}: ${detail}`);
+    }
+    return data;
+  }
+
+  // --- Criar anúncio de catálogo pelo EAN (09/10/2026) ---
+  // AVISO DE HONESTIDADE: shapes e endpoints abaixo vêm da documentação
+  // pública e NUNCA foram chamados contra o ML real. Parse defensivo.
+
+  // Fichas de catálogo ativas para um GTIN/EAN (GET /products/search).
+  async searchCatalogProductsByGtin(gtin: string, accessToken: string): Promise<MlCatalogProductHit[]> {
+    const params = new URLSearchParams({ status: 'active', site_id: SITE_ID, product_identifier: gtin });
+    const response = await this.request(`${BASE_URL}/products/search?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      throw new Error(`Mercado Livre GET /products/search retornou HTTP ${response.status}`);
+    }
+    const data = (await response.json().catch(() => ({}))) as {
+      results?: { id?: string; name?: string; domain_id?: string; status?: string }[];
+    };
+    return (data.results ?? [])
+      .filter((r): r is { id: string; name?: string; domain_id?: string; status?: string } => typeof r.id === 'string')
+      .map((r) => ({ id: r.id, name: r.name ?? null, domainId: r.domain_id ?? null, status: r.status ?? null }));
+  }
+
+  // Cria anúncio de catálogo (POST /items com catalog_product_id). POST NÃO
+  // idempotente: timeout não prova que o ML não criou — por isso NÃO retenta
+  // em timeout (só em 429, que o ML rejeita antes de processar). Evita
+  // anúncio duplicado.
+  async createCatalogItem(accessToken: string, payload: Record<string, unknown>): Promise<MlCreateItemResult> {
+    const response = await this.request(
+      `${BASE_URL}/items`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      { retryOnTimeout: false },
+    );
+    const data = (await response.json().catch(() => ({}))) as MlCreateItemResult;
+    if (!response.ok) {
+      const detail = data.message ?? data.error ?? JSON.stringify(data.cause ?? {});
+      throw new Error(`Mercado Livre POST /items (catálogo) retornou HTTP ${response.status}: ${detail}`);
     }
     return data;
   }
