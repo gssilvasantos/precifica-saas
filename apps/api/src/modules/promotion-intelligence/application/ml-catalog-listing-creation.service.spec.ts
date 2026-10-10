@@ -29,6 +29,7 @@ function build(o: Overrides = {}) {
       originalPrice: null,
       availableQuantity: 5,
       listingTypeId: 'gold_special',
+      variations: [],
       ...o.item,
     }),
     searchCatalogProductsByGtin: jest.fn().mockResolvedValue(o.hits ?? [{ id: 'MLB999', name: 'Batom', domainId: 'MLB-LIPSTICKS', status: 'active' }]),
@@ -89,6 +90,20 @@ describe('MlCatalogListingCreationService.plan', () => {
     const { service, client } = build({ item });
     await expect(service.plan('tenant-1', 'MLB111')).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(client.searchCatalogProductsByGtin).not.toHaveBeenCalled();
+  });
+
+  it('sinaliza no plano quando já existe catálogo ativo da conta para a ficha (verificação pelo EAN)', async () => {
+    const { service } = build({
+      summaries: [{ id: 'MLB777', title: 'c', price: 1, status: 'active', isCatalogListing: true, catalogProductId: 'MLB999', skuCode: null }],
+    });
+    const plan = await service.plan('tenant-1', 'MLB111');
+    expect(plan.existingCatalogListingId).toBe('MLB777');
+    expect(plan.warnings[0]).toMatch(/Já existe o anúncio de catálogo MLB777/);
+  });
+
+  it('sem catálogo existente, existingCatalogListingId é null', async () => {
+    const { service } = build();
+    expect((await service.plan('tenant-1', 'MLB111')).existingCatalogListingId).toBeNull();
   });
 
   it('recusa quando não há ficha de catálogo para o EAN', async () => {
@@ -188,6 +203,120 @@ describe('MlCatalogListingCreationService.create', () => {
     release();
     await first;
     expect(client.createCatalogItem).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('anúncio com variações (um catálogo por variação, pelo EAN de cada uma)', () => {
+  const variations = [
+    { id: '111', skuCode: 'RM0130', label: 'Cor: Rosa', availableQuantity: 4, attributes: [{ id: 'GTIN', value_name: '7908254900097' }] },
+    { id: '222', skuCode: 'RM0134', label: 'Cor: Nude', availableQuantity: 2, attributes: [{ id: 'GTIN', value_name: '7908254900004' }] },
+    { id: '333', skuCode: 'RM0999', label: 'Cor: Preto', availableQuantity: 1, attributes: [] },
+  ];
+  const itemWithVariations = { skuCode: null, attributes: [], variations };
+
+  it('plan sem variationId recusa (422) e lista as variações', async () => {
+    const { service } = build({ item: itemWithVariations });
+    await expect(service.plan('tenant-1', 'MLB111')).rejects.toThrow(/3 variações/);
+  });
+
+  it('plan com variationId usa o SKU e o EAN DA VARIAÇÃO', async () => {
+    const { service, client } = build({ item: itemWithVariations });
+    const plan = await service.plan('tenant-1', 'MLB111', { variationId: '222' });
+    expect(client.searchCatalogProductsByGtin).toHaveBeenCalledWith('7908254900004', 'token');
+    expect(plan.skuCode).toBe('RM0134');
+    expect(plan.variationId).toBe('222');
+    expect(plan.variationLabel).toBe('Cor: Nude');
+  });
+
+  it('variação inexistente e variationId em anúncio sem variações são recusados', async () => {
+    await expect(build({ item: itemWithVariations }).service.plan('tenant-1', 'MLB111', { variationId: '999' })).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+    await expect(build().service.plan('tenant-1', 'MLB111', { variationId: '111' })).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('planVariations devolve uma linha por variação, com o motivo das que não dá', async () => {
+    const { service } = build({ item: itemWithVariations });
+    const rows = await service.planVariations('tenant-1', 'MLB111');
+    expect(rows.map((r) => [r.variationId, r.plan ? 'ok' : 'erro'])).toEqual([['111', 'ok'], ['222', 'ok'], ['333', 'erro']]);
+    expect(rows[2].error).toMatch(/sem EAN/);
+  });
+
+  const originalFlag = process.env[CATALOG_CREATE_FLAG];
+  beforeEach(() => {
+    process.env[CATALOG_CREATE_FLAG] = 'true';
+  });
+  afterAll(() => {
+    if (originalFlag === undefined) delete process.env[CATALOG_CREATE_FLAG];
+    else process.env[CATALOG_CREATE_FLAG] = originalFlag;
+  });
+
+  it('create de variação escreve com o SKU da variação e recusa anúncio com variações sem variationId', async () => {
+    const { service, client } = build({ item: itemWithVariations });
+    await service.create('tenant-1', 'MLB111', { variationId: '111' });
+    expect(client.createCatalogItem).toHaveBeenCalledWith(
+      'token',
+      expect.objectContaining({ attributes: [{ id: 'SELLER_SKU', value_name: 'RM0130' }] }),
+    );
+    await expect(service.create('tenant-1', 'MLB111')).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(client.createCatalogItem).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MlCatalogListingCreationService.planBatch (só leitura, por EAN)', () => {
+  const rows = (...ids: string[]) =>
+    ids.map((id) => ({ id, title: id, price: 10, status: 'active', isCatalogListing: false, catalogProductId: null, skuCode: null }));
+
+  it('planeja anúncio simples e variações, separando pronto / já tem catálogo / bloqueado', async () => {
+    const { service, client } = build({
+      summaries: [
+        ...rows('MLB1', 'MLB2'),
+        { id: 'MLB9', title: 'cat', price: 1, status: 'active', isCatalogListing: true, catalogProductId: 'FICHA-EXISTENTE', skuCode: null },
+      ],
+    });
+    (client.fetchItemPricingContext as jest.Mock).mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'MLB1'
+          ? { id, title: 'simples', status: 'active', categoryId: 'MLB1234', skuCode: 'RM0130', isCatalogListing: false, catalogProductId: null,
+              attributes: [{ id: 'GTIN', value_name: '7908254900097' }], sellerId: '123', originalPrice: null, availableQuantity: 5, listingTypeId: 'gold_special', variations: [] }
+          : { id, title: 'pai', status: 'active', categoryId: 'MLB1234', skuCode: null, isCatalogListing: false, catalogProductId: null,
+              attributes: [], sellerId: '123', originalPrice: null, availableQuantity: 5, listingTypeId: 'gold_special',
+              variations: [
+                { id: '1', skuCode: 'RM0134', label: 'Rosa', availableQuantity: 1, attributes: [{ id: 'GTIN', value_name: '7908254900004' }] },
+                { id: '2', skuCode: 'RM0999', label: 'Preto', availableQuantity: 1, attributes: [] },
+              ] },
+      ),
+    );
+    // A ficha da variação 1 do MLB2 já tem catálogo na conta.
+    (client.searchCatalogProductsByGtin as jest.Mock).mockImplementation((gtin: string) =>
+      Promise.resolve([{ id: gtin === '7908254900004' ? 'FICHA-EXISTENTE' : 'MLB999', name: 'n', domainId: null, status: 'active' }]),
+    );
+    const res = await service.planBatch('tenant-1', { offset: 0, limit: 5 });
+    expect(res.total).toBe(2);
+    expect(res.counts).toEqual({ READY: 1, ALREADY_HAS_CATALOG: 1, BLOCKED: 1 });
+    expect(res.rows.map((r) => [r.itemId, r.variationId, r.status])).toEqual([
+      ['MLB1', null, 'READY'],
+      ['MLB2', '1', 'ALREADY_HAS_CATALOG'],
+      ['MLB2', '2', 'BLOCKED'],
+    ]);
+    expect(res.rows[1].existingCatalogListingId).toBe('MLB9');
+    expect(res.rows[2].reason).toMatch(/sem EAN/);
+    expect(client.createCatalogItem).not.toHaveBeenCalled();
+  });
+
+  it('limita a página a 5 anúncios, respeita offset e bloqueia item de outra conta sem derrubar o lote', async () => {
+    const { service, client } = build({ summaries: rows('MLB1', 'MLB2', 'MLB3', 'MLB4', 'MLB5', 'MLB6', 'MLB7') });
+    (client.fetchItemPricingContext as jest.Mock).mockImplementation((id: string) =>
+      Promise.resolve({
+        id, title: id, status: 'active', categoryId: 'MLB1234', skuCode: 'RM0130', isCatalogListing: false, catalogProductId: null,
+        attributes: [{ id: 'GTIN', value_name: '7908254900097' }], sellerId: id === 'MLB3' ? '999' : '123', originalPrice: null,
+        availableQuantity: 5, listingTypeId: 'gold_special', variations: [],
+      }),
+    );
+    const res = await service.planBatch('tenant-1', { offset: 1, limit: 1000 });
+    expect(res.limit).toBe(5);
+    expect(res.rows.map((r) => r.itemId)).toEqual(['MLB2', 'MLB3', 'MLB4', 'MLB5', 'MLB6']);
+    expect(res.rows.find((r) => r.itemId === 'MLB3')?.status).toBe('BLOCKED');
   });
 });
 

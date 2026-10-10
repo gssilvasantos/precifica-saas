@@ -79,6 +79,42 @@ export class MlCatalogCreationOptionsDto {
   @Min(0)
   @Max(99.99)
   taxRatePct?: number;
+
+  // Id da variação (anúncios com variações geram um catálogo POR variação).
+  @IsOptional()
+  @Matches(/^\d{1,20}$/, { message: 'variationId deve conter só dígitos.' })
+  variationId?: string;
+}
+
+// Plano em lote: página pequena (máx. 5 anúncios) porque cada um faz várias
+// chamadas ao Mercado Livre.
+export class MlCatalogBatchQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  limit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(5)
+  @Max(99)
+  targetMarginPct?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(99.99)
+  taxRatePct?: number;
 }
 
 export const ML_ITEM_ID_PATTERN = /^MLB\d{6,15}$/;
