@@ -40,7 +40,7 @@ function hasCatalog(s: { isCatalogListing: boolean; catalogProductId: string | n
   return s.isCatalogListing || Boolean(s.catalogProductId);
 }
 
-const SUMMARIES_CACHE_TTL_MS = 5 * 60 * 1000;
+const SUMMARIES_CACHE_TTL_MS = 30 * 60 * 1000;
 
 export interface CatalogCreationOptions {
   targetMarginPct?: number;
@@ -161,6 +161,7 @@ export class MlCatalogListingCreationService {
   // conhecida da inscrição em campanhas; ver docs.
   private readonly createsInFlight = new Set<string>();
   private readonly summariesCache = new Map<string, { at: number; data: MlCatalogListingSummary[] }>();
+  private readonly summariesInFlight = new Map<string, Promise<MlCatalogListingSummary[]>>();
 
   constructor(
     @Inject(PRODUCT_CATALOG_READER) private readonly catalog: ProductCatalogReader,
@@ -555,8 +556,29 @@ export class MlCatalogListingCreationService {
   private async loadSellerSummaries(tenantId: string, fresh = false): Promise<MlCatalogListingSummary[]> {
     const cached = this.summariesCache.get(tenantId);
     if (!fresh && cached && Date.now() - cached.at < SUMMARIES_CACHE_TTL_MS) return cached.data;
+    // Leituras que chegam durante uma leitura em andamento (ex.: o MCP desistiu
+    // aos 90s e o usuário repetiu) ENTRAM nela em vez de começar outra leitura
+    // completa da conta. A criação (fresh) nunca entra: precisa do estado de agora.
+    const running = this.summariesInFlight.get(tenantId);
+    if (!fresh && running) return running;
+    const load = this.loadAndCacheSummaries(tenantId);
+    if (!fresh) {
+      this.summariesInFlight.set(tenantId, load);
+      const clear = () => {
+        if (this.summariesInFlight.get(tenantId) === load) this.summariesInFlight.delete(tenantId);
+      };
+      load.then(clear, clear);
+    }
+    return load;
+  }
+
+  private async loadAndCacheSummaries(tenantId: string): Promise<MlCatalogListingSummary[]> {
+    const startedAt = Date.now();
     const data = await this.fetchSellerSummaries(tenantId);
     this.summariesCache.set(tenantId, { at: Date.now(), data });
+    this.logger.log(
+      `Leitura da lista de anúncios da conta concluída: tenant=${tenantId} anuncios=${data.length} duracaoMs=${Date.now() - startedAt}`,
+    );
     return data;
   }
 
