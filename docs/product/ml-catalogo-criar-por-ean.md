@@ -45,8 +45,13 @@ anúncio de catálogo independente por esse EAN.
 - A tarifa depende do preço e tem **degrau** (taxa fixa abaixo de R$ 79), então a função não é monotônica.
   O solver itera o ponto fixo, sobe até cumprir a margem e **desce enquanto o centavo anterior ainda cumpre**
   (`domain/ml-catalog-listing-creation.ts`). Teste cobre o caso do degrau.
-- Piso de marca (ex.: Catharine Hill) continua valendo para produtos dessa marca: não aplicado
-  automaticamente nesta funcionalidade — **verificar manualmente** até ser implementado.
+- **MAP (preço mínimo da marca, `Product.mapPrice`) — aplicado desde 10/10/2026.** O plano lê o MAP do SKU:
+  - preço da margem alvo ≥ MAP → nada muda, aviso "respeita o MAP";
+  - preço da margem alvo < MAP → o preço **sobe para o MAP**, a tarifa é consultada de novo nesse preço e
+    tarifa/imposto/margem são recalculados (a margem fica ≥ alvo, pois o preço só subiu); aviso explica a subida;
+  - SKU sem MAP → cria normalmente, mas o plano avisa que o piso da marca **não foi verificado**;
+  - `create()` tem um gate final: preço < MAP → 422 `MAP_PRICE_VIOLATION`, sem chamada ao ML.
+  Kits não têm MAP por decisão do Gui (10/10/2026). Produtos próprios (RM0130, RM0134) também não.
 
 ## 5. Executado x não executado (09/10/2026)
 
@@ -54,9 +59,12 @@ anúncio de catálogo independente por esse EAN.
   (inclui solver, GTIN, payload e o serviço de plano/criação com fakes: isolamento de conta,
   flag desligada, duplicidade, trava de concorrência). `npm run typecheck` sem erros.
   `npm run lint`: 0 erros, 5 avisos (= baseline, não subiu).
+- **Atualização 10/10/2026 (trava de MAP)**: `npx jest` completo — 137 suítes, 1568 testes passando;
+  typecheck sem erros; lint 0 erros, 5 avisos (= baseline). Testes novos cobrem MAP no planejador, na adesão e na criação.
+  Não exercitado contra o Mercado Livre real.
 - **Escrito, não executado**: endpoints HTTP (nenhum teste de contrato/e2e; e2e exige Postgres).
 - **Não implementado**: ferramenta MCP, auditoria persistente, trava de duplicidade em banco
-  (hoje em memória, 1 instância), verificação de piso de marca.
+  (hoje em memória, 1 instância). Piso de marca (MAP): implementado em 10/10/2026, ver seção 4.
 - **Pendente**: linha `ML_CATALOG_LISTING_CREATE_ENABLED` em `apps/api/.env.example` — o acesso a
   esse arquivo foi negado nesta sessão; adicionar à mão (vazio = desligado, só "true" liga).
 

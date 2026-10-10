@@ -73,6 +73,33 @@ describe('MlCatalogListingCreationService.plan', () => {
     expect(client.createCatalogItem).not.toHaveBeenCalled();
   });
 
+  it('sem MAP cadastrado: planeja normalmente e avisa que o piso da marca não foi verificado', async () => {
+    const { service } = build();
+    const plan = await service.plan('tenant-1', 'MLB111');
+    expect(plan.mapPrice).toBeNull();
+    expect(plan.warnings.join(' ')).toMatch(/sem MAP cadastrado/i);
+  });
+
+  it('MAP abaixo do preço da margem alvo: preço não muda e o aviso diz que respeita o MAP', async () => {
+    const base = await build().service.plan('tenant-1', 'MLB111');
+    const { service } = build({ product: { productId: 'p', skuCode: 'RM0130', productCostPrice: 32.64, mapPrice: 51.6 } });
+    const plan = await service.plan('tenant-1', 'MLB111');
+    expect(plan.price).toBe(base.price);
+    expect(plan.mapPrice).toBe(51.6);
+    expect(plan.warnings.join(' ')).toMatch(/respeita o MAP/);
+  });
+
+  it('MAP acima do preço da margem alvo: sobe para o MAP, recalcula tarifa e margem (>= alvo)', async () => {
+    const { service } = build({ product: { productId: 'p', skuCode: 'RM0130', productCostPrice: 32.64, mapPrice: 150 } });
+    const plan = await service.plan('tenant-1', 'MLB111');
+    expect(plan.price).toBe(150);
+    expect(plan.feeAmount).toBe(19.5);
+    expect(plan.taxAmount).toBe(10.95);
+    expect(plan.marginAmount).toBe(Math.round((150 - 32.64 - 10.95 - 19.5 - 8.15) * 100) / 100);
+    expect(plan.marginPct).toBeGreaterThanOrEqual(40);
+    expect(plan.warnings.join(' ')).toMatch(/subiu .* para o MAP de R\$ 150\.00/);
+  });
+
   it('recusa anúncio de outra conta (isolamento) e não consulta catálogo', async () => {
     const { service, client } = build({ item: { sellerId: '999' } });
     await expect(service.plan('tenant-1', 'MLB111')).rejects.toBeInstanceOf(UnprocessableEntityException);
@@ -172,6 +199,13 @@ describe('MlCatalogListingCreationService.create', () => {
         attributes: [{ id: 'SELLER_SKU', value_name: 'RM0130' }],
       }),
     );
+  });
+
+  it('com MAP acima do preço da margem alvo, cria no MAP (nunca abaixo)', async () => {
+    const { service, client } = build({ product: { productId: 'p', skuCode: 'RM0130', productCostPrice: 32.64, mapPrice: 150 } });
+    const result = await service.create('tenant-1', 'MLB111');
+    expect(result.plan.price).toBe(150);
+    expect(client.createCatalogItem).toHaveBeenCalledWith('token', expect.objectContaining({ price: 150 }));
   });
 
   it('recusa quando já existe anúncio de catálogo ativo com o mesmo SKU ou ficha (409) e NÃO escreve', async () => {

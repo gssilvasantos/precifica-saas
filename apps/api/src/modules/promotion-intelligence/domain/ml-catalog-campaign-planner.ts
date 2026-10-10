@@ -68,6 +68,7 @@ export type CampaignAction =
   | 'ALREADY_IN' // já participa — nada a fazer
   | 'LOWER_SUGGESTED' // já participa, mas um preço menor ganharia a buy box com margem OK
   | 'SKIP_MARGIN' // nenhum preço possível respeita a margem mínima
+  | 'SKIP_MAP' // todo preço possível ficaria abaixo do MAP (preço mínimo da marca) do SKU
   | 'SKIP_NOT_ELIGIBLE'; // tipo de campanha fora da rotina, ou status que não aceita adesão
 
 export type PriceReason = 'BUY_BOX' | 'KEEP_CURRENT_PRICE' | null;
@@ -180,6 +181,9 @@ export function planItem(
   marginAt: (price: number) => MarginBreakdown,
   minMarginPct: number,
   eligibleTypes: readonly string[] = DEFAULT_ELIGIBLE_PROMOTION_TYPES,
+  // MAP do SKU (Product.mapPrice). null = sem restrição. Preço abaixo do MAP
+  // nunca é escolhido: o planejador cai no outro preço possível ou pula.
+  mapPrice: number | null = null,
 ): ItemPlan {
   if (!(minMarginPct >= 0)) {
     throw new InvalidPlanInputError('minMarginPct deve ser >= 0.');
@@ -218,12 +222,13 @@ export function planItem(
     const buyBoxPrice = target !== null ? fitToRange(target, range) : null;
     const keepPrice = fitToRange(item.currentSellingPrice, range);
 
+    const respectsMap = (price: number) => mapPrice === null || price >= mapPrice - 0.005;
     let chosen: { price: number; reason: PriceReason; margin: MarginBreakdown } | null = null;
-    if (buyBoxPrice !== null) {
+    if (buyBoxPrice !== null && respectsMap(buyBoxPrice)) {
       const margin = marginAt(buyBoxPrice);
       if (margin.marginPct >= minMarginPct) chosen = { price: buyBoxPrice, reason: 'BUY_BOX', margin };
     }
-    if (!chosen && keepPrice !== null) {
+    if (!chosen && keepPrice !== null && respectsMap(keepPrice)) {
       const margin = marginAt(keepPrice);
       if (margin.marginPct >= minMarginPct) chosen = { price: keepPrice, reason: 'KEEP_CURRENT_PRICE', margin };
     }
@@ -256,6 +261,17 @@ export function planItem(
 
     if (!chosen) {
       const reference = buyBoxPrice ?? keepPrice;
+      const candidates = [buyBoxPrice, keepPrice].filter((p): p is number => p !== null);
+      if (mapPrice !== null && candidates.length > 0 && candidates.every((p) => !respectsMap(p))) {
+        return {
+          ...head,
+          action: 'SKIP_MAP',
+          plannedPrice: null,
+          priceReason: null,
+          margin: reference !== null ? marginAt(reference) : null,
+          note: `Preço possível (R$ ${Math.max(...candidates).toFixed(2)}) fica abaixo do MAP de R$ ${mapPrice.toFixed(2)} do SKU — não entra.`,
+        };
+      }
       return {
         ...head,
         action: 'SKIP_MARGIN',

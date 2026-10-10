@@ -151,6 +151,8 @@ export interface CatalogCreationPlan {
   categoryId: string;
   listingTypeId: string;
   costPrice: number;
+  // MAP do SKU (preço mínimo da marca); null = sem MAP cadastrado.
+  mapPrice: number | null;
   taxRatePct: number;
   taxRateSource: 'OVERRIDE' | 'TAX_INTELLIGENCE';
   freightAmount: number;
@@ -508,6 +510,21 @@ export class MlCatalogListingCreationService {
       throw new UnprocessableEntityException(`Não foi possível calcular preço com ${targetMarginPct}% de margem: ${(error as Error).message}`);
     }
 
+    // MAP (preço mínimo da marca, Product.mapPrice): o preço inicial nunca fica
+    // abaixo dele. Se a margem alvo der menos que o MAP, sobe para o MAP e
+    // recalcula tarifa/imposto/margem nesse preço (a margem fica >= alvo).
+    const mapPrice = cost.mapPrice ?? null;
+    const raisedToMap = mapPrice !== null && solved.price < mapPrice - 0.005;
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    let { price, feeAmount, taxAmount, marginAmount, marginPct } = solved;
+    if (raisedToMap) {
+      price = r2(mapPrice);
+      feeAmount = r2(await feeAt(price));
+      taxAmount = r2(price * taxRate);
+      marginAmount = r2(price - cost.productCostPrice - taxAmount - feeAmount - freightAmount);
+      marginPct = r2((marginAmount / price) * 100);
+    }
+
     return {
       sourceItemId,
       variationId: unit.variationId,
@@ -521,20 +538,25 @@ export class MlCatalogListingCreationService {
       categoryId,
       listingTypeId,
       costPrice: cost.productCostPrice,
+      mapPrice,
       taxRatePct: Math.round(taxRate * 10000) / 100,
       taxRateSource,
       freightAmount,
       targetMarginPct,
-      price: solved.price,
-      feeAmount: solved.feeAmount,
-      taxAmount: solved.taxAmount,
-      marginAmount: solved.marginAmount,
-      marginPct: solved.marginPct,
+      price,
+      feeAmount,
+      taxAmount,
+      marginAmount,
+      marginPct,
       initialStock: INITIAL_STOCK,
       warnings: [
         ...(existing ? [`Já existe o anúncio de catálogo ${existing.id} para esta ficha/SKU — a criação será recusada.`] : []),
         'Categoria do tradicional usada na criação: o ML pode recusar se divergir da ficha de catálogo.',
-        'Piso de preço de marca (ex.: Catharine Hill) NÃO é verificado aqui — confira antes de criar.',
+        mapPrice === null
+          ? 'SKU sem MAP cadastrado: o piso de preço da marca NÃO foi verificado — cadastre o MAP ou confira antes de criar.'
+          : raisedToMap
+            ? `Preço subiu de R$ ${solved.price.toFixed(2)} para o MAP de R$ ${mapPrice.toFixed(2)} (preço mínimo da marca); a margem ficou em ${marginPct.toFixed(2)}%.`
+            : `Preço respeita o MAP de R$ ${mapPrice.toFixed(2)} do SKU.`,
         'Preço inicial de cadastro (margem alvo); o preço de venda real vem depois, de uma promoção.',
       ],
     };
@@ -565,6 +587,15 @@ export class MlCatalogListingCreationService {
         throw new ConflictException({
           code: 'ML_CATALOG_LISTING_ALREADY_EXISTS',
           message: `Já existe o anúncio de catálogo ${plan.existingCatalogListingId} para o SKU ${plan.skuCode} / ficha ${plan.catalogProductId}.`,
+        });
+      }
+
+      // Gate final de MAP: pela construção do plano isto não dispara; é o assert
+      // de que nenhum preço abaixo do mínimo da marca chega ao Mercado Livre.
+      if (plan.mapPrice !== null && plan.price < plan.mapPrice - 0.005) {
+        throw new UnprocessableEntityException({
+          code: 'MAP_PRICE_VIOLATION',
+          message: `Preço R$ ${plan.price.toFixed(2)} abaixo do MAP de R$ ${plan.mapPrice.toFixed(2)} do SKU ${plan.skuCode} — não criado.`,
         });
       }
 

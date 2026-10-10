@@ -72,3 +72,15 @@ MCP: `kyneti_list_ml_catalog_items`, `kyneti_plan_ml_catalog_campaigns`,
 - Continuam abertos (não corrigidos): conferência de que o anúncio pertence ao vendedor da conexão, tradução
   do erro bruto do ML + `AlertService` na falha de inscrição, cache da listagem, auditoria persistente,
   rate limit de entrada. Contrato com a API real do ML segue **não exercitado**.
+
+## MAP na adesão a campanha (10/10/2026)
+
+- O preço da promoção é preço anunciado, então **nunca fica abaixo do MAP** do SKU (`Product.mapPrice`).
+  Premissa do Gui: MAP vale para qualquer preço anunciado (ele não a confirmou explicitamente para promoção
+  — confirmar com a marca se houver dúvida).
+- Planejador (`planItem`, parâmetro `mapPrice`): preço da buy box abaixo do MAP é descartado e cai para o
+  preço atual, se este respeita o MAP e a margem; se todo preço possível fica abaixo do MAP, a ação é
+  `SKIP_MAP` (nunca entra). Comparação inclusiva (preço = MAP é aceito).
+- `join()`: preço abaixo do MAP → 422 `MAP_PRICE_VIOLATION`, sem chamada ao ML, independentemente da margem.
+- A resposta do plano traz `mapPrice` (null = SKU sem MAP, sem restrição).
+- Não exercitado contra o ML real; coberto por testes com fakes (planejador e serviço).
