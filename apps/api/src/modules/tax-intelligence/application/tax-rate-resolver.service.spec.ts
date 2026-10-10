@@ -95,6 +95,40 @@ describe('TaxRateResolverService', () => {
       expect(r.breakdown.aliquotaCheia).toBeCloseTo(0.0721126574, 9);
     });
 
+    describe('RBT12 incompleto (09/10/2026)', () => {
+      // Regressão: o resolvedor calculava a alíquota ANTES de olhar a manual e
+      // lançava RBT12_INCOMPLETO, ignorando o número que o lojista mantém.
+      it('com alíquota manual, usa o número dele em vez de bloquear', async () => {
+        const base = await tenantProfiles.findVigente();
+        tenantProfiles.findVigente.mockResolvedValue({ ...base, aliquotaManual: 0.073 });
+        priorRevenues.findForPeriod.mockResolvedValue([]);
+
+        const r = await service.resolve(query);
+
+        expect(r.effectiveRate).toBe(0.073);
+        expect(r.source).toBe('MANUAL_OVERRIDE');
+        expect(r.regime).toBe('SIMPLES_NACIONAL');
+        expect(r.incidence).toBe('POR_DENTRO');
+        expect(r.creditableRate).toBe(0);
+        expect(r.fixedMonthlyTaxAmount).toBeNull();
+        // Sem RBT12 não há alíquota calculada: o breakdown não inventa uma.
+        expect(r.breakdown.aliquotaCheia).toBeUndefined();
+      });
+
+      it('sem alíquota manual continua bloqueando', async () => {
+        priorRevenues.findForPeriod.mockResolvedValue([]);
+        await expect(service.resolve(query)).rejects.toMatchObject({ reason: 'RBT12_INCOMPLETO' });
+      });
+
+      it('com alíquota manual, Simples sem Anexo continua bloqueando', async () => {
+        const base = await tenantProfiles.findVigente();
+        tenantProfiles.findVigente.mockResolvedValue({ ...base, aliquotaManual: 0.073, anexo: null });
+        priorRevenues.findForPeriod.mockResolvedValue([]);
+
+        await expect(service.resolve(query)).rejects.toMatchObject({ reason: 'REGIME_NAO_CONFIGURADO' });
+      });
+    });
+
     it('perfil SEM o campo não é tratado como sobrescrito', async () => {
       // Regressão: `undefined !== null` é TRUE. Com a checagem frouxa, um
       // registro sem a coluna virava MANUAL_OVERRIDE com effectiveRate
