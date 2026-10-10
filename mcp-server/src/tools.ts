@@ -279,6 +279,53 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
     },
   );
 
+  // --- v4 (09/10/2026): criar anúncio de CATÁLOGO pelo EAN (leitura) ---
+  // Ver docs/product/ml-catalogo-criar-por-ean.md. A criação (escrita) fica
+  // abaixo, atrás de writesEnabled.
+  server.registerTool(
+    'kyneti_list_ml_traditional_items',
+    {
+      description:
+        'Lista os anúncios TRADICIONAIS ativos do Mercado Livre da conta (candidatos a ganhar anúncio de catálogo), com SKU, preço e se já existe catálogo ativo com o mesmo SKU. Paginado. Só leitura. Fonte: GET /promotion-intelligence/mercado-livre/catalog-creation/traditional-items.',
+      inputSchema: {
+        offset: z.number().int().min(0).optional().describe('Início da página (padrão 0)'),
+        limit: z.number().int().min(1).max(100).optional().describe('Itens por página (padrão 50, máx. 100)'),
+      },
+    },
+    async ({ offset, limit }) => {
+      try {
+        return toResult(await client.get('/promotion-intelligence/mercado-livre/catalog-creation/traditional-items', { offset, limit }));
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    'kyneti_plan_ml_catalog_creation',
+    {
+      description:
+        'Planeja a criação de um anúncio de CATÁLOGO a partir de UM anúncio tradicional: lê o EAN do tradicional, acha a ficha de catálogo, e calcula o menor preço com a margem alvo (padrão 40%) sobre custo + imposto + tarifa + frete. Estoque inicial 1 e SKU do produto. Só leitura — não cria nada. Devolve erro 422 com o motivo quando não dá (sem EAN, sem ficha, mais de uma ficha, sem SKU, sem custo). Fonte: GET /promotion-intelligence/mercado-livre/catalog-creation/items/:itemId/plan.',
+      inputSchema: {
+        itemId: z.string().regex(/^MLB\d{6,15}$/).describe('Id do anúncio TRADICIONAL de origem, ex.: MLB7393870900'),
+        targetMarginPct: z.number().min(5).max(99).optional().describe('Margem alvo em % (padrão 40)'),
+        taxRatePct: z.number().min(0).max(99.99).optional().describe('Alíquota de imposto em % para sobrescrever a calculada (ex.: 7.3)'),
+      },
+    },
+    async ({ itemId, targetMarginPct, taxRatePct }) => {
+      try {
+        return toResult(
+          await client.get(`/promotion-intelligence/mercado-livre/catalog-creation/items/${encodeURIComponent(itemId)}/plan`, {
+            targetMarginPct,
+            taxRatePct,
+          }),
+        );
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
   if (!writesEnabled) return;
 
   // --- v2: Mercado Livre — ESCRITA real no anúncio (SELLER_SKU) ---
@@ -338,6 +385,35 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
             promotionId,
             dealPrice,
             ...(minMarginPct !== undefined ? { minMarginPct } : {}),
+            ...(taxRatePct !== undefined ? { taxRatePct } : {}),
+          }),
+        );
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
+  // --- v4: criar anúncio de catálogo pelo EAN (ESCRITA real) ---
+  // Mesmas camadas: RBAC (ADMIN/PRICING_EDITOR) + MCP_ALLOW_WRITES + confirm:true
+  // + flag ML_CATALOG_LISTING_CREATE_ENABLED na API. UM anúncio por chamada.
+  server.registerTool(
+    'kyneti_create_ml_catalog_listing',
+    {
+      description:
+        'ESCREVE no Mercado Livre real: cria UM anúncio de catálogo (ficha do EAN do tradicional de origem), com estoque 1, SKU do produto e o preço que dá a margem alvo. Rode kyneti_plan_ml_catalog_creation antes e só crie com a confirmação explícita do dono. O servidor recalcula tudo, recusa se já existir catálogo ativo com o mesmo SKU/ficha e não repete a chamada em timeout. Exige confirm:true. Fonte: POST /promotion-intelligence/mercado-livre/catalog-creation/items/:itemId/create.',
+      inputSchema: {
+        itemId: z.string().regex(/^MLB\d{6,15}$/).describe('Id do anúncio TRADICIONAL de origem, ex.: MLB7393870900'),
+        targetMarginPct: z.number().min(5).max(99).optional().describe('Margem alvo em % (padrão 40) — a mesma do plano'),
+        taxRatePct: z.number().min(0).max(99.99).optional().describe('Mesma alíquota usada no plano, se foi sobrescrita'),
+        confirm: z.literal(true).describe('Precisa ser exatamente true — escrita real e intencional em produção.'),
+      },
+    },
+    async ({ itemId, targetMarginPct, taxRatePct }) => {
+      try {
+        return toResult(
+          await client.post(`/promotion-intelligence/mercado-livre/catalog-creation/items/${encodeURIComponent(itemId)}/create`, {
+            ...(targetMarginPct !== undefined ? { targetMarginPct } : {}),
             ...(taxRatePct !== undefined ? { taxRatePct } : {}),
           }),
         );

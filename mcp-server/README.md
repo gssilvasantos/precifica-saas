@@ -162,3 +162,16 @@ Três ferramentas novas (ver `docs/product/ml-catalogo-buybox-campanhas.md`):
 **Passo extra no Kyneti:** na tela de Equipe, conceda o módulo
 **PROMOTIONS** à conta de serviço do MCP. Sem isso as três ferramentas
 respondem 403.
+
+## v4 (09/10/2026) — Criar anúncio de catálogo pelo EAN
+
+Três ferramentas novas (ver `docs/product/ml-catalogo-criar-por-ean.md`):
+
+- `kyneti_list_ml_traditional_items` (leitura)
+- `kyneti_plan_ml_catalog_creation` (leitura — não cria nada)
+- `kyneti_create_ml_catalog_listing` (**escrita real**, só registrada com
+  `MCP_ALLOW_WRITES=true`; exige `confirm:true`, PRICING_EDITOR e, na API,
+  `ML_CATALOG_LISTING_CREATE_ENABLED=true`). Um anúncio por chamada.
+
+Mesmo passo extra da v3: módulo **PROMOTIONS** na conta de serviço. Nada disto
+foi exercitado contra o Mercado Livre real.
