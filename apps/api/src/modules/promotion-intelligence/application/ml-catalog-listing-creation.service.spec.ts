@@ -289,7 +289,7 @@ describe('MlCatalogListingCreationService.planBatch (só leitura, por EAN)', () 
     );
     // A ficha da variação 1 do MLB2 já tem catálogo na conta.
     (client.searchCatalogProductsByGtin as jest.Mock).mockImplementation((gtin: string) =>
-      Promise.resolve([{ id: gtin === '7908254900004' ? 'FICHA-EXISTENTE' : 'MLB999', name: 'n', domainId: null, status: 'active' }]),
+      Promise.resolve([{ id: gtin === '7908254900004' ? 'FICHA-EXISTENTE' : 'MLB999', name: 'simples pai', domainId: null, status: 'active' }]),
     );
     const res = await service.planBatch('tenant-1', { offset: 0, limit: 5 });
     expect(res.total).toBe(2);
@@ -355,6 +355,44 @@ describe('cache da lista de anúncios da conta (30 min, por tenant)', () => {
     expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(2); // outro tenant: outra chave
     await service.create('tenant-1', 'MLB111');
     expect(client.fetchSellerItemIds).toHaveBeenCalledTimes(3); // fresh
+  });
+});
+
+describe('EAN que leva a ficha de outro produto não cria (09/10/2026)', () => {
+  const originalFlag = process.env[CATALOG_CREATE_FLAG];
+  beforeEach(() => {
+    process.env[CATALOG_CREATE_FLAG] = 'true';
+  });
+  afterAll(() => {
+    if (originalFlag === undefined) delete process.env[CATALOG_CREATE_FLAG];
+    else process.env[CATALOG_CREATE_FLAG] = originalFlag;
+  });
+  // Caso real: pincel de maquiagem (RM0019) com EAN que o ML liga a um microfone.
+  const microfone = [{ id: 'MLB21632968', name: 'Microfone de Lapela Condensador Profissional', domainId: null, status: 'active' }];
+
+  it('o plano é recusado (422) com o motivo: EAN, ficha e título', async () => {
+    const { service } = build({ hits: microfone });
+    await expect(service.plan('tenant-1', 'MLB111')).rejects.toThrow(/MLB21632968.*Microfone.*Batom Tradicional/);
+  });
+
+  it('o lote lista o item como BLOCKED com o motivo, sem derrubar os outros', async () => {
+    const { service } = build({ hits: microfone });
+    const res = await service.planBatch('tenant-1', { offset: 0, limit: 1 });
+    expect(res.rows[0].status).toBe('BLOCKED');
+    expect(res.rows[0].reason).toMatch(/Microfone.*confira o EAN/);
+    expect(res.rows[0].plan).toBeNull();
+  });
+
+  it('a criação não escreve nada', async () => {
+    const { service, client } = build({ hits: microfone });
+    await expect(service.create('tenant-1', 'MLB111')).rejects.toThrow(/não bate/);
+    expect(client.createCatalogItem).not.toHaveBeenCalled();
+  });
+
+  it('com nome da ficha batendo com o anúncio, cria normalmente', async () => {
+    const { service, client } = build();
+    await service.create('tenant-1', 'MLB111');
+    expect(client.createCatalogItem).toHaveBeenCalledTimes(1);
   });
 });
 

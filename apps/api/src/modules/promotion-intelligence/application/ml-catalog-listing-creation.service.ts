@@ -23,6 +23,7 @@ import {
   INITIAL_STOCK,
   buildCatalogItemPayload,
   extractGtin,
+  catalogNameRelatesToTitle,
   solvePriceForMargin,
 } from '../domain/ml-catalog-listing-creation';
 
@@ -407,6 +408,14 @@ export class MlCatalogListingCreationService {
       );
     }
     const product = hits[0];
+    // Regra do dono (09/10/2026): o EAN consultado precisa levar a uma ficha cujo
+    // nome bate com o do anúncio. Se não bater, NÃO cria — o item sai como
+    // BLOCKED com o motivo, sem pedir decisão (o EAN do cadastro é que deve ser conferido).
+    if (!catalogNameRelatesToTitle(item.title, product.name)) {
+      throw new UnprocessableEntityException(
+        `EAN ${gtin} leva à ficha ${product.id} ("${product.name}"), que não bate com o anúncio ("${item.title}") — não criado; confira o EAN do SKU ${skuCode}.`,
+      );
+    }
     const existing = catalogListings.find((s) => s.catalogProductId === product.id || s.skuCode === skuCode);
     if (existing && stopIfExisting) throw new ExistingCatalogSignal(gtin, product.id, existing.id);
 

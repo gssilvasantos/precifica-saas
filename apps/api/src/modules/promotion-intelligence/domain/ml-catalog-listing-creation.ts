@@ -118,6 +118,33 @@ export async function solvePriceForMargin(input: PriceSolveInput): Promise<Price
   };
 }
 
+const TITLE_STOPWORDS = new Set(['para', 'com', 'sem', 'por', 'uma', 'uns', 'umas', 'dos', 'das', 'kit', 'cor', 'novo', 'nova']);
+
+function titleTokens(text: string): Set<string> {
+  const normalized = text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ');
+  return new Set(normalized.split(' ').filter((t) => t.length >= 3 && !TITLE_STOPWORDS.has(t)));
+}
+
+// Trava de sanidade (09/10/2026): o EAN do anúncio pode apontar, no catálogo do
+// ML, para um produto que não é o nosso (caso real: pincel de maquiagem →
+// ficha de microfone). Se o título do anúncio e o nome da ficha não têm UMA
+// palavra em comum, a ficha é tratada como divergente e a criação é recusada.
+// É heurística grosseira e propositalmente conservadora: recusar um caso
+// legítimo custa uma conferência manual; aceitar um errado cria anúncio
+// trocado. Sem título ou sem nome não há como comparar — devolve true e quem
+// chama deve avisar que não verificou.
+export function catalogNameRelatesToTitle(itemTitle: string | null, catalogName: string | null): boolean {
+  if (!itemTitle || !catalogName) return true;
+  const a = titleTokens(itemTitle);
+  const b = titleTokens(catalogName);
+  for (const token of a) if (b.has(token)) return true;
+  return false;
+}
+
 export interface CatalogItemPayloadInput {
   catalogProductId: string;
   categoryId: string;

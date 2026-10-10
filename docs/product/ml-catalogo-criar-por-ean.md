@@ -104,6 +104,24 @@ de reajuste de alíquota (que compara com a calculada) não tem base até o fatu
 preenchido. Cobertura: 3 testes novos em `tax-rate-resolver.service.spec.ts`. Mudança em regra
 tributária compartilhada (pricing, DRE, promoções) — vale para todos os consumidores da porta.
 
+**Tarifa sem token (09/10/2026):** o RM0019 ficou bloqueado com HTTP 403 em `listing_prices`. Chamada
+sem autenticação a esse endpoint devolve `PA_UNAUTHORIZED_RESULT_FROM_POLICIES` (PolicyAgent); a consulta
+passou a enviar o token e o 403 acabou (confirmado no plano em lote real). A campanha de catálogo
+também consultava sem token e foi ajustada, mas não foi reexecutada.
+
+**Leitura da conta (09/10/2026):** listar os 933 anúncios levou 65 s e 134 s em duas medições (log
+`Leitura da lista de anúncios da conta concluída`). Cache em memória de 30 min por tenant; leituras
+simultâneas compartilham uma só leitura. O cache zera a cada deploy: a primeira chamada depois pode passar
+dos 90 s do MCP — esperar ~2 min e repetir. Solução definitiva ainda não feita (resposta "carregando").
+
+**Regra de conferência EAN x nome (Gui, 09/10/2026):** o EAN consultado tem que levar a uma ficha cujo
+nome bate com o do anúncio; se não bater, **não cria** e o item sai como `BLOCKED` com o motivo (EAN,
+ficha e título), sem pedir decisão ao dono. Caso real: RM0019 (pincel "Seven Colors"), EAN 7892020090016
+igual no anúncio do ML e no Olist, mas a busca do ML devolveu a ficha MLB21632968, de um microfone. O
+critério é "ao menos uma palavra em comum" entre título e nome da ficha (sem acento/caixa, palavras de 3+
+letras) — heurística grosseira e conservadora: pode bloquear caso legítimo com nomes bem diferentes, e
+não pega ficha errada que compartilhe uma palavra. O EAN desse SKU deve ser conferido no cadastro.
+
 ## 5.1 Endpoints (prefixo `/api/promotion-intelligence/mercado-livre/catalog-creation`)
 
 Auth: JWT + módulo Promoções. `POST .../create` aceita `variationId` no corpo. O `tenantId` vem do token.
