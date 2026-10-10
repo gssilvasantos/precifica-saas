@@ -1,0 +1,209 @@
+import { BadRequestException, ConflictException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common';
+import { CATALOG_CREATE_FLAG, MlCatalogListingCreationService } from './ml-catalog-listing-creation.service';
+import { MercadoLivreApiClient } from '../../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-api.client';
+import { MercadoLivreConnectionService } from '../../marketplace-intelligence/application/mercado-livre-connection.service';
+
+interface Overrides {
+  item?: Record<string, unknown>;
+  hits?: unknown[];
+  summaries?: unknown[];
+  product?: unknown;
+  taxThrows?: boolean;
+  sellerId?: string;
+}
+
+function build(o: Overrides = {}) {
+  const client = {
+    fetchItemPricingContext: jest.fn().mockResolvedValue({
+      id: 'MLB111',
+      title: 'Batom Tradicional',
+      price: 69.9,
+      permalink: null,
+      status: 'active',
+      categoryId: 'MLB1234',
+      skuCode: 'RM0130',
+      isCatalogListing: false,
+      catalogProductId: null,
+      attributes: [{ id: 'GTIN', value_name: '7908254900097' }],
+      sellerId: '123',
+      originalPrice: null,
+      availableQuantity: 5,
+      listingTypeId: 'gold_special',
+      ...o.item,
+    }),
+    searchCatalogProductsByGtin: jest.fn().mockResolvedValue(o.hits ?? [{ id: 'MLB999', name: 'Batom', domainId: 'MLB-LIPSTICKS', status: 'active' }]),
+    fetchSellerShippingCost: jest.fn().mockResolvedValue(8.15),
+    fetchSaleFeeAmount: jest.fn().mockImplementation((_c: string, price: number) => Promise.resolve(Math.round(price * 0.13 * 100) / 100)),
+    fetchSellerItemIds: jest.fn().mockResolvedValue(['MLB111']),
+    fetchOrderSellerIdSample: jest.fn().mockResolvedValue(null),
+    fetchCatalogListingSummaries: jest.fn().mockResolvedValue(
+      o.summaries ?? [{ id: 'MLB111', title: 'Batom Tradicional', price: 69.9, status: 'active', isCatalogListing: false, catalogProductId: null, skuCode: 'RM0130' }],
+    ),
+    createCatalogItem: jest.fn().mockResolvedValue({ id: 'MLB555', status: 'active' }),
+  } as unknown as jest.Mocked<MercadoLivreApiClient>;
+
+  const connections = {
+    getValidAccessToken: jest.fn().mockResolvedValue('token'),
+    getSellerId: jest.fn().mockResolvedValue(o.sellerId ?? '123'),
+  } as unknown as jest.Mocked<MercadoLivreConnectionService>;
+
+  const catalog = {
+    findBySku: jest.fn().mockResolvedValue(o.product === undefined ? { productId: 'prod-1', skuCode: 'RM0130', productCostPrice: 32.64 } : o.product),
+  };
+  const taxRates = {
+    resolve: o.taxThrows
+      ? jest.fn().mockRejectedValue(new Error('RBT12_INCOMPLETO'))
+      : jest.fn().mockResolvedValue({ effectiveRate: 0.073, incidence: 'POR_DENTRO' }),
+  };
+  const service = new MlCatalogListingCreationService(catalog as never, taxRates as never, client, connections);
+  return { service, client, catalog, taxRates };
+}
+
+describe('MlCatalogListingCreationService.plan', () => {
+  it('planeja com EAN lido do tradicional, ficha única e margem >= 40%', async () => {
+    const { service, client } = build();
+    const plan = await service.plan('tenant-1', 'MLB111');
+    expect(client.searchCatalogProductsByGtin).toHaveBeenCalledWith('7908254900097', 'token');
+    expect(plan.catalogProductId).toBe('MLB999');
+    expect(plan.skuCode).toBe('RM0130');
+    expect(plan.initialStock).toBe(1);
+    expect(plan.marginPct).toBeGreaterThanOrEqual(40);
+    expect(plan.taxRateSource).toBe('TAX_INTELLIGENCE');
+    expect(client.createCatalogItem).not.toHaveBeenCalled();
+  });
+
+  it('recusa anúncio de outra conta (isolamento) e não consulta catálogo', async () => {
+    const { service, client } = build({ item: { sellerId: '999' } });
+    await expect(service.plan('tenant-1', 'MLB111')).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(client.searchCatalogProductsByGtin).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['já é de catálogo', { isCatalogListing: true }],
+    ['inativo', { status: 'paused' }],
+    ['sem SKU', { skuCode: null }],
+    ['sem EAN', { attributes: [] }],
+    ['EAN inválido', { attributes: [{ id: 'GTIN', value_name: '123' }] }],
+    ['sem categoria', { categoryId: null }],
+  ])('recusa quando o anúncio %s', async (_name, item) => {
+    const { service, client } = build({ item });
+    await expect(service.plan('tenant-1', 'MLB111')).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(client.searchCatalogProductsByGtin).not.toHaveBeenCalled();
+  });
+
+  it('recusa quando não há ficha de catálogo para o EAN', async () => {
+    const { service } = build({ hits: [] });
+    await expect(service.plan('tenant-1', 'MLB111')).rejects.toThrow(/Não existe ficha/);
+  });
+
+  it('recusa quando o EAN tem mais de uma ficha (escolha manual)', async () => {
+    const { service } = build({ hits: [{ id: 'A', name: null, domainId: null, status: 'active' }, { id: 'B', name: null, domainId: null, status: 'active' }] });
+    await expect(service.plan('tenant-1', 'MLB111')).rejects.toThrow(/2 fichas/);
+  });
+
+  it('recusa SKU fora do catálogo do Kyneti e custo zerado', async () => {
+    await expect(build({ product: null }).service.plan('tenant-1', 'MLB111')).rejects.toBeInstanceOf(UnprocessableEntityException);
+    await expect(
+      build({ product: { productId: 'p', skuCode: 'RM0130', productCostPrice: 0 } }).service.plan('tenant-1', 'MLB111'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('sem alíquota calculada pede taxRatePct; com taxRatePct usa OVERRIDE', async () => {
+    const { service } = build({ taxThrows: true });
+    await expect(service.plan('tenant-1', 'MLB111')).rejects.toBeInstanceOf(UnprocessableEntityException);
+    const plan = await service.plan('tenant-1', 'MLB111', { taxRatePct: 7.3 });
+    expect(plan.taxRateSource).toBe('OVERRIDE');
+  });
+
+  it('não aceita margem alvo abaixo do piso nem 100%', async () => {
+    const { service } = build();
+    await expect(service.plan('tenant-1', 'MLB111', { targetMarginPct: 1 })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.plan('tenant-1', 'MLB111', { targetMarginPct: 100 })).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('MlCatalogListingCreationService.create', () => {
+  const original = process.env[CATALOG_CREATE_FLAG];
+  beforeEach(() => {
+    process.env[CATALOG_CREATE_FLAG] = 'true';
+  });
+  afterAll(() => {
+    if (original === undefined) delete process.env[CATALOG_CREATE_FLAG];
+    else process.env[CATALOG_CREATE_FLAG] = original;
+  });
+
+  it('com a flag ausente ou diferente de "true", recusa (403) e NÃO escreve no ML', async () => {
+    const { service, client } = build();
+    for (const value of [undefined, '', 'false', '1', 'TRUE']) {
+      if (value === undefined) delete process.env[CATALOG_CREATE_FLAG];
+      else process.env[CATALOG_CREATE_FLAG] = value;
+      await expect(service.create('tenant-1', 'MLB111')).rejects.toBeInstanceOf(ForbiddenException);
+    }
+    expect(client.createCatalogItem).not.toHaveBeenCalled();
+  });
+
+  it('cria com estoque 1, SKU e preço recalculado no servidor', async () => {
+    const { service, client } = build();
+    const result = await service.create('tenant-1', 'MLB111');
+    expect(result.createdItemId).toBe('MLB555');
+    expect(client.createCatalogItem).toHaveBeenCalledTimes(1);
+    expect(client.createCatalogItem).toHaveBeenCalledWith(
+      'token',
+      expect.objectContaining({
+        catalog_listing: true,
+        catalog_product_id: 'MLB999',
+        available_quantity: 1,
+        price: result.plan.price,
+        attributes: [{ id: 'SELLER_SKU', value_name: 'RM0130' }],
+      }),
+    );
+  });
+
+  it('recusa quando já existe anúncio de catálogo ativo com o mesmo SKU ou ficha (409) e NÃO escreve', async () => {
+    const { service, client } = build({
+      summaries: [
+        { id: 'MLB111', title: 't', price: 1, status: 'active', isCatalogListing: false, catalogProductId: null, skuCode: 'RM0130' },
+        { id: 'MLB777', title: 'c', price: 1, status: 'active', isCatalogListing: true, catalogProductId: 'MLB999', skuCode: null },
+      ],
+    });
+    await expect(service.create('tenant-1', 'MLB111')).rejects.toBeInstanceOf(ConflictException);
+    expect(client.createCatalogItem).not.toHaveBeenCalled();
+  });
+
+  it('não escreve quando o plano falha (sem ficha)', async () => {
+    const { service, client } = build({ hits: [] });
+    await expect(service.create('tenant-1', 'MLB111')).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(client.createCatalogItem).not.toHaveBeenCalled();
+  });
+
+  it('duas criações simultâneas do mesmo anúncio: só uma escreve, a outra recebe 409; trava liberada depois', async () => {
+    const { service, client } = build();
+    let release!: () => void;
+    (client.createCatalogItem as jest.Mock).mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve({ id: 'MLB555', status: 'active' }); }),
+    );
+    const first = service.create('tenant-1', 'MLB111');
+    for (let i = 0; i < 50 && !release; i++) await new Promise((r) => setImmediate(r));
+    await expect(service.create('tenant-1', 'MLB111')).rejects.toBeInstanceOf(ConflictException);
+    release();
+    await first;
+    expect(client.createCatalogItem).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MlCatalogListingCreationService.listTraditionalWithoutCatalog', () => {
+  it('lista só tradicionais ativos, marca SKU que já tem catálogo e limita a página', async () => {
+    const { service } = build({
+      summaries: [
+        { id: 'MLB1', title: 'a', price: 10, status: 'active', isCatalogListing: false, catalogProductId: null, skuCode: 'S1' },
+        { id: 'MLB2', title: 'b', price: 10, status: 'paused', isCatalogListing: false, catalogProductId: null, skuCode: 'S2' },
+        { id: 'MLB3', title: 'c', price: 10, status: 'active', isCatalogListing: true, catalogProductId: 'X', skuCode: 'S1' },
+        { id: 'MLB4', title: 'd', price: 10, status: 'active', isCatalogListing: false, catalogProductId: null, skuCode: 'S4' },
+      ],
+    });
+    const page = await service.listTraditionalWithoutCatalog('tenant-1', { offset: 0, limit: 1000 });
+    expect(page.limit).toBe(100);
+    expect(page.total).toBe(2);
+    expect(page.items.map((i) => [i.itemId, i.hasCatalogListingWithSameSku])).toEqual([['MLB1', true], ['MLB4', false]]);
+  });
+});

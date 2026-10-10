@@ -8,6 +8,8 @@ import { PrismaPromotionEnrollmentRepository } from './infrastructure/prisma-pro
 import { PromotionCampaignsController } from './interface/controllers/promotion-campaigns.controller';
 import { MlCatalogCampaignsController } from './interface/controllers/ml-catalog-campaigns.controller';
 import { MlCatalogCampaignService } from './application/ml-catalog-campaign.service';
+import { MlCatalogListingCreationController } from './interface/controllers/ml-catalog-listing-creation.controller';
+import { MlCatalogListingCreationService } from './application/ml-catalog-listing-creation.service';
 
 import { PROMOTION_CAMPAIGN_REPOSITORY } from './application/ports/promotion-campaign-repository.port';
 import { PROMOTION_ENROLLMENT_REPOSITORY } from './application/ports/promotion-enrollment-repository.port';
@@ -32,11 +34,12 @@ import { TaxIntelligenceModule } from '../tax-intelligence/public-api';
 // circular: nenhum dos três módulos importados conhece este de volta.
 @Module({
   imports: [CatalogModule, MarketplaceIntelligenceModule, LogisticsFulfillmentModule, TaxIntelligenceModule],
-  controllers: [PromotionCampaignsController, MlCatalogCampaignsController],
+  controllers: [PromotionCampaignsController, MlCatalogCampaignsController, MlCatalogListingCreationController],
   providers: [
     PromotionCampaignService,
     PromotionIntelligenceService,
     MlCatalogCampaignService,
+    MlCatalogListingCreationService,
 
     { provide: PROMOTION_CAMPAIGN_REPOSITORY, useClass: PrismaPromotionCampaignRepository },
     { provide: PROMOTION_ENROLLMENT_REPOSITORY, useClass: PrismaPromotionEnrollmentRepository },

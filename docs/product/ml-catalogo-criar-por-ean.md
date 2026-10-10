@@ -49,10 +49,29 @@ anúncio de catálogo independente por esse EAN.
 
 ## 5. Executado x não executado (09/10/2026)
 
-- **Executado**: `npx jest ...ml-catalog-listing-creation` — 6 testes passando (solver, GTIN, payload).
-- **Escrito, não executado**: nada além do acima.
-- **Não implementado**: cliente ML (busca por GTIN, criação), serviço de aplicação, controller/DTO,
-  trava de idempotência, auditoria, ferramenta MCP, testes de isolamento de tenant/autorização.
+- **Executado**: `npx jest src/modules/promotion-intelligence` — 7 suítes, 74 testes passando
+  (inclui solver, GTIN, payload e o serviço de plano/criação com fakes: isolamento de conta,
+  flag desligada, duplicidade, trava de concorrência). `npm run typecheck` sem erros.
+  `npm run lint`: 0 erros, 5 avisos (= baseline, não subiu).
+- **Escrito, não executado**: endpoints HTTP (nenhum teste de contrato/e2e; e2e exige Postgres).
+- **Não implementado**: ferramenta MCP, auditoria persistente, trava de duplicidade em banco
+  (hoje em memória, 1 instância), verificação de piso de marca.
+- **Pendente**: linha `ML_CATALOG_LISTING_CREATE_ENABLED` em `apps/api/.env.example` — o acesso a
+  esse arquivo foi negado nesta sessão; adicionar à mão (vazio = desligado, só "true" liga).
+
+## 5.1 Endpoints (prefixo `/api/promotion-intelligence/mercado-livre/catalog-creation`)
+
+Auth: JWT + módulo Promoções. O `tenantId` vem do token.
+
+| Método | Rota | Papel | O que faz |
+|---|---|---|---|
+| GET | `/traditional-items?offset&limit` | qualquer com módulo | Tradicionais ativos (limite 100), marca SKU que já tem catálogo |
+| GET | `/items/:itemId/plan?targetMarginPct&taxRatePct` | qualquer com módulo | Plano: EAN, ficha, SKU, preço, margem. Só lê |
+| POST | `/items/:itemId/create` | ADMIN ou PRICING_EDITOR | Cria 1 anúncio. 403 `ML_CATALOG_CREATE_DISABLED` sem a flag; 409 se já existe ou em andamento |
+
+Flag: `ML_CATALOG_LISTING_CREATE_ENABLED=true` (separada de `ML_CAMPAIGN_WRITES_ENABLED`).
+Margem alvo mínima aceita: 5% (padrão 40%). Erros do plano são 422 com o motivo (sem EAN, sem
+ficha, mais de uma ficha, sem SKU, sem custo, item de outra conta).
 
 ## 6. Limitações e premissas NÃO verificadas
 

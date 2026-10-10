@@ -63,6 +63,24 @@ export class MlJoinPromotionDto {
   taxRatePct?: number;
 }
 
+// Criar anúncio de catálogo pelo EAN (09/10/2026). O cliente só informa o
+// anúncio de origem (na rota); preço, EAN, ficha e custo vêm do servidor.
+export class MlCatalogCreationOptionsDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(5)
+  @Max(99)
+  targetMarginPct?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(99.99)
+  taxRatePct?: number;
+}
+
 export const ML_ITEM_ID_PATTERN = /^MLB\d{6,15}$/;
 
 export class MlItemIdParam {
