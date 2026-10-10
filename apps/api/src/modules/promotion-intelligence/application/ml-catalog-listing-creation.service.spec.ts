@@ -358,6 +358,15 @@ describe('cache da lista de anúncios da conta (30 min, por tenant)', () => {
   });
 });
 
+describe('tarifa do ML com token (09/10/2026)', () => {
+  it('consulta a tarifa autenticada: sem token o ML devolve 403 (PolicyAgent)', async () => {
+    const { service, client } = build();
+    await service.plan('tenant-1', 'MLB111');
+    expect(client.fetchSaleFeeAmount).toHaveBeenCalled();
+    for (const call of client.fetchSaleFeeAmount.mock.calls) expect(call[3]).toBe('token');
+  });
+});
+
 describe('leitura da lista de anúncios em andamento', () => {
   it('chamadas simultâneas de leitura compartilham UMA leitura da conta', async () => {
     const { service, client } = build();

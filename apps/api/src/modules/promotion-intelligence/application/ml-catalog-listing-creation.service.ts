@@ -450,7 +450,7 @@ export class MlCatalogListingCreationService {
         taxRate,
         freightAmount,
         targetMarginPct,
-        feeAt: (price) => this.client.fetchSaleFeeAmount(categoryId, price, listingTypeId),
+        feeAt: (price) => this.client.fetchSaleFeeAmount(categoryId, price, listingTypeId, accessToken),
       });
     } catch (error) {
       throw new UnprocessableEntityException(`Não foi possível calcular preço com ${targetMarginPct}% de margem: ${(error as Error).message}`);
