@@ -13,7 +13,7 @@ import {
 } from '../../../identity-access/public-api';
 import { OlistV3ConnectionService } from '../../application/olist-v3-connection.service';
 import { OlistV3VerificationService } from '../../application/olist-v3-verification.service';
-import { OlistV3CallbackQueryDto } from '../dto/olist-v3-callback-query.dto';
+import { readOlistV3CallbackParams } from '../dto/olist-v3-callback-params';
 import { VerifyOlistV3Dto } from '../dto/verify-olist-v3.dto';
 
 // Mesmo racional do callback do Mercado Livre: o redirect de volta é cosmético,
@@ -51,9 +51,17 @@ export class OlistV3ConnectionController {
   // Passo 2: SEM guard de propósito — é o Olist quem redireciona o navegador para
   // cá, sem JWT nosso. A proteção é o `state` criptografado (tenant + validade).
   @Get('callback')
-  async callback(@Query() query: OlistV3CallbackQueryDto, @Res() res: Response) {
+  async callback(@Query() query: Record<string, unknown>, @Res() res: Response) {
+    // Sem DTO de propósito: o Olist manda parâmetros extras (session_state, iss)
+    // e a validação global recusaria o callback. Ver olist-v3-callback-params.ts.
+    const params = readOlistV3CallbackParams(query);
+    if (!params) {
+      this.logger.warn('Callback do Olist v3 sem code/state válidos (autorização negada ou requisição malformada).');
+      res.redirect(`${FRONTEND_BASE_URL}/integracoes?erro=olist-v3`);
+      return;
+    }
     try {
-      await this.connection.handleCallback(query.code, query.state);
+      await this.connection.handleCallback(params.code, params.state);
       res.redirect(`${FRONTEND_BASE_URL}/integracoes?conectado=olist-v3`);
     } catch (error) {
       // Só a mensagem: o objeto de erro pode carregar corpo de resposta do provedor.

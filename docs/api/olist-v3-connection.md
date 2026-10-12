@@ -27,7 +27,7 @@ Qualquer papel com módulo `INTEGRATIONS`. Resposta:
 
 ## GET `/callback`  *(público de propósito)*
 Sem JWT: quem chama é o navegador redirecionado pelo Olist. Proteção: `state` criptografado e
-com validade; `code`/`state` com `MaxLength(2048)`. Sempre responde 302 para
+com validade; `code`/`state` lidos à mão (máx. 2048; parâmetros extras do provedor, como `session_state`, são ignorados — um DTO os recusaria com 400). Sempre responde 302 para
 `${FRONTEND_BASE_URL}/integracoes?conectado=olist-v3` ou `?erro=olist-v3`. Grava os tokens
 criptografados (AES-256-GCM) dentro do contexto do tenant do `state`.
 
