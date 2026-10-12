@@ -74,3 +74,90 @@ export async function syncOlistNow(): Promise<{ triggered: boolean }> {
   const { data } = await apiClient.post<{ triggered: boolean }>('/erp-integration/olist/sync-now');
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Olist API v3 (OAuth2) — ADR 0003, fatia 1: conexão + verificação somente de
+// leitura. Espelha à mão apps/api/.../olist-v3-connection.service.ts
+// (OlistV3ConnectionStatus) e olist-v3-verification.service.ts. Contrato em
+// docs/api/olist-v3-connection.md. Dívida conhecida: tipos duplicados.
+// ---------------------------------------------------------------------------
+
+export interface OlistV3Status {
+  enabled: boolean;
+  configured: boolean;
+  connected: boolean;
+  accessExpiresAt: string | null;
+  refreshExpiresAt: string | null;
+  connectedAt: string | null;
+}
+
+export interface OlistV3ProductSummary {
+  id: string | null;
+  sku: string | null;
+  tipo: string | null;
+  tipoVariacao: string | null;
+  campos: {
+    precoCusto: number | null;
+    preco: number | null;
+    estoqueQuantidade: number | null;
+    pesoLiquido: number | null;
+    pesoBruto: number | null;
+    largura: number | null;
+    altura: number | null;
+    comprimento: number | null;
+    ncm: string | null;
+    gtin: string | null;
+    origem: string | null;
+    categoria: string | null;
+  };
+  fotos: number;
+  variacoes: { total: number; chavesDaPrimeira: string[] };
+  ausentes: string[];
+}
+
+export interface OlistV3RateLimitInfo {
+  limit: number | null;
+  remaining: number | null;
+  resetSeconds: number | null;
+}
+
+export interface OlistV3SkuVerification {
+  sku: string;
+  found: boolean;
+  tipoVariacao: string | null;
+  produto: OlistV3ProductSummary | null;
+  error: string | null;
+}
+
+export interface OlistV3VerifyResult {
+  checkedAt: string;
+  rateLimit: OlistV3RateLimitInfo | null;
+  incrementalProbe: {
+    windowDays: number;
+    since: string;
+    totalChanged: number | null;
+    returned: number;
+    error: string | null;
+  };
+  skus: OlistV3SkuVerification[];
+  callsMade: number;
+}
+
+export async function fetchOlistV3Status(): Promise<OlistV3Status> {
+  const { data } = await apiClient.get<OlistV3Status>('/erp-integration/olist/v3/status');
+  return data;
+}
+
+export async function fetchOlistV3AuthorizeUrl(): Promise<{ authorizeUrl: string }> {
+  const { data } = await apiClient.get<{ authorizeUrl: string }>('/erp-integration/olist/v3/authorize');
+  return data;
+}
+
+export async function disconnectOlistV3(): Promise<void> {
+  await apiClient.delete('/erp-integration/olist/v3/connect');
+}
+
+export async function verifyOlistV3(skus: string[]): Promise<OlistV3VerifyResult> {
+  const { data } = await apiClient.post<OlistV3VerifyResult>('/erp-integration/olist/v3/verify', { skus });
+  return data;
+}

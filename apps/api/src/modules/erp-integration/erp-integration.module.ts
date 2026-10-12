@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { OlistConnectionService } from './application/olist-connection.service';
+import { OlistV3ConnectionService } from './application/olist-v3-connection.service';
+import { OlistV3VerificationService } from './application/olist-v3-verification.service';
 import { ErpSyncOrchestrator } from './application/erp-sync-orchestrator.service';
 import { ErpSyncEventsQueryService } from './application/erp-sync-events-query.service';
 import { ProductPhotoMirrorService } from './application/product-photo-mirror.service';
@@ -13,6 +15,7 @@ import { PrismaErpSyncChangeEventRepository } from './infrastructure/prisma-erp-
 import { PrismaNuvemshopConnectionRepository } from './infrastructure/prisma-nuvemshop-connection.repository';
 import { PrismaChannelListingRepository } from './infrastructure/prisma-channel-listing.repository';
 import { OlistApiClient } from './infrastructure/olist/olist-api.client';
+import { OlistV3ApiClient } from './infrastructure/olist/olist-v3-api.client';
 import { NuvemshopApiClient } from './infrastructure/nuvemshop/nuvemshop-api.client';
 import { NuvemshopFeeRuleProvider } from './infrastructure/nuvemshop/nuvemshop-fee-rule.provider';
 import { NuvemshopOrderProvider } from './infrastructure/nuvemshop/nuvemshop-order.provider';
@@ -24,6 +27,7 @@ import { ErpSyncSchedulerJob } from './infrastructure/scheduler/erp-sync-schedul
 import { NuvemshopSyncSchedulerJob } from './infrastructure/scheduler/nuvemshop-sync-scheduler.job';
 
 import { OlistConnectionController } from './interface/controllers/olist-connection.controller';
+import { OlistV3ConnectionController } from './interface/controllers/olist-v3-connection.controller';
 import { NuvemshopConnectionController } from './interface/controllers/nuvemshop-connection.controller';
 import { ChannelListingsController } from './interface/controllers/channel-listings.controller';
 
@@ -34,11 +38,13 @@ import { CHANNEL_LISTING_REPOSITORY } from './application/ports/channel-listing-
 import { FILE_STORAGE, CHANNEL_LISTING_READER, CHANNEL_LISTING_WRITER } from '../../shared/contracts/tokens';
 import { CredentialEncryptionService } from '../../shared/security/credential-encryption.service';
 import { SyncOpsModule } from '../../shared/sync-ops/sync-ops.module';
+import { ObservabilityModule } from '../../shared/observability/observability.module';
 import { CatalogModule } from '../catalog/catalog.module';
 
 @Module({
   imports: [
     SyncOpsModule, // agenda/log/saúde de sync — mesma infra genérica usada pelo Marketplace Intelligence
+    ObservabilityModule, // ALERT_SERVICE — falha de renovação do token v3 emite alerta ERROR
     CatalogModule, // só para consumir PRODUCT_CATALOG_WRITER — nunca a tabela Product direto
     // NÃO importa TaxIntelligenceModule (13/08/2026): aquele módulo importa
     // OrdersModule (para o RBT12), e OrdersModule importa este — o ciclo
@@ -47,9 +53,11 @@ import { CatalogModule } from '../catalog/catalog.module';
     // (ERP_PRODUCT_EVENTS.IMPORTED), não por chamada direta. forwardRef
     // resolveria a compilação e esconderia o acoplamento.
   ],
-  controllers: [OlistConnectionController, NuvemshopConnectionController, ChannelListingsController],
+  controllers: [OlistConnectionController, OlistV3ConnectionController, NuvemshopConnectionController, ChannelListingsController],
   providers: [
     OlistConnectionService,
+    OlistV3ConnectionService,
+    OlistV3VerificationService,
     ErpSyncOrchestrator,
     ErpSyncEventsQueryService,
     ProductPhotoMirrorService,
@@ -60,6 +68,7 @@ import { CatalogModule } from '../catalog/catalog.module';
     CredentialEncryptionService,
 
     OlistApiClient,
+    OlistV3ApiClient,
     NuvemshopApiClient,
     // NuvemshopFeeRuleProvider mora aqui (não em marketplace-intelligence)
     // porque precisa do mesmo NuvemshopApiClient/credenciais deste módulo —

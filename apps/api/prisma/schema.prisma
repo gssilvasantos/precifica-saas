@@ -1167,6 +1167,15 @@ model OlistConnection {
   // páginas são buscadas, mesmo que o PROCESSAMENTO delas falhe depois —
   // ver comentário em ErpSyncOrchestrator.syncTenant).
   resumeFromPage Int?
+  // CONEXÃO OAuth2 DA API v3 (12/10/2026, ADR 0003). Todas opcionais: a v2
+  // (apiTokenEnc) continua sendo a fonte do sync até a v3 provar equivalência.
+  // Os dois tokens ficam criptografados em repouso (CredentialEncryptionService).
+  // NULL em v3RefreshTokenEnc = nunca conectado na v3.
+  v3AccessTokenEnc   String?
+  v3RefreshTokenEnc  String?
+  v3AccessExpiresAt  DateTime?
+  v3RefreshExpiresAt DateTime?
+  v3ConnectedAt      DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

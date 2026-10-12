@@ -38,7 +38,12 @@ export default function IntegracoesPage() {
   useEffect(() => {
     if (!callbackChannel) return;
     void queryClient.invalidateQueries({
-      queryKey: callbackChannel === 'shopee' ? ['shopee-status'] : ['mercado-livre-status'],
+      queryKey:
+        callbackChannel === 'shopee'
+          ? ['shopee-status']
+          : callbackChannel === 'olist-v3'
+            ? ['olist-v3-status']
+            : ['mercado-livre-status'],
     });
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -50,7 +55,8 @@ export default function IntegracoesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const callbackChannelLabel = callbackChannel === 'shopee' ? 'Shopee' : 'Mercado Livre';
+  const callbackChannelLabel =
+    callbackChannel === 'shopee' ? 'Shopee' : callbackChannel === 'olist-v3' ? 'API v3 do Olist' : 'Mercado Livre';
 
   const statusQuery = useQuery({
     queryKey: ['mercado-livre-status'],
