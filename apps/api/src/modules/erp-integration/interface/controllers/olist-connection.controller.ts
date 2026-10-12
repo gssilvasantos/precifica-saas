@@ -12,6 +12,8 @@ import {
 } from '../../../identity-access/public-api';
 import { OlistConnectionService } from '../../application/olist-connection.service';
 import { ErpSyncOrchestrator } from '../../application/erp-sync-orchestrator.service';
+import { OlistV3SyncService } from '../../application/olist-v3-sync.service';
+import { OlistV3ApiClient } from '../../infrastructure/olist/olist-v3-api.client';
 import { ErpSyncEventsQueryService } from '../../application/erp-sync-events-query.service';
 import { ConnectOlistDto } from '../dto/connect-olist.dto';
 
@@ -23,6 +25,8 @@ export class OlistConnectionController {
     private readonly connectionService: OlistConnectionService,
     private readonly orchestrator: ErpSyncOrchestrator,
     private readonly eventsQuery: ErpSyncEventsQueryService,
+    private readonly v3Sync: OlistV3SyncService,
+    private readonly v3Client: OlistV3ApiClient,
   ) {}
 
   @Get('status')
@@ -55,7 +59,10 @@ export class OlistConnectionController {
   @Roles(UserRole.ADMIN)
   @Post('sync-now')
   async syncNow(@CurrentUser() user: AuthenticatedUser) {
-    const result = await this.orchestrator.syncTenant(user.tenantId);
+    // Com OLIST_V3_SYNC_ENABLED o clique usa o sync incremental da v3; senão, o v2 de sempre.
+    const result = this.v3Client.isSyncEnabled()
+      ? await this.v3Sync.syncTenant(user.tenantId)
+      : await this.orchestrator.syncTenant(user.tenantId);
     if (!result.success) {
       throw new BadRequestException(result.error ?? 'Falha desconhecida ao sincronizar com o Olist.');
     }

@@ -89,6 +89,12 @@ export class OlistV3ApiClient {
     return process.env.OLIST_V3_ENABLED === 'true';
   }
 
+  // Segunda flag (ADR 0003, fatia 2): liga o SYNC incremental pela v3. Exige a flag
+  // de conexão também; sozinha não faz nada.
+  isSyncEnabled(): boolean {
+    return this.isEnabled() && process.env.OLIST_V3_SYNC_ENABLED === 'true';
+  }
+
   isConfigured(): boolean {
     return Boolean(
       process.env.OLIST_V3_CLIENT_ID && process.env.OLIST_V3_CLIENT_SECRET && process.env.OLIST_V3_REDIRECT_URI,
@@ -128,6 +134,20 @@ export class OlistV3ApiClient {
     if (params.codigo) query.codigo = params.codigo;
     if (params.dataAlteracao) query.dataAlteracao = params.dataAlteracao;
     return this.get(accessToken, '/produtos', query);
+  }
+
+  // GET /estoque — itens com estoque alterado desde `dataAlteracao`. É o gatilho de
+  // "quem teve saldo mexido" (a listagem de produtos só traz `localizacao`).
+  listarEstoque(
+    accessToken: string,
+    params: { limit?: number; offset?: number; dataAlteracao?: string } = {},
+  ): Promise<OlistV3Response<unknown>> {
+    const query: Record<string, string> = {
+      limit: String(params.limit ?? 100),
+      offset: String(params.offset ?? 0),
+    };
+    if (params.dataAlteracao) query.dataAlteracao = params.dataAlteracao;
+    return this.get(accessToken, '/estoque', query);
   }
 
   // GET /produtos/{id} — detalhe. Para uma variação, o id é o da própria

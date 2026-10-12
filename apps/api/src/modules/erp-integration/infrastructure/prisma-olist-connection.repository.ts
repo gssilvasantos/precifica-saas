@@ -124,4 +124,24 @@ export class PrismaOlistConnectionRepository implements OlistConnectionRepositor
       },
     });
   }
+
+  async findTenantIdsWithV3Tokens(): Promise<string[]> {
+    const rows = await this.prisma.olistConnection.findMany({
+      where: { v3RefreshTokenEnc: { not: null } },
+      select: { tenantId: true },
+    });
+    return rows.map((r) => r.tenantId);
+  }
+
+  async getV3SyncCursor(tenantId: string): Promise<Date | null> {
+    const row = await this.prisma.olistConnection.findUnique({
+      where: { tenantId },
+      select: { v3SyncCursorAt: true },
+    });
+    return row?.v3SyncCursorAt ?? null;
+  }
+
+  async setV3SyncCursor(tenantId: string, at: Date): Promise<void> {
+    await this.prisma.olistConnection.updateMany({ where: { tenantId }, data: { v3SyncCursorAt: at } });
+  }
 }

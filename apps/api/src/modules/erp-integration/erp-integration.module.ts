@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { OlistConnectionService } from './application/olist-connection.service';
 import { OlistV3ConnectionService } from './application/olist-v3-connection.service';
 import { OlistV3VerificationService } from './application/olist-v3-verification.service';
+import { OlistV3SyncService } from './application/olist-v3-sync.service';
 import { ErpSyncOrchestrator } from './application/erp-sync-orchestrator.service';
 import { ErpSyncEventsQueryService } from './application/erp-sync-events-query.service';
 import { ProductPhotoMirrorService } from './application/product-photo-mirror.service';
@@ -58,6 +59,7 @@ import { CatalogModule } from '../catalog/catalog.module';
     OlistConnectionService,
     OlistV3ConnectionService,
     OlistV3VerificationService,
+    OlistV3SyncService,
     ErpSyncOrchestrator,
     ErpSyncEventsQueryService,
     ProductPhotoMirrorService,

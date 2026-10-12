@@ -1176,6 +1176,9 @@ model OlistConnection {
   v3AccessExpiresAt  DateTime?
   v3RefreshExpiresAt DateTime?
   v3ConnectedAt      DateTime?
+  // Cursor do sync incremental v3 (ADR 0003, fatia 2): início da última rodada que
+  // terminou SEM falha. Só avança em rodada limpa, para nada alterado se perder.
+  v3SyncCursorAt     DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

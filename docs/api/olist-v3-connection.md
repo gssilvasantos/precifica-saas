@@ -48,5 +48,11 @@ valor **não verificado** contra o limite oficial) e leitura de `x-ratelimit-*`.
 Os tipos do cliente estão copiados à mão em `apps/web/src/features/erp-connections/api.ts`
 (`OlistV3Status`, `OlistV3VerifyResult`). Mudou o DTO ou a resposta, atualize os dois no mesmo commit.
 
+## Sync pela v3 (fatia 2)
+Sem rota nova. `POST /erp-integration/olist/sync-now` e o agendador passam a usar
+`OlistV3SyncService` quando `OLIST_V3_ENABLED` e `OLIST_V3_SYNC_ENABLED` são `true`; caso contrário,
+o sync v2. Resposta e permissões inalteradas. Ver ADR 0003 e `docs/runbooks/olist-v3-sync.md`.
+
 ## Não exercitado
-Nenhuma chamada contra o Olist real foi feita nesta fatia; os testes usam `fetch` simulado.
+A fatia 1 foi verificada contra a conta real (RM0100, RM0024-5). O sync da fatia 2 só tem testes
+com fakes; a primeira rodada real ainda não foi executada.

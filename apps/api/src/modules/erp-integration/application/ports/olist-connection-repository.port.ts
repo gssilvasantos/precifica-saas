@@ -56,6 +56,12 @@ export interface OlistConnectionRepository {
   // exige apiTokenEnc, então a v3 só pode ser ligada a uma conexão que já existe).
   saveV3Tokens(tenantId: string, tokens: OlistV3TokenWrite, markConnected: boolean): Promise<boolean>;
   clearV3Tokens(tenantId: string): Promise<void>;
+  // Contas com token v3 gravado (keep-alive e sync incremental). Cross-tenant: só
+  // chamar dentro de TenantContextStore.runAsService, como findAllActive.
+  findTenantIdsWithV3Tokens(): Promise<string[]>;
+  // Cursor do sync incremental v3 (ADR 0003, fatia 2). null = nunca rodou.
+  getV3SyncCursor(tenantId: string): Promise<Date | null>;
+  setV3SyncCursor(tenantId: string, at: Date): Promise<void>;
 }
 
 export const OLIST_CONNECTION_REPOSITORY = Symbol('OLIST_CONNECTION_REPOSITORY');

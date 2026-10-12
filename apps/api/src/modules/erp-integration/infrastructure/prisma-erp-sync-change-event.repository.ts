@@ -31,4 +31,9 @@ export class PrismaErpSyncChangeEventRepository implements ErpSyncChangeEventRep
       take: limit,
     }) as unknown as Promise<ErpSyncChangeEvent[]>;
   }
+
+  async findAllExternalIds(tenantId: string): Promise<Set<string>> {
+    const rows = await this.prisma.erpSyncChangeEvent.findMany({ where: { tenantId }, select: { externalId: true } });
+    return new Set(rows.map((r) => r.externalId));
+  }
 }
