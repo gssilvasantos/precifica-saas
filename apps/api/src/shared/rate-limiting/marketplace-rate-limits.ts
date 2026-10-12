@@ -57,6 +57,12 @@ export const MARKETPLACE_RATE_LIMITS: Record<string, RateLimiterConfig> = {
   // rajada: o bloqueio do Tiny é por janela de minuto, então o que importa é
   // a taxa média, e uma rajada inicial só antecipa o estouro.
   OLIST: { requestsPerInterval: 1, intervalMs: 1333 },
+  // OLIST_V3 (12/10/2026, ADR 0003) — API v3 do mesmo Olist, mesma conta e
+  // mesma cota compartilhada com marketplaces e com o rm-catalogo. O limite
+  // OFICIAL da v3 não foi verificado (o OpenAPI não o descreve); começa igual
+  // ao da v2, de propósito conservador. O cliente v3 lê x-ratelimit-* da
+  // resposta e se adianta quando o saldo está baixo.
+  OLIST_V3: { requestsPerInterval: 1, intervalMs: 1333 },
 };
 
 // Fail-safe para qualquer canal sem entrada explícita acima — conservador

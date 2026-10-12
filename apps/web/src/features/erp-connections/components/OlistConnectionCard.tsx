@@ -6,6 +6,7 @@ import { ConnectionStatusBadge } from './ConnectionStatusBadge';
 import { useAuth } from '../../auth/auth-context';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
+import { OlistV3Panel } from './OlistV3Panel';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
@@ -184,6 +185,8 @@ export function OlistConnectionCard() {
       {syncMutation.isError && (
         <p className="mt-3 text-sm text-margin-danger">{extractErrorMessage(syncMutation.error)}</p>
       )}
+
+      <OlistV3Panel />
     </Card>
   );
 }

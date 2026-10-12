@@ -22,4 +22,6 @@ do cliente atualizado no mesmo commit.** Registre a operação afetada aqui.
 
 ## Índice
 
-*(vazio — o primeiro contrato entra aqui)*
+| Contrato | Módulo | Data |
+|---|---|---|
+| [olist-v3-connection](./olist-v3-connection.md) | erp-integration | 2026-10-12 |

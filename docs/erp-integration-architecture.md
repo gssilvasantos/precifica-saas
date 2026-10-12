@@ -137,3 +137,11 @@ Sem estado `PENDENTE_VALIDACAO` aqui — a diferença de confiança explicada na
 **Ajuste técnico que decidi ao escrever o client**: entre API V2 (token estático por conta) e V3 (OAuth2, exige app "Construa" e endpoints que eu não conseguiria verificar ao vivo neste ambiente), vou implementar contra a **V2** nesta primeira entrega — token único gerado pelo próprio tenant no painel do Olist, sem fluxo de autorização OAuth para construir às cegas. V3 fica documentada como evolução natural quando os endpoints puderem ser validados contra uma conta real. Isso simplifica bastante o `OlistConnection` (um campo de token, não client_id/secret/refresh) e ainda cumpre 100% a exigência de leitura apenas.
 
 
+
+---
+
+## 9. Atualização 2026-10-12 — API v3 (em teste, fatia 1)
+
+A seção 8 adiou a v3 por não poder ser validada contra conta real. Com o sync v2 em `PARTIAL` desde 2026-10-10 (varredura completa de ~1.800 chamadas, cota do Olist e corte do processo no Render free), a decisão de migrar a **busca** para a v3, de forma incremental, está em `docs/decisions/0003-olist-api-v3-sync-incremental.md`.
+
+Estado: só a conexão OAuth2 e uma verificação somente leitura existem, atrás de `OLIST_V3_ENABLED` (desligada). O sync continua 100% na v2. Contrato: `docs/api/olist-v3-connection.md`. Nada foi exercitado contra o Olist real ainda.

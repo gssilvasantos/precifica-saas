@@ -12,6 +12,23 @@ export interface OlistConnectionRecord {
   resumeFromPage: number | null;
 }
 
+// Tokens OAuth2 da API v3 (ADR 0003). Sempre criptografados nesta camada — o
+// decrypt só acontece em OlistV3ConnectionService.
+export interface OlistV3TokenRecord {
+  accessTokenEnc: string;
+  refreshTokenEnc: string;
+  accessExpiresAt: Date;
+  refreshExpiresAt: Date | null;
+  connectedAt: Date | null;
+}
+
+export interface OlistV3TokenWrite {
+  accessTokenEnc: string;
+  refreshTokenEnc: string;
+  accessExpiresAt: Date;
+  refreshExpiresAt: Date | null;
+}
+
 export interface OlistConnectionRepository {
   findByTenant(tenantId: string): Promise<OlistConnectionRecord | null>;
   findAllActive(): Promise<OlistConnectionRecord[]>;
@@ -32,6 +49,13 @@ export interface OlistConnectionRepository {
   // retomar). Não mexe em lastSyncedAt/lastSyncStatus — só markSynced* e
   // markSyncFailed fecham uma tentativa; isto só marca progresso dentro dela.
   saveProgress(tenantId: string, resumeFromPage: number | null): Promise<void>;
+
+  // v3 (ADR 0003). Retorna null quando a conta nunca conectou na v3.
+  findV3Tokens(tenantId: string): Promise<OlistV3TokenRecord | null>;
+  // Grava o par de tokens. Retorna false quando a conta não tem conexão v2 (a linha
+  // exige apiTokenEnc, então a v3 só pode ser ligada a uma conexão que já existe).
+  saveV3Tokens(tenantId: string, tokens: OlistV3TokenWrite, markConnected: boolean): Promise<boolean>;
+  clearV3Tokens(tenantId: string): Promise<void>;
 }
 
 export const OLIST_CONNECTION_REPOSITORY = Symbol('OLIST_CONNECTION_REPOSITORY');
