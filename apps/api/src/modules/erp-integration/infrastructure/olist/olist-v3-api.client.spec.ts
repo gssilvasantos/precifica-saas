@@ -45,6 +45,16 @@ describe('OlistV3ApiClient', () => {
       expect(client.isEnabled()).toBe(true);
     });
 
+    it('isSyncEnabled exige a flag de conexão E a flag de sync', () => {
+      const client = new OlistV3ApiClient();
+      delete process.env.OLIST_V3_SYNC_ENABLED;
+      expect(client.isSyncEnabled()).toBe(false);
+      process.env.OLIST_V3_SYNC_ENABLED = 'true';
+      expect(client.isSyncEnabled()).toBe(true);
+      process.env.OLIST_V3_ENABLED = 'false';
+      expect(client.isSyncEnabled()).toBe(false);
+    });
+
     it('isConfigured exige id, segredo e redirect', () => {
       const client = new OlistV3ApiClient();
       expect(client.isConfigured()).toBe(true);
@@ -108,6 +118,16 @@ describe('OlistV3ApiClient', () => {
   });
 
   describe('leitura', () => {
+    it('listarEstoque chama /estoque com dataAlteracao e paginação', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse({ itens: [] }));
+      await new OlistV3ApiClient().listarEstoque('tok', { limit: 100, offset: 200, dataAlteracao: '2026-10-05 10:00:00' });
+      const parsed = new URL(String(fetchSpy.mock.calls[0][0]));
+      expect(parsed.pathname).toBe('/public-api/v3/estoque');
+      expect(parsed.searchParams.get('limit')).toBe('100');
+      expect(parsed.searchParams.get('offset')).toBe('200');
+      expect(parsed.searchParams.get('dataAlteracao')).toBe('2026-10-05 10:00:00');
+    });
+
     it('listarProdutos monta a query com dataAlteracao e envia Bearer', async () => {
       fetchSpy.mockResolvedValue(
         jsonResponse({ itens: [] }, { headers: { 'x-ratelimit-limit': '60', 'x-ratelimit-remaining': '59', 'x-ratelimit-reset': '10' } }),

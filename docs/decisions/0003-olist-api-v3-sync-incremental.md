@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | proposto (a fatia 1 só entrega conexão e verificação; o sync continua na v2) |
+| **Status** | aceito (fatia 1: conexão e verificação; fatia 2: sync incremental atrás de `OLIST_V3_SYNC_ENABLED`, desligada por padrão) |
 | **Data** | 2026-10-12 |
 | **Decisores** | Dono do produto (gssilvasantos) |
 | **Escopo** | `apps/api/src/modules/erp-integration` — importação do catálogo do Olist |
@@ -90,6 +90,45 @@ leitura**. Não altera o sync v2. As fatias seguintes: (2) sync incremental v3 a
 Alta nesta fatia: as colunas novas são opcionais e a flag vem desligada; desligar a flag devolve o
 comportamento atual. Rollback de schema: `ALTER TABLE ... DROP COLUMN` das 5 colunas (sem dado de
 negócio, só tokens que podem ser refeitos reconectando).
+
+## Fatia 2 — sync incremental (2026-10-12)
+
+Verificação da fatia 1 contra a conta real confirmou: variação consultada pelo próprio id traz
+peso, dimensões, custo, preço, estoque, NCM, GTIN e fotos; `dataAlteracao` funciona; custo/peso/
+dimensões/NCM/GTIN batem com o que a v2 importou.
+
+**Achado:** a v2 nunca importou estoque (`produto.obter.php` não traz). Todos os 1.131 produtos do
+tenant principal estão com `stockQuantity = 0`; a v3 traz o valor real em `estoque.quantidade`.
+
+**Desenho** (`OlistV3SyncService`), a cada rodada:
+1. lista todos os produtos ativos (~18 chamadas de 100) — universo atual;
+2. candidatos a detalhe = (a) ativo e nunca importado (diferença contra `ErpSyncChangeEvent`),
+   (b) `dataAlteracao` ≥ cursor, (c) saldo alterado ≥ cursor (`GET /estoque?dataAlteracao=`);
+3. detalhe só dos candidatos, pais antes das variações, gravando pelo mesmo caminho do v2
+   (`ErpSyncOrchestrator.importNormalized`: hash de conteúdo, fotos, evento fiscal).
+
+**Cursor** (`olist_connections.v3SyncCursorAt`): só avança em rodada sem falha transitória nem
+pendência; recua 4 h na leitura (fuso do filtro não verificado: UTC vs Brasília). Cadastro inválido
+no Olist (sem sku/nome) não segura o cursor — aparece no aviso do card. Autocura: o que falhou
+continua "nunca importado" ou "alterado" e entra na rodada seguinte.
+
+**Teto por rodada:** 120 produtos / 8 min; o excedente fica pendente e o cursor não avança.
+
+**Keep-alive do token:** o agendador (a cada 30 min) chama `getValidAccessToken` para todas as
+contas v3, mantendo o refresh token (24 h) vivo.
+
+**Flag:** `OLIST_V3_SYNC_ENABLED`. Ligada, o agendador e o "sincronizar agora" usam a v3; desligada,
+v2. Rollback = desligar a flag.
+
+**Orçamento de horas (Render free):** 750 h/mês compartilhadas entre 4 serviços free. O ping
+(pg_cron no Supabase, `*/10` das 07h às 21h BRT, ~430 h/mês) mantém a API acordada só nesse período.
+
+**Fora de escopo desta fatia:** produtos que ficam inativos no Olist (nem v2 nem v3 desativam);
+desligar a v2 (fatia 3).
+
+**Não verificado:** interpretação de fuso do `dataAlteracao`; comportamento sob rodada real
+completa com estoque; duração do primeiro sync (≈1.131 produtos + variações a ~1,3 s/chamada, em
+várias rodadas por causa do teto).
 
 ## Não verificado até a data deste ADR
 

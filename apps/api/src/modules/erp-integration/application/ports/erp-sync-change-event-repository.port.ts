@@ -29,6 +29,9 @@ export interface ErpSyncChangeEventRepository {
   upsert(data: ErpSyncChangeEventUpsertData): Promise<void>;
   findByExternalId(tenantId: string, externalId: string): Promise<ErpSyncChangeEvent | null>;
   findRecent(tenantId: string, limit?: number): Promise<ErpSyncChangeEvent[]>;
+  // Ids externos já importados (uma consulta, só a coluna externalId). Serve ao
+  // sync v3 para achar o que NUNCA foi importado sem uma consulta por produto.
+  findAllExternalIds(tenantId: string): Promise<Set<string>>;
 }
 
 export const ERP_SYNC_CHANGE_EVENT_REPOSITORY = Symbol('ERP_SYNC_CHANGE_EVENT_REPOSITORY');

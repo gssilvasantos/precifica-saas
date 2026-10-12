@@ -27,6 +27,7 @@ import { OlistApiClient, isRateLimitError } from '../infrastructure/olist/olist-
 import { ProductPhotoMirrorService } from './product-photo-mirror.service';
 import {
   InvalidOlistProductError,
+  NormalizedOlistProduct,
   OlistVariationRef,
   extractVariationRefs,
   normalizeOlistProduct,
@@ -311,12 +312,23 @@ export class ErpSyncOrchestrator {
     return { applied, rejected, semDimensoes };
   }
 
-  private async processProduct(
+  private processProduct(
     tenantId: string,
     raw: unknown,
     variacao?: { parentExternalId: string; variantAttributes: Record<string, string>; paiImportado: boolean },
   ): Promise<{ changed: boolean; semDimensoes: boolean }> {
-    const normalized = normalizeOlistProduct(raw);
+    return this.importNormalized(tenantId, normalizeOlistProduct(raw), variacao);
+  }
+
+  // Gravação no catálogo a partir de um produto JÁ normalizado: hash, atalho
+  // "nada mudou", espelhamento de fotos, upsert via porta e evento fiscal.
+  // Pública porque o sync da API v3 (OlistV3SyncService) normaliza a resposta
+  // da v3 e reaproveita exatamente este caminho — uma implementação só.
+  async importNormalized(
+    tenantId: string,
+    normalized: NormalizedOlistProduct,
+    variacao?: { parentExternalId: string; variantAttributes: Record<string, string>; paiImportado: boolean },
+  ): Promise<{ changed: boolean; semDimensoes: boolean }> {
 
     // Hash sobre os dados ORIGINAIS do Olist (antes de espelhar fotos) —
     // assim uma foto que só trocou de URL no Olist mas é visualmente igual
@@ -497,6 +509,12 @@ const MAX_REASONS_SHOWN = 3;
 // O texto completo continua no log do servidor, que é onde se investiga.
 export function motivoVisivelDeRejeicao(identificacao: string, error: unknown): string {
   if (error instanceof InvalidOlistProductError) return error.message;
+  // Bloqueio de cota do Olist NÃO é falha interna: o produto está certo, o Olist
+  // é que recusou a consulta. Rotulado como "falha interna" (até 12/10/2026)
+  // mandava o usuário atrás de um bug que não existe. Tentará de novo no próximo sync.
+  if (isRateLimitError(error)) {
+    return `${identificacao}: o Olist bloqueou temporariamente as consultas (limite de requisições) — será tentado de novo no próximo sync.`;
+  }
   return `${identificacao}: falha interna ao gravar — registrada no log do servidor.`;
 }
 

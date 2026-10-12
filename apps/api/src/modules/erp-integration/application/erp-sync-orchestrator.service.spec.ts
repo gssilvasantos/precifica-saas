@@ -114,6 +114,14 @@ describe('ErpSyncOrchestrator — bloqueio de cota do Olist', () => {
   });
 });
 
+describe('motivoVisivelDeRejeicao — bloqueio de cota', () => {
+  it('rotula "API Bloqueada" como limite do Olist, não como falha interna', () => {
+    const motivo = motivoVisivelDeRejeicao('Variação RM0185-1', new Error('API Bloqueada - Excedido o número de acessos'));
+    expect(motivo).toContain('bloqueou temporariamente');
+    expect(motivo).not.toContain('falha interna');
+  });
+});
+
 describe('motivoVisivelDeRejeicao', () => {
   it('passa inteira a mensagem de cadastro incompleto, que foi escrita para o lojista', () => {
     const erro = new InvalidOlistProductError('794327305', 'NCM ausente — preencha no cadastro do Olist.');
