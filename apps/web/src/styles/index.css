@@ -103,13 +103,16 @@
   }
 }
 
-/* Barra de rolagem (WebKit: Chrome/Edge/Safari) — pedido do usuário: nada
-   de fundo aparecendo no TRILHO ao passar o mouse por cima, só as setas de
-   navegação (sempre visíveis, não só no hover) e o polegar. Cor das setas é
-   fixa (não dá pra referenciar a variável CSS do tema dentro de um
-   background-image de pseudo-elemento de scrollbar em todo navegador), mas
-   o tom escolhido (cinza-azulado neutro) tem contraste aceitável nos dois
-   temas — mesma família do token muted-foreground. */
+/* Barra de rolagem (WebKit: Chrome/Edge/Safari) — pedido do usuário
+   (13/10/2026, reforçado depois de ver o paginador): SÓ as setas de
+   navegação aparecem, nada de fundo — nem no trilho, nem no polegar, nem
+   no hover. O polegar fica transparente (ainda arrastável, só não pintado);
+   quem indica que dá pra rolar são as setas nas pontas, não uma barra
+   colorida. Cor das setas é fixa (não dá pra referenciar a variável CSS do
+   tema dentro de um background-image de pseudo-elemento de scrollbar em
+   todo navegador), mas o tom escolhido (cinza-azulado neutro) tem
+   contraste aceitável nos dois temas — mesma família do token
+   muted-foreground. */
 ::-webkit-scrollbar {
   width: 14px;
   height: 14px;
@@ -121,19 +124,9 @@
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background-color: rgb(var(--border));
-  border-radius: 9999px;
-  border: 3px solid transparent;
-  background-clip: padding-box;
-}
-
+::-webkit-scrollbar-thumb,
 ::-webkit-scrollbar-thumb:hover {
-  /* Só o polegar reage ao hover (affordance padrão de scrollbar) — o
-     trilho ao redor continua transparente, que é o que o usuário pediu. */
-  background-color: rgb(var(--muted-foreground) / 0.6);
-  border: 3px solid transparent;
-  background-clip: padding-box;
+  background-color: transparent;
 }
 
 ::-webkit-scrollbar-button {
