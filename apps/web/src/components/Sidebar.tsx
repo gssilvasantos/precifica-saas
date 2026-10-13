@@ -31,6 +31,8 @@ import {
   Tags,
   ChevronDown,
   Compass,
+  ChevronsLeft,
+  ChevronsRight,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../features/auth/auth-context';
@@ -128,6 +130,7 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 const STORAGE_KEY = 'kyneti.sidebar.groupsAbertos';
+const COLLAPSED_STORAGE_KEY = 'kyneti.sidebar.recolhida';
 
 interface Props {
   isOpen: boolean;
@@ -166,6 +169,26 @@ export default function Sidebar({ isOpen, onClose }: Props) {
   }, [isTenantAdmin, user?.moduleAccess, user?.isPlatformAdmin]);
 
   const grupoDaRotaAtual = grupos.find((g) => g.items.some((i) => pathname.startsWith(i.to)))?.id;
+
+  // Sidebar recolhível (pedido do usuário, 13/10/2026: "não conseguimos
+  // diminuir [o menu] para ganhar espaço na exibição dos produtos") — vira
+  // uma trilha só de ícones (72px) em vez dos 256px padrão. Persistido como
+  // os grupos abertos, mesma chave de storage por aba.
+  const [recolhida, setRecolhida] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(COLLAPSED_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSED_STORAGE_KEY, recolhida ? '1' : '0');
+    } catch {
+      // ver comentário de `abertos` abaixo — persistir é conveniência.
+    }
+  }, [recolhida]);
 
   const [abertos, setAbertos] = useState<string[]>(() => {
     try {
@@ -208,6 +231,7 @@ export default function Sidebar({ isOpen, onClose }: Props) {
   const itemClasses = ({ isActive }: { isActive: boolean }) =>
     cn(
       'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+      recolhida && 'justify-center px-0',
       isActive
         ? 'bg-primary text-primary-foreground'
         : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground',
@@ -221,36 +245,67 @@ export default function Sidebar({ isOpen, onClose }: Props) {
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-card transition-transform md:static md:translate-x-0',
+          'fixed inset-y-0 left-0 z-40 flex shrink-0 flex-col border-r border-border bg-card transition-[transform,width] duration-200',
+          recolhida ? 'md:w-[76px]' : 'md:w-64',
+          'w-64 md:static md:translate-x-0',
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className="flex h-16 shrink-0 items-center gap-2 border-b border-border px-6">
-          <span className="font-serif text-xl font-semibold text-foreground">
+        <div
+          className={cn(
+            'flex h-16 shrink-0 items-center gap-2 border-b border-border px-6',
+            recolhida && 'md:justify-center md:px-0',
+          )}
+        >
+          <span className={cn('font-serif text-xl font-semibold text-foreground', recolhida && 'md:hidden')}>
             Kyneti<span className="text-accent">.</span>
           </span>
+          {/* Toggle de recolher (pedido do usuário, 13/10/2026: "não
+              conseguimos diminuir [o menu] para ganhar espaço"). Some no
+              mobile — lá o menu já é um painel sobreposto, recolher não
+              ganha espaço nenhum, só esconde o rótulo sem necessidade. */}
+          <button
+            type="button"
+            onClick={() => setRecolhida((atual) => !atual)}
+            aria-label={recolhida ? 'Expandir menu' : 'Recolher menu'}
+            title={recolhida ? 'Expandir menu' : 'Recolher menu'}
+            className="hidden rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground md:ml-auto md:flex"
+          >
+            {recolhida ? <ChevronsRight className="h-4 w-4" strokeWidth={1.8} /> : <ChevronsLeft className="h-4 w-4" strokeWidth={1.8} />}
+          </button>
         </div>
 
         {/* overflow-y-auto: com grupos abertos a lista passa da altura da tela */}
         <nav className="flex-1 space-y-4 overflow-y-auto p-3">
           <div className="space-y-1">
             {HOME.map((item) => (
-              <NavLink key={item.to} to={item.to} onClick={onClose} className={itemClasses}>
+              <NavLink
+                key={item.to}
+                to={item.to}
+                onClick={onClose}
+                className={itemClasses}
+                title={recolhida ? item.label : undefined}
+              >
                 <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.8} />
-                {item.label}
+                <span className={cn(recolhida && 'md:hidden')}>{item.label}</span>
               </NavLink>
             ))}
           </div>
 
           {grupos.map((grupo) => {
-            const aberto = abertos.includes(grupo.id);
+            // Recolhida: sem rótulo de grupo pra clicar, então todo grupo
+            // fica sempre "aberto" — só a trilha de ícones, sem acordeão.
+            const aberto = recolhida || abertos.includes(grupo.id);
             return (
               <div key={grupo.id} className="space-y-1">
                 <button
                   type="button"
                   onClick={() => alternar(grupo.id)}
                   aria-expanded={aberto}
-                  className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 transition-colors hover:text-foreground"
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 transition-colors hover:text-foreground',
+                    recolhida && 'md:hidden',
+                  )}
                 >
                   {grupo.label}
                   <ChevronDown
@@ -261,9 +316,15 @@ export default function Sidebar({ isOpen, onClose }: Props) {
 
                 {aberto &&
                   grupo.items.map((item) => (
-                    <NavLink key={item.to} to={item.to} onClick={onClose} className={itemClasses}>
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      onClick={onClose}
+                      className={itemClasses}
+                      title={recolhida ? item.label : undefined}
+                    >
                       <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.8} />
-                      {item.label}
+                      <span className={cn(recolhida && 'md:hidden')}>{item.label}</span>
                     </NavLink>
                   ))}
               </div>

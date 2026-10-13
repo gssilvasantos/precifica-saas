@@ -16,9 +16,14 @@ export class PrismaProductRepository implements ProductRepository {
   }
 
   async findAllActive(tenantId: string): Promise<Product[]> {
+    // orderBy skuCode (não name): pedido do usuário, 13/10/2026 — catálogo em
+    // ordem crescente de SKU (RM0001, RM0002, ...), não alfabética por nome.
+    // SKU é string de largura fixa por faixa (RM + 4 dígitos, variação com
+    // sufixo "-NN" depois), então ordenação lexicográfica já reproduz a
+    // ordem numérica — sem precisar de cast/expressão.
     const records = await this.prisma.product.findMany({
       where: { tenantId, isActive: true },
-      orderBy: { name: 'asc' },
+      orderBy: { skuCode: 'asc' },
     });
     return records.map((record) => this.toDomain(record));
   }
@@ -53,9 +58,11 @@ export class PrismaProductRepository implements ProductRepository {
   }
 
   async findChildren(tenantId: string, parentProductId: string): Promise<Product[]> {
+    // Mesmo critério de findAllActive — variações do mesmo pai também em
+    // ordem crescente de SKU (ex.: RM0001-01, RM0001-02, ...).
     const records = await this.prisma.product.findMany({
       where: { tenantId, parentProductId },
-      orderBy: { name: 'asc' },
+      orderBy: { skuCode: 'asc' },
     });
     return records.map((record) => this.toDomain(record));
   }
