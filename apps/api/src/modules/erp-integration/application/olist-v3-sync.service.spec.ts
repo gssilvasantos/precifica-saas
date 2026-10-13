@@ -156,6 +156,23 @@ describe('OlistV3SyncService.syncTenant', () => {
     expect(connections.markSyncedWithWarning.mock.calls[0][2]).toMatch(/10 produto\(s\) ficaram/);
   });
 
+  it('teto por rodada é configurável por ambiente (catch-up) e o cursor avança ao completar', async () => {
+    process.env.OLIST_V3_SYNC_MAX_PRODUCTS = '200';
+    try {
+      const active = Array.from({ length: 130 }, (_, i) => item(i + 1, `S${i + 1}`));
+      const { service, importer, connections } = build({ active });
+      await service.syncTenant('t1');
+      expect(importer.importNormalized).toHaveBeenCalledTimes(130);
+      expect(connections.setV3SyncCursor).toHaveBeenCalled();
+      process.env.OLIST_V3_SYNC_MAX_PRODUCTS = 'abc';
+      const again = build({ active });
+      await again.service.syncTenant('t1');
+      expect(again.importer.importNormalized).toHaveBeenCalledTimes(120);
+    } finally {
+      delete process.env.OLIST_V3_SYNC_MAX_PRODUCTS;
+    }
+  });
+
   it('produto sem dimensões gera aviso mas o cursor avança', async () => {
     const { service, importer, connections } = build({ active: [item(1, 'A')] });
     importer.importNormalized.mockResolvedValue({ changed: true, semDimensoes: true });

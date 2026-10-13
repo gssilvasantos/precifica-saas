@@ -15,6 +15,11 @@ falha de renovação de token v3; log `Sync Olist v3 ... falhou`.
 - *Limite de requisições (HTTP 429):* nada a fazer; a rodada para e retoma na seguinte. Se persistir,
   verificar se outra integração (rm-catalogo, MCP) está consumindo a mesma cota.
 - *Produtos "ficaram para a próxima rodada":* normal no primeiro sync (teto de 120 por rodada).
+- *Catch-up do catálogo inteiro (carga de estoque):* o sync incremental só relê o que mudou; produtos
+  antigos ficam com estoque 0 até mudarem. Para recarregar tudo: no Render, definir
+  `OLIST_V3_SYNC_MAX_PRODUCTS=1500` e `OLIST_V3_SYNC_MAX_RUN_MINUTES=45`, zerar o cursor
+  (`UPDATE erp_integration.olist_connections SET "v3SyncCursorAt" = '2020-01-01' WHERE "tenantId" = '<id>';`),
+  deixar uma rodada completa (~30 min) e REMOVER as duas variáveis depois.
 - *Cadastro inválido (sem sku/nome):* corrigir no Olist; não bloqueia o cursor.
 - *Reverter para v2:* `OLIST_V3_SYNC_ENABLED=false` no Render e redeploy/restart. Dados e cursor permanecem.
 - *Reprocessar tudo:* `UPDATE erp_integration.olist_connections SET "v3SyncCursorAt" = NULL WHERE "tenantId" = '<id>';`
