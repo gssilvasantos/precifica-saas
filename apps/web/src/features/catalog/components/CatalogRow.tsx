@@ -1,3 +1,4 @@
+import type { MouseEvent, ReactNode } from 'react';
 import { ChevronRight, MoreHorizontal } from 'lucide-react';
 import type { Product } from '../api';
 import type { MarginStatusInfo } from '../margin-status';
@@ -30,6 +31,13 @@ interface Props {
   onPricing: () => void;
   // Só em produto que não é variação (a hierarquia tem um nível só).
   onGenerateVariants?: () => void;
+  // Expansão de preço por canal (pedido do usuário, 13/10/2026: "quando eu
+  // clicar em um produto... esse produto se expanda" com os cards de preço
+  // por canal abaixo, no estilo Mazzei Pro Seller). Independente de
+  // `expanded`/`onToggle` acima, que é a expansão pai→variações.
+  pricingExpanded?: boolean;
+  onTogglePricing?: () => void;
+  pricingContent?: ReactNode;
 }
 
 function variantLabel(attrs: Product['variantAttributes']): string | null {
@@ -42,13 +50,42 @@ function variantLabel(attrs: Product['variantAttributes']): string | null {
 // em vez de forçar rolagem horizontal: a tabela sempre cabe na página.
 export const CELL = 'px-3 py-3 align-middle';
 
-export default function CatalogRow({ row, isChild = false, variantCount, expanded = false, onToggle, onEdit, onPricing, onGenerateVariants }: Props) {
+export default function CatalogRow({
+  row,
+  isChild = false,
+  variantCount,
+  expanded = false,
+  onToggle,
+  onEdit,
+  onPricing,
+  onGenerateVariants,
+  pricingExpanded = false,
+  onTogglePricing,
+  pricingContent,
+}: Props) {
   const { product, avgPrice, marginPct, statusInfo } = row;
   const hasChildren = (variantCount ?? 0) > 0;
   const grade = isChild ? variantLabel(product.variantAttributes) : null;
 
+  // Clique na linha inteira abre os cards de preço por canal — exceto
+  // cliques em botão (seta de variação, menu de ações), que têm sua própria
+  // ação. Evita precisar de stopPropagation espalhado em cada botão.
+  const handleRowClick = (event: MouseEvent<HTMLTableRowElement>) => {
+    if (!onTogglePricing) return;
+    if ((event.target as HTMLElement).closest('button')) return;
+    onTogglePricing();
+  };
+
   return (
-    <tr className={`border-b border-border/60 last:border-0 hover:bg-muted/40 ${isChild ? 'bg-muted/20' : ''}`}>
+    <>
+      <tr
+        onClick={handleRowClick}
+        aria-expanded={onTogglePricing ? pricingExpanded : undefined}
+        title={onTogglePricing ? 'Clique para ver o preço por canal' : undefined}
+        className={`border-b border-border/60 last:border-0 hover:bg-muted/40 ${isChild ? 'bg-muted/20' : ''} ${
+          pricingExpanded ? 'bg-accent/5' : ''
+        } ${onTogglePricing ? 'cursor-pointer' : ''}`}
+      >
       <td className={CELL}>
         <div className={`flex min-w-0 items-center gap-2 ${isChild ? 'pl-8' : ''}`}>
           {hasChildren ? (
@@ -113,7 +150,12 @@ export default function CatalogRow({ row, isChild = false, variantCount, expande
           </span>
         )}
       </td>
-      <td className={`${CELL} text-right`}>
+      {/* stopPropagation: o conteúdo do menu é renderizado em portal (fora da
+          árvore DOM da linha), então o `closest('button')` do clique na linha
+          não pega um item de menu — mas o React ainda borbulha o evento
+          sintético pela árvore de COMPONENTES, então parar aqui intercepta
+          tanto o botão "⋯" quanto qualquer item do menu antes de chegar na <tr>. */}
+      <td className={`${CELL} text-right`} onClick={(e) => e.stopPropagation()}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" aria-label={`Ações de ${product.name}`} className="h-8 w-8 p-0">
@@ -128,5 +170,14 @@ export default function CatalogRow({ row, isChild = false, variantCount, expande
         </DropdownMenu>
       </td>
     </tr>
+
+    {pricingExpanded && (
+      <tr className="border-b border-border/60 bg-muted/10 last:border-0">
+        <td colSpan={7} className="p-0">
+          {pricingContent}
+        </td>
+      </tr>
+    )}
+    </>
   );
 }

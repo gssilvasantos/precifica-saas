@@ -7,6 +7,7 @@ import ProductForm from '../features/catalog/components/ProductForm';
 import GenerateVariantsDialog from '../features/catalog/components/GenerateVariantsDialog';
 import { Pagination } from '../components/ui/pagination';
 import CatalogRow from '../features/catalog/components/CatalogRow';
+import CatalogPricingCards from '../features/catalog/components/CatalogPricingCards';
 import { groupByParent } from '../features/catalog/group-variants';
 import { fetchChannelListings } from '../features/channels/api';
 import { averageChannelPrice, computeMarginStatus, grossMarginPct } from '../features/catalog/margin-status';
@@ -39,6 +40,20 @@ export default function CatalogPage() {
   const [expandidos, setExpandidos] = useState<Set<string>>(() => new Set());
   const alternar = (id: string) =>
     setExpandidos((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(id)) novo.delete(id);
+      else novo.add(id);
+      return novo;
+    });
+
+  // Expansão de preço por canal (pedido do usuário, 13/10/2026: clicar num
+  // produto mostra os cards de preço por canal abaixo, estilo Mazzei Pro
+  // Seller) — conjunto à parte do `expandidos` acima (que é pai→variações):
+  // um produto pode estar com as variações recolhidas e ainda assim mostrar
+  // seu próprio preço por canal, e vice-versa.
+  const [precosAbertos, setPrecosAbertos] = useState<Set<string>>(() => new Set());
+  const alternarPreco = (id: string) =>
+    setPrecosAbertos((atual) => {
       const novo = new Set(atual);
       if (novo.has(id)) novo.delete(id);
       else novo.add(id);
@@ -240,6 +255,9 @@ export default function CatalogPage() {
                     onEdit={() => setForm({ produto: item.product })}
                     onPricing={() => navigate(`/produtos/${item.product.id}`)}
                     onGenerateVariants={() => setGerarPara(item.product)}
+                    pricingExpanded={precosAbertos.has(item.product.id)}
+                    onTogglePricing={() => alternarPreco(item.product.id)}
+                    pricingContent={<CatalogPricingCards product={item.product} listings={listings} />}
                   />
                   {aberto &&
                     children.map((child) => (
@@ -249,6 +267,9 @@ export default function CatalogPage() {
                         isChild
                         onEdit={() => setForm({ produto: child.product })}
                         onPricing={() => navigate(`/produtos/${child.product.id}`)}
+                        pricingExpanded={precosAbertos.has(child.product.id)}
+                        onTogglePricing={() => alternarPreco(child.product.id)}
+                        pricingContent={<CatalogPricingCards product={child.product} listings={listings} />}
                       />
                     ))}
                 </Fragment>
