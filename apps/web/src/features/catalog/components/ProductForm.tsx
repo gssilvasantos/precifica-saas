@@ -130,15 +130,15 @@ export default function ProductForm({ produto, onClose }: Props) {
     Number(campos.minimumMarginPct) <= Number(campos.desiredMarginPct);
 
   const campo = (nome: string, rotulo: string, extras: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
-    // flex-col + justify-end: quando um rótulo quebra em duas linhas (ex.: "Peso da
-    // embalagem (kg)" numa coluna estreita), a célula da grade fica mais alta e
-    // o input desce junto com os vizinhos — todos alinhados pela base.
-    <label className="flex flex-col justify-end text-xs font-medium text-foreground">
-      {rotulo}
+    // Rótulo numa linha só (whitespace-nowrap) e texto centralizado: todos os campos
+    // de uma linha da grade têm a mesma altura e ficam alinhados. Por isso os rótulos
+    // são curtos — se um precisar de mais espaço, abrevie, não deixe quebrar.
+    <label className="flex min-w-0 flex-col text-center text-xs font-medium text-foreground">
+      <span className="whitespace-nowrap">{rotulo}</span>
       <input
         value={campos[nome]}
         onChange={set(nome)}
-        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-center text-sm text-foreground outline-none focus:border-accent"
         {...extras}
       />
     </label>
@@ -201,12 +201,12 @@ export default function ProductForm({ produto, onClose }: Props) {
               vínculo pode ser trocado, mas ainda não removido por aqui.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-xs font-medium text-foreground">
-                Fornecedor
+              <label className="flex min-w-0 flex-col text-center text-xs font-medium text-foreground">
+                <span className="whitespace-nowrap">Fornecedor</span>
                 <select
                   value={campos.supplierId}
                   onChange={set('supplierId')}
-                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-center text-sm text-foreground outline-none [text-align-last:center] focus:border-accent"
                 >
                   <option value="">{suppliersQuery.isLoading ? 'Carregando…' : 'Nenhum'}</option>
                   {suppliers.map((s) => (
@@ -223,12 +223,12 @@ export default function ProductForm({ produto, onClose }: Props) {
                   <span className="mt-1 block text-muted-foreground">Nenhum fornecedor cadastrado — cadastre em Fornecedores.</span>
                 )}
               </label>
-              <label className="text-xs font-medium text-foreground">
-                Embalagem
+              <label className="flex min-w-0 flex-col text-center text-xs font-medium text-foreground">
+                <span className="whitespace-nowrap">Embalagem</span>
                 <select
                   value={campos.packagingId}
                   onChange={set('packagingId')}
-                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-center text-sm text-foreground outline-none [text-align-last:center] focus:border-accent"
                 >
                   <option value="">{packagingsQuery.isLoading ? 'Carregando…' : 'Nenhuma'}</option>
                   {packagings.map((p) => (
@@ -257,7 +257,7 @@ export default function ProductForm({ produto, onClose }: Props) {
             </p>
             <div className="grid gap-3 sm:grid-cols-5">
               {campo('weightKg', 'Peso (kg) *', { type: 'number', step: '0.001', min: '0' })}
-              {campo('packagingWeightKg', 'Peso da embalagem (kg)', { type: 'number', step: '0.001', min: '0' })}
+              {campo('packagingWeightKg', 'Peso emb. (kg)', { type: 'number', step: '0.001', min: '0' })}
               {campo('lengthCm', 'Compr. (cm) *', { type: 'number', step: '0.1', min: '0' })}
               {campo('widthCm', 'Largura (cm) *', { type: 'number', step: '0.1', min: '0' })}
               {campo('heightCm', 'Altura (cm) *', { type: 'number', step: '0.1', min: '0' })}
@@ -275,12 +275,12 @@ export default function ProductForm({ produto, onClose }: Props) {
               {campo('ncm', 'NCM', { placeholder: '3304.99.90', maxLength: 10 })}
               {campo('cest', 'CEST', { placeholder: '20.063.00', maxLength: 10 })}
               {campo('gtin', 'GTIN / EAN', { placeholder: '7891234567890', maxLength: 14 })}
-              <label className="text-xs font-medium text-foreground">
-                Origem da mercadoria
+              <label className="flex min-w-0 flex-col text-center text-xs font-medium text-foreground">
+                <span className="whitespace-nowrap">Origem da mercadoria</span>
                 <select
                   value={campos.fiscalOriginCode}
                   onChange={set('fiscalOriginCode')}
-                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-center text-sm text-foreground outline-none [text-align-last:center] focus:border-accent"
                 >
                   <option value="">Não informada</option>
                   {ORIGENS_FISCAIS.map((o) => (
