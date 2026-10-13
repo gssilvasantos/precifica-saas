@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../features/auth/auth-context';
 import {
   assignVendedorToItem,
@@ -15,6 +16,7 @@ import {
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
+import { Stagger, RevealItem } from '../components/motion/Reveal';
 import { extractErrorMessage } from '../lib/extract-error-message';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -308,45 +310,61 @@ export default function SellersPage() {
       {vendedoresQuery.isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
       {!vendedoresQuery.isLoading && vendedores.length === 0 && <p className="text-sm text-muted-foreground">Nenhum vendedor cadastrado ainda.</p>}
 
-      <div className="space-y-3">
+      <Stagger as="div" className="space-y-3">
         {vendedores.map((v) => (
-          <Card key={v.id} className="p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-serif text-base font-semibold text-foreground">{v.name}</h3>
-                  <Badge variant={v.isActive ? 'success' : 'secondary'}>{v.isActive ? 'Ativo' : 'Inativo'}</Badge>
+          <RevealItem key={v.id}>
+            <Card className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-serif text-base font-semibold text-foreground">{v.name}</h3>
+                    <Badge variant={v.isActive ? 'success' : 'secondary'}>{v.isActive ? 'Ativo' : 'Inativo'}</Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Comissão: {v.aliquotaComissaoPct}% {v.email && `· ${v.email}`}
+                  </p>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Comissão: {v.aliquotaComissaoPct}% {v.email && `· ${v.email}`}
-                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setExpandedId(expandedId === v.id ? null : v.id)}>
+                    {expandedId === v.id ? 'Ocultar comissões' : 'Ver comissões'}
+                  </Button>
+                  {canEdit && (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => setFormMode({ edit: v })}>
+                        Editar
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={v.isActive ? 'hover:border-margin-danger hover:text-margin-danger' : ''}
+                        disabled={toggleActiveMutation.isPending}
+                        onClick={() => toggleActiveMutation.mutate({ id: v.id, isActive: !v.isActive })}
+                      >
+                        {v.isActive ? 'Desativar' : 'Ativar'}
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setExpandedId(expandedId === v.id ? null : v.id)}>
-                  {expandedId === v.id ? 'Ocultar comissões' : 'Ver comissões'}
-                </Button>
-                {canEdit && (
-                  <>
-                    <Button variant="outline" size="sm" onClick={() => setFormMode({ edit: v })}>
-                      Editar
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={v.isActive ? 'hover:border-margin-danger hover:text-margin-danger' : ''}
-                      disabled={toggleActiveMutation.isPending}
-                      onClick={() => toggleActiveMutation.mutate({ id: v.id, isActive: !v.isActive })}
-                    >
-                      {v.isActive ? 'Desativar' : 'Ativar'}
-                    </Button>
-                  </>
+              {/* Acordeão animado — mesmo padrão de PriceListsPage. */}
+              <AnimatePresence initial={false}>
+                {expandedId === v.id && (
+                  <motion.div
+                    key="comissoes"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: 'easeInOut' }}
+                    className="overflow-hidden"
+                  >
+                    <VendedorCommissionsPanel vendedor={v} canEdit={canEdit} canGeneratePayout={canGeneratePayout} />
+                  </motion.div>
                 )}
-              </div>
-            </div>
-            {expandedId === v.id && <VendedorCommissionsPanel vendedor={v} canEdit={canEdit} canGeneratePayout={canGeneratePayout} />}
-          </Card>
+              </AnimatePresence>
+            </Card>
+          </RevealItem>
         ))}
-      </div>
+      </Stagger>
     </div>
   );
 }

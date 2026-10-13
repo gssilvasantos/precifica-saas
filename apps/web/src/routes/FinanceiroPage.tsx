@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 import { useAppMode } from '../features/app-mode/app-mode-context';
 import ChannelBadge from '../components/orders/ChannelBadge';
 import { Card } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import { Stagger, RevealItem } from '../components/motion/Reveal';
 import { cn } from '../lib/utils';
 import { extractErrorMessage } from '../lib/extract-error-message';
 import {
@@ -50,17 +52,28 @@ export default function FinanceiroPage() {
         </p>
       </div>
 
+      {/* Pílula deslizante (pedido do usuário, 13/10/2026: "motion action") —
+          `layoutId` compartilhado entre as abas: o Framer Motion anima a
+          POSIÇÃO do fundo ativo de uma aba para outra, em vez de só trocar
+          a cor na hora. Padrão comum em SaaS moderno para seletores de aba. */}
       <div className="flex flex-wrap gap-2 border-b border-border pb-2">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={cn(
-              'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-              tab === t.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground',
+              'relative rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+              tab === t.id ? 'text-primary-foreground' : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground',
             )}
           >
-            {t.label}
+            {tab === t.id && (
+              <motion.span
+                layoutId="financeiro-tab-active"
+                className="absolute inset-0 rounded-lg bg-primary"
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+              />
+            )}
+            <span className="relative z-10">{t.label}</span>
           </button>
         ))}
       </div>
@@ -96,42 +109,50 @@ function DreTab() {
       )}
 
       {report && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <SummaryCard label="Receita bruta" value={currency.format(report.receitaBruta)} />
-          <SummaryCard label="Deduções" value={currency.format(report.deducoes)} />
-          <SummaryCard label="Custos variáveis" value={currency.format(report.custosVariaveis)} />
-          <SummaryCard
-            label="Margem de contribuição"
-            value={currency.format(report.margemContribuicao)}
-            caption={report.margemContribuicaoPct !== null ? `${report.margemContribuicaoPct.toFixed(1)}%` : undefined}
-          />
+        <Stagger className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <RevealItem><SummaryCard label="Receita bruta" value={currency.format(report.receitaBruta)} /></RevealItem>
+          <RevealItem><SummaryCard label="Deduções" value={currency.format(report.deducoes)} /></RevealItem>
+          <RevealItem><SummaryCard label="Custos variáveis" value={currency.format(report.custosVariaveis)} /></RevealItem>
+          <RevealItem>
+            <SummaryCard
+              label="Margem de contribuição"
+              value={currency.format(report.margemContribuicao)}
+              caption={report.margemContribuicaoPct !== null ? `${report.margemContribuicaoPct.toFixed(1)}%` : undefined}
+            />
+          </RevealItem>
           {/* Publicidade (01/08/2026) — linha própria depois da margem de
               contribuição, porque Ads é custo de período e não de pedido. */}
-          <SummaryCard label="Publicidade (Ads)" value={currency.format(report.custoAds)} />
-          <SummaryCard
-            label="Margem após Ads"
-            value={currency.format(report.margemAposAds)}
-            caption={report.margemAposAdsPct !== null ? `${report.margemAposAdsPct.toFixed(1)}%` : undefined}
-          />
+          <RevealItem><SummaryCard label="Publicidade (Ads)" value={currency.format(report.custoAds)} /></RevealItem>
+          <RevealItem>
+            <SummaryCard
+              label="Margem após Ads"
+              value={currency.format(report.margemAposAds)}
+              caption={report.margemAposAdsPct !== null ? `${report.margemAposAdsPct.toFixed(1)}%` : undefined}
+            />
+          </RevealItem>
           {/* Despesas fixas e resultado operacional (01/08/2026) — é aqui
               que o relatório finalmente responde "a operação fechou no
               azul?", que é a pergunta que um DRE existe para responder. */}
-          <SummaryCard
-            label="Despesas fixas"
-            value={report.despesasFixasApuradas ? currency.format(report.despesasFixas) : '—'}
-            caption={report.despesasFixasApuradas ? undefined : 'exige período fechado'}
-          />
-          <SummaryCard
-            label="Resultado operacional"
-            value={currency.format(report.resultadoOperacional)}
-            caption={
-              report.resultadoOperacionalPct !== null
-                ? `${report.resultadoOperacionalPct.toFixed(1)}%`
-                : undefined
-            }
-            highlight
-          />
-        </div>
+          <RevealItem>
+            <SummaryCard
+              label="Despesas fixas"
+              value={report.despesasFixasApuradas ? currency.format(report.despesasFixas) : '—'}
+              caption={report.despesasFixasApuradas ? undefined : 'exige período fechado'}
+            />
+          </RevealItem>
+          <RevealItem>
+            <SummaryCard
+              label="Resultado operacional"
+              value={currency.format(report.resultadoOperacional)}
+              caption={
+                report.resultadoOperacionalPct !== null
+                  ? `${report.resultadoOperacionalPct.toFixed(1)}%`
+                  : undefined
+              }
+              highlight
+            />
+          </RevealItem>
+        </Stagger>
       )}
 
       {report && !report.despesasFixasApuradas && (

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { fetchProducts, type Product } from '../features/catalog/api';
 import { fetchChannelListings } from '../features/channels/api';
 import { simulateNuvemshopMargin } from '../features/pricing/api';
 import { CHANNELS } from '../features/pricing/channels';
 import ProductPricingCard, { type ChannelPricingData } from '../features/pricing/ProductPricingCard';
+import { Card } from '../components/ui/card';
+import { Stagger, RevealItem } from '../components/motion/Reveal';
 
 const RECEIVING_WINDOWS = [
   { label: 'Na hora', days: 0 },
@@ -85,7 +88,7 @@ export default function ProductPricingPage() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
-      <aside className="rounded-2xl border border-border bg-card p-4 shadow-card">
+      <Card className="p-4">
         <Link to="/catalogo" className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-accent">
           ← Voltar ao catálogo
         </Link>
@@ -93,18 +96,28 @@ export default function ProductPricingPage() {
         {productsQuery.isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
         <ul className="space-y-1">
           {products.map((product) => (
-            <li key={product.id}>
+            <li key={product.id} className="relative">
               <button
                 onClick={() => navigate(`/produtos/${product.id}`)}
                 className={[
-                  'w-full rounded-lg px-3 py-2 text-left text-sm transition',
+                  'relative w-full rounded-lg px-3 py-2 text-left text-sm transition-colors',
                   selected?.id === product.id
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'text-primary-foreground'
                     : 'text-foreground/80 hover:bg-muted',
                 ].join(' ')}
               >
-                <span className="block font-medium">{product.name}</span>
-                <span className="block text-xs opacity-70">{product.skuCode}</span>
+                {/* Pílula deslizante (pedido do usuário, 13/10/2026: "motion
+                    action") — mesmo padrão de layoutId usado nas abas do
+                    Financeiro, aqui para o item selecionado na lista. */}
+                {selected?.id === product.id && (
+                  <motion.span
+                    layoutId="product-pricing-selected"
+                    className="absolute inset-0 rounded-lg bg-primary"
+                    transition={{ duration: 0.2, ease: 'easeOut' }}
+                  />
+                )}
+                <span className="relative z-10 block font-medium">{product.name}</span>
+                <span className="relative z-10 block text-xs opacity-70">{product.skuCode}</span>
               </button>
             </li>
           ))}
@@ -114,16 +127,16 @@ export default function ProductPricingPage() {
             Nenhum produto ainda. Conecte o Olist em Integrações para importar o catálogo.
           </p>
         )}
-      </aside>
+      </Card>
 
       <main>
         {!selected ? (
-          <div className="flex h-full items-center justify-center rounded-2xl border border-border bg-card p-10 text-muted-foreground shadow-card">
+          <Card className="flex h-full items-center justify-center p-10 text-muted-foreground">
             Selecione um produto para ver a precificação por canal.
-          </div>
+          </Card>
         ) : (
           <div className="space-y-6">
-            <div className="flex items-start gap-5 rounded-2xl border border-border bg-card p-6 shadow-card">
+            <Card className="flex items-start gap-5 p-6">
               {selected.photoUrls[0] ? (
                 <img src={selected.photoUrls[0]} alt={selected.name} className="h-24 w-24 rounded-xl object-cover" />
               ) : (
@@ -141,9 +154,9 @@ export default function ProductPricingPage() {
                   · Estoque <span className="font-semibold text-foreground/80">{selected.stockQuantity}</span>
                 </p>
               </div>
-            </div>
+            </Card>
 
-            <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-border bg-card p-5 shadow-card">
+            <Card className="flex flex-wrap items-end gap-4 p-5">
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">Parcelas</label>
                 <select
@@ -206,19 +219,20 @@ export default function ProductPricingPage() {
                   className="w-28 rounded-lg border border-input bg-background px-3 py-1.5 text-sm text-foreground"
                 />
               </div>
-            </div>
+            </Card>
 
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            <Stagger className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
               {CHANNELS.map((channel) => (
-                <ProductPricingCard
-                  key={channel.code}
-                  channel={channel}
-                  isBestMargin={channel.code === bestChannelCode}
-                  isLoading={channel.code === 'NUVEMSHOP' && simulateQuery.isFetching}
-                  data={channel.code === 'NUVEMSHOP' ? nuvemshopData : null}
-                />
+                <RevealItem key={channel.code}>
+                  <ProductPricingCard
+                    channel={channel}
+                    isBestMargin={channel.code === bestChannelCode}
+                    isLoading={channel.code === 'NUVEMSHOP' && simulateQuery.isFetching}
+                    data={channel.code === 'NUVEMSHOP' ? nuvemshopData : null}
+                  />
+                </RevealItem>
               ))}
-            </div>
+            </Stagger>
           </div>
         )}
       </main>

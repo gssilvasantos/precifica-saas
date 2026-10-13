@@ -16,6 +16,7 @@ import {
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
+import { Stagger, RevealItem } from '../components/motion/Reveal';
 import { extractErrorMessage } from '../lib/extract-error-message';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' });
@@ -431,8 +432,14 @@ export default function LotsPage() {
         )}
       </div>
 
-      <ProductLotsSection canEdit={canEdit} />
-      <LotStockSection canEdit={canEdit} />
+      <Stagger as="div" className="space-y-6">
+        <RevealItem>
+          <ProductLotsSection canEdit={canEdit} />
+        </RevealItem>
+        <RevealItem>
+          <LotStockSection canEdit={canEdit} />
+        </RevealItem>
+      </Stagger>
     </div>
   );
 }

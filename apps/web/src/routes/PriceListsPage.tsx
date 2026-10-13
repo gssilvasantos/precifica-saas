@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../features/auth/auth-context';
 import {
   createPriceList,
@@ -17,6 +18,7 @@ import { fetchProducts } from '../features/catalog/api';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
+import { Stagger, RevealItem } from '../components/motion/Reveal';
 import { extractErrorMessage } from '../lib/extract-error-message';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -289,48 +291,69 @@ export default function PriceListsPage() {
       {listsQuery.isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
       {!listsQuery.isLoading && lists.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma lista de preços cadastrada ainda.</p>}
 
-      <div className="space-y-3">
+      <Stagger as="div" className="space-y-3">
         {lists.map((list) => (
-          <Card key={list.id} className="p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-serif text-base font-semibold text-foreground">{list.name}</h3>
-                  <Badge variant={list.isActive ? 'success' : 'secondary'}>{list.isActive ? 'Ativa' : 'Inativa'}</Badge>
+          <RevealItem key={list.id}>
+            <Card className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-serif text-base font-semibold text-foreground">{list.name}</h3>
+                    <Badge variant={list.isActive ? 'success' : 'secondary'}>{list.isActive ? 'Ativa' : 'Inativa'}</Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Ajuste: {list.adjustmentPct > 0 ? '+' : ''}
+                    {list.adjustmentPct}%
+                  </p>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Ajuste: {list.adjustmentPct > 0 ? '+' : ''}
-                  {list.adjustmentPct}%
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setExpandedId(expandedId === list.id ? null : list.id)}>
-                  {expandedId === list.id ? 'Ocultar exceções' : 'Ver exceções'}
-                </Button>
-                {canEdit && (
-                  <>
-                    <Button variant="outline" size="sm" onClick={() => setFormMode({ edit: list })}>
-                      Editar
-                    </Button>
-                    {list.isActive && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="hover:border-margin-danger hover:text-margin-danger"
-                        disabled={deactivateMutation.isPending}
-                        onClick={() => deactivateMutation.mutate(list.id)}
-                      >
-                        Desativar
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setExpandedId(expandedId === list.id ? null : list.id)}>
+                    {expandedId === list.id ? 'Ocultar exceções' : 'Ver exceções'}
+                  </Button>
+                  {canEdit && (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => setFormMode({ edit: list })}>
+                        Editar
                       </Button>
-                    )}
-                  </>
-                )}
+                      {list.isActive && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="hover:border-margin-danger hover:text-margin-danger"
+                          disabled={deactivateMutation.isPending}
+                          onClick={() => deactivateMutation.mutate(list.id)}
+                        >
+                          Desativar
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-            {expandedId === list.id && <PriceListExceptions list={list} canEdit={canEdit} />}
-          </Card>
+              {/* Acordeão animado (pedido do usuário, 13/10/2026: "motion
+                  action") — `AnimatePresence` aqui SIM consegue animar a
+                  saída: o toggle acontece dentro do mesmo componente que
+                  guarda `expandedId`, diferente dos modais (que desmontam lá
+                  fora, na página que os abre). `height: 'auto'` via framer
+                  motion mede o conteúdo real a cada render. */}
+              <AnimatePresence initial={false}>
+                {expandedId === list.id && (
+                  <motion.div
+                    key="exceptions"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: 'easeInOut' }}
+                    className="overflow-hidden"
+                  >
+                    <PriceListExceptions list={list} canEdit={canEdit} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Card>
+          </RevealItem>
         ))}
-      </div>
+      </Stagger>
     </div>
   );
 }
