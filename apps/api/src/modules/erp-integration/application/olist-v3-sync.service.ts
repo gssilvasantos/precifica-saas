@@ -38,8 +38,16 @@ const FALLBACK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 // Teto por rodada: cada produto custa 1–2 chamadas a ~1,3 s e o processo no plano
 // free só fica acordado enquanto há tráfego. O que não couber continua pendente
 // (não grava hash nem avança o cursor) e entra na rodada seguinte.
-const MAX_PRODUCTS_PER_RUN = 120;
-const MAX_RUN_MS = 8 * 60 * 1000;
+const DEFAULT_MAX_PRODUCTS_PER_RUN = 120;
+const DEFAULT_MAX_RUN_MS = 8 * 60 * 1000;
+
+// Tetos ajustáveis por ambiente: o catch-up de uma carga inicial (todo o catálogo, ~30 min)
+// precisa de rodada maior que o uso normal, e o agendador não tem timeout de requisição.
+// Valor inválido ou não positivo cai no padrão.
+function envPositiveInt(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
 
 export interface OlistV3SyncResult {
   success: boolean;
@@ -153,6 +161,8 @@ export class OlistV3SyncService {
       const ordered = [...work.values()].sort((a, b) => Number(a.tipoVariacao === 'V') - Number(b.tipoVariacao === 'V'));
       const parentDetails = new Map<string, unknown>();
       const importedNow = new Set<string>();
+      const maxProducts = envPositiveInt('OLIST_V3_SYNC_MAX_PRODUCTS', DEFAULT_MAX_PRODUCTS_PER_RUN);
+      const maxRunMs = envPositiveInt('OLIST_V3_SYNC_MAX_RUN_MINUTES', DEFAULT_MAX_RUN_MS / 60_000) * 60_000;
       const rejected: string[] = [];
       let semDimensoes = 0;
       let deferred = 0;
@@ -164,7 +174,7 @@ export class OlistV3SyncService {
 
       for (let i = 0; i < ordered.length; i++) {
         const candidate = ordered[i];
-        if (abortedByQuota || i >= MAX_PRODUCTS_PER_RUN || Date.now() - startedAt.getTime() > MAX_RUN_MS) {
+        if (abortedByQuota || i >= maxProducts || Date.now() - startedAt.getTime() > maxRunMs) {
           deferred++;
           continue;
         }
