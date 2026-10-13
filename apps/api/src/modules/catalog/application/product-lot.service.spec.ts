@@ -77,6 +77,8 @@ describe('ProductLotService', () => {
       deactivate: jest.fn(),
       findByExternalId: jest.fn(),
       findChildren: jest.fn(),
+      findActiveBySkuCode: jest.fn(),
+      findActiveSkuCodesByPackaging: jest.fn(),
     };
     const lots: jest.Mocked<ProductLotRepository> = {
       create: jest.fn(),

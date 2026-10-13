@@ -62,6 +62,8 @@ describe('CatalogReaderService (custo efetivo com Packaging)', () => {
       deactivate: jest.fn(),
       findByExternalId: jest.fn(),
       findChildren: jest.fn(),
+      findActiveBySkuCode: jest.fn().mockImplementation(async (_t: string, sku: string) => (sku === product.skuCode ? product : null)),
+      findActiveSkuCodesByPackaging: jest.fn(),
     };
     const packagings: jest.Mocked<PackagingRepository> = {
       create: jest.fn(),
@@ -105,5 +107,22 @@ describe('CatalogReaderService (custo efetivo com Packaging)', () => {
 
     expect(result).toBeNull();
     expect(packagings.findById).not.toHaveBeenCalled();
+  });
+
+  it('busca por SKU usa consulta dedicada e nunca carrega o catálogo inteiro', async () => {
+    const { service, products } = buildService(baseProduct, null);
+
+    await service.findBySku('tenant-1', 'SKU-001');
+
+    expect(products.findActiveBySkuCode).toHaveBeenCalledWith('tenant-1', 'SKU-001');
+    expect(products.findAllActive).not.toHaveBeenCalled();
+  });
+
+  it('SKUs por embalagem usa consulta dedicada', async () => {
+    const { service, products } = buildService(baseProduct, null);
+    products.findActiveSkuCodesByPackaging.mockResolvedValue(['A', 'B']);
+
+    await expect(service.findSkuCodesByPackaging('tenant-1', 'pack-1')).resolves.toEqual(['A', 'B']);
+    expect(products.findAllActive).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,11 @@ export interface ProductRepository {
   create(data: ProductCreateData): Promise<Product>;
   findAllActive(tenantId: string): Promise<Product[]>;
   findById(tenantId: string, id: string): Promise<Product | null>;
+  // Consultas dedicadas (índice único tenantId+skuCode / filtro por embalagem) para o
+  // CatalogReaderService: antes ele carregava o catálogo ativo inteiro a cada chamada
+  // (137 mil chamadas × ~505 linhas) — causa do estouro de egress do Supabase em 07/10/2026.
+  findActiveBySkuCode(tenantId: string, skuCode: string): Promise<Product | null>;
+  findActiveSkuCodesByPackaging(tenantId: string, packagingId: string): Promise<string[]>;
   update(id: string, data: ProductUpdateData): Promise<Product>;
   deactivate(id: string): Promise<Product>;
   // Usado pelo CatalogSyncWriterService (Etapa 5) para decidir se um produto

@@ -29,12 +29,7 @@ export class CatalogReaderService implements ProductCatalogReader, PackagingLink
   ) {}
 
   async findBySku(tenantId: string, skuCode: string): Promise<ProductCatalogSummary | null> {
-    // findAllActive + filtro em memória por ora — não há um findBySku dedicado
-    // no ProductRepository (a busca pública sempre foi por id). Simples o
-    // bastante para o volume atual; vira índice dedicado se o simulador virar
-    // um endpoint de alto tráfego.
-    const products = await this.products.findAllActive(tenantId);
-    const product = products.find((p) => p.skuCode === skuCode);
+    const product = await this.products.findActiveBySkuCode(tenantId, skuCode);
     if (!product) return null;
 
     const packaging = product.packagingId ? await this.packagings.findById(tenantId, product.packagingId) : null;
@@ -64,10 +59,8 @@ export class CatalogReaderService implements ProductCatalogReader, PackagingLink
 
   // Implementação de PackagingLinkedProductsReader — consumida pelo
   // PackagingCostChangeListener (Pricing Intelligence) para saber quais SKUs
-  // recalcular quando Packaging.costPrice muda. Mesmo filtro em memória de
-  // findBySku acima; mesmo aviso de performance (findAllActive completo).
+  // recalcular quando Packaging.costPrice muda.
   async findSkuCodesByPackaging(tenantId: string, packagingId: string): Promise<string[]> {
-    const products = await this.products.findAllActive(tenantId);
-    return products.filter((p) => p.packagingId === packagingId).map((p) => p.skuCode);
+    return this.products.findActiveSkuCodesByPackaging(tenantId, packagingId);
   }
 }
