@@ -43,6 +43,14 @@ export interface Product {
   gtin: string | null;
   fiscalOriginCode: number | null;
   cest: string | null;
+
+  // Vínculos de cadastro. Espelham Product.supplierId/packagingId/isKit do
+  // backend, que já devolve a entidade inteira — o tipo só não os declarava.
+  // Fornecedor e embalagem são configuração do Kyneti (não do ERP), então são
+  // editáveis também em produto espelhado do Olist.
+  supplierId: string | null;
+  packagingId: string | null;
+  isKit: boolean;
 }
 
 export interface ProductWriteInput {
@@ -61,6 +69,10 @@ export interface ProductWriteInput {
   gtin?: string | null;
   fiscalOriginCode?: number | null;
   cest?: string | null;
+  // Só ids: o backend valida que pertencem ao tenant. O DTO não aceita null
+  // aqui, então o vínculo pode ser definido ou trocado, mas ainda não removido.
+  supplierId?: string;
+  packagingId?: string;
 }
 
 export async function createProduct(input: ProductWriteInput): Promise<Product> {
