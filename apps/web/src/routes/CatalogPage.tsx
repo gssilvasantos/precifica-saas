@@ -1,14 +1,14 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { fetchProducts, type Product } from '../features/catalog/api';
 import ProductForm from '../features/catalog/components/ProductForm';
+import CatalogRow from '../features/catalog/components/CatalogRow';
+import { groupByParent } from '../features/catalog/group-variants';
 import { fetchChannelListings } from '../features/channels/api';
 import { averageChannelPrice, computeMarginStatus, grossMarginPct } from '../features/catalog/margin-status';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-
-const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
 // `null` = fechado; `undefined` dentro do estado aberto = criação. Duas
 // informações distintas ("está aberto?" e "editando quem?") num estado só,
@@ -18,6 +18,15 @@ type FormState = { produto?: Product } | null;
 export default function CatalogPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState<FormState>(null);
+  // Pais expandidos. Começa tudo recolhido: o catálogo lista um pai por linha.
+  const [expandidos, setExpandidos] = useState<Set<string>>(() => new Set());
+  const alternar = (id: string) =>
+    setExpandidos((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(id)) novo.delete(id);
+      else novo.add(id);
+      return novo;
+    });
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: fetchProducts });
   const listingsQuery = useQuery({ queryKey: ['channel-listings'], queryFn: fetchChannelListings });
 
@@ -33,6 +42,8 @@ export default function CatalogPage() {
     return { product, avgPrice, marginPct, statusInfo, channelCount: skuListings.length };
   });
 
+  const groups = groupByParent(rows);
+
   // Tiras de resumo (Reestruturação Visual WowDash, 13/10/2026) — contagem
   // real sobre `rows` já calculado acima, nenhum dado novo buscado.
   const semNcmCount = products.filter((p) => !p.ncm).length;
@@ -44,7 +55,7 @@ export default function CatalogPage() {
         <div>
           <h1 className="font-serif text-3xl font-semibold text-foreground">Catálogo</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Preço e margem aqui são a média simples entre os canais vinculados, sem taxa de gateway — para o cálculo
+            Produtos com variações aparecem agrupados: use a seta para expandir. Preço e margem aqui são a média simples entre os canais vinculados, sem taxa de gateway — para o cálculo
             fino por cenário, abra "Editar Precificação".
           </p>
         </div>
@@ -103,55 +114,31 @@ export default function CatalogPage() {
                 </tr>
               )}
 
-              {rows.map(({ product, avgPrice, marginPct, statusInfo }) => (
-                <tr key={product.id} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
-                  <td className="px-5 py-3">
-                    {product.photoUrls[0] ? (
-                      <img src={product.photoUrls[0]} alt={product.name} className="h-10 w-10 rounded-lg object-cover" />
-                    ) : (
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-[10px] text-muted-foreground">
-                        sem foto
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 font-medium text-foreground">{product.name}</td>
-                  <td className="px-5 py-3 font-sans text-foreground">{product.skuCode}</td>
-                  <td className="px-5 py-3 font-sans text-foreground">{currency.format(product.costPrice)}</td>
-                  <td className="px-5 py-3 font-sans text-foreground">
-                    {avgPrice !== null ? currency.format(avgPrice) : <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="px-5 py-3 font-sans font-semibold text-foreground">
-                    {marginPct !== null ? `${marginPct.toFixed(1)}%` : <span className="font-normal text-muted-foreground">—</span>}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusInfo.badgeClass}`}>
-                      {statusInfo.label}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    {product.ncm ? (
-                      <span className="font-sans text-foreground">{product.ncm}</span>
-                    ) : (
-                      // NCM ausente não é detalhe de cadastro: sem ele não há
-                      // como classificar o produto para fins tributários, nem
-                      // emitir NF-e, nem publicar anúncio.
-                      <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
-                        sem NCM
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => setForm({ produto: product })}>
-                        Editar
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => navigate(`/produtos/${product.id}`)}>
-                        Precificação
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {groups.map(({ item, children }) => {
+                const aberto = expandidos.has(item.product.id);
+                return (
+                  <Fragment key={item.product.id}>
+                    <CatalogRow
+                      row={item}
+                      variantCount={children.length}
+                      expanded={aberto}
+                      onToggle={() => alternar(item.product.id)}
+                      onEdit={() => setForm({ produto: item.product })}
+                      onPricing={() => navigate(`/produtos/${item.product.id}`)}
+                    />
+                    {aberto &&
+                      children.map((child) => (
+                        <CatalogRow
+                          key={child.product.id}
+                          row={child}
+                          isChild
+                          onEdit={() => setForm({ produto: child.product })}
+                          onPricing={() => navigate(`/produtos/${child.product.id}`)}
+                        />
+                      ))}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
