@@ -1,7 +1,13 @@
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, MoreHorizontal } from 'lucide-react';
 import type { Product } from '../api';
 import type { MarginStatusInfo } from '../margin-status';
 import { Button } from '../../../components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../../components/ui/dropdown-menu';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -14,7 +20,7 @@ export interface CatalogRowData {
 
 interface Props {
   row: CatalogRowData;
-  // Linha de variação: recuada, sem foto grande e com a grade no lugar do nome.
+  // Linha de variação: recuada, com a grade no lugar da legenda.
   isChild?: boolean;
   // Presente só em pai com variações: mostra a seta e o contador.
   variantCount?: number;
@@ -32,6 +38,10 @@ function variantLabel(attrs: Product['variantAttributes']): string | null {
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
+// As colunas "secundárias" somem em telas menores (hidden + md/lg/xl:table-cell)
+// em vez de forçar rolagem horizontal: a tabela sempre cabe na página.
+export const CELL = 'px-3 py-3 align-middle';
+
 export default function CatalogRow({ row, isChild = false, variantCount, expanded = false, onToggle, onEdit, onPricing, onGenerateVariants }: Props) {
   const { product, avgPrice, marginPct, statusInfo } = row;
   const hasChildren = (variantCount ?? 0) > 0;
@@ -39,52 +49,60 @@ export default function CatalogRow({ row, isChild = false, variantCount, expande
 
   return (
     <tr className={`border-b border-border/60 last:border-0 hover:bg-muted/40 ${isChild ? 'bg-muted/20' : ''}`}>
-      <td className="px-5 py-3">
-        <div className={`flex items-center gap-2 ${isChild ? 'pl-6' : ''}`}>
+      <td className={CELL}>
+        <div className={`flex min-w-0 items-center gap-2 ${isChild ? 'pl-8' : ''}`}>
           {hasChildren ? (
             <button
               type="button"
               onClick={onToggle}
               aria-expanded={expanded}
               aria-label={`${expanded ? 'Recolher' : 'Expandir'} variações de ${product.name}`}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <ChevronRight className={`h-4 w-4 transition-transform motion-reduce:transition-none ${expanded ? 'rotate-90' : ''}`} />
             </button>
           ) : (
             // Reserva a largura da seta para as fotos ficarem alinhadas na coluna.
-            !isChild && <span className="h-6 w-6 shrink-0" aria-hidden="true" />
+            !isChild && <span className="h-7 w-7 shrink-0" aria-hidden="true" />
           )}
           {product.photoUrls[0] ? (
-            <img src={product.photoUrls[0]} alt={product.name} className="h-10 w-10 rounded-lg object-cover" />
+            <img src={product.photoUrls[0]} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
           ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-[10px] text-muted-foreground">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-center text-[9px] leading-tight text-muted-foreground">
               sem foto
             </div>
           )}
+          <div className="min-w-0">
+            <p className="line-clamp-3 break-words text-sm font-medium text-foreground" title={product.name}>
+              {product.name}
+              {hasChildren && (
+                <span className="ml-2 whitespace-nowrap rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                  {variantCount} {variantCount === 1 ? 'variação' : 'variações'}
+                </span>
+              )}
+            </p>
+            <p className="truncate font-sans text-xs text-muted-foreground">
+              {product.skuCode}
+              {grade && <span> · {grade}</span>}
+            </p>
+          </div>
         </div>
       </td>
-      <td className="px-5 py-3 font-medium text-foreground">
-        {product.name}
-        {hasChildren && (
-          <span className="ml-2 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {variantCount} {variantCount === 1 ? 'variação' : 'variações'}
-          </span>
-        )}
-        {grade && <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{grade}</span>}
+      <td className={`${CELL} hidden whitespace-nowrap font-sans text-sm text-foreground md:table-cell`}>
+        {currency.format(product.costPrice)}
       </td>
-      <td className="px-5 py-3 font-sans text-foreground">{product.skuCode}</td>
-      <td className="px-5 py-3 font-sans text-foreground">{currency.format(product.costPrice)}</td>
-      <td className="px-5 py-3 font-sans text-foreground">
+      <td className={`${CELL} hidden whitespace-nowrap font-sans text-sm text-foreground lg:table-cell`}>
         {avgPrice !== null ? currency.format(avgPrice) : <span className="text-muted-foreground">—</span>}
       </td>
-      <td className="px-5 py-3 font-sans font-semibold text-foreground">
+      <td className={`${CELL} whitespace-nowrap font-sans text-sm font-semibold text-foreground`}>
         {marginPct !== null ? `${marginPct.toFixed(1)}%` : <span className="font-normal text-muted-foreground">—</span>}
       </td>
-      <td className="px-5 py-3">
-        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusInfo.badgeClass}`}>{statusInfo.label}</span>
+      <td className={`${CELL} hidden sm:table-cell`}>
+        <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${statusInfo.badgeClass}`}>
+          {statusInfo.label}
+        </span>
       </td>
-      <td className="px-5 py-3">
+      <td className={`${CELL} hidden whitespace-nowrap text-sm xl:table-cell`}>
         {product.ncm ? (
           <span className="font-sans text-foreground">{product.ncm}</span>
         ) : (
@@ -95,20 +113,19 @@ export default function CatalogRow({ row, isChild = false, variantCount, expande
           </span>
         )}
       </td>
-      <td className="px-5 py-3 text-right">
-        <div className="flex justify-end gap-2">
-          {!isChild && onGenerateVariants && (
-            <Button variant="ghost" size="sm" onClick={onGenerateVariants}>
-              Variações
+      <td className={`${CELL} text-right`}>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" aria-label={`Ações de ${product.name}`} className="h-8 w-8 p-0">
+              <MoreHorizontal className="h-4 w-4" />
             </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={onEdit}>
-            Editar
-          </Button>
-          <Button variant="outline" size="sm" onClick={onPricing}>
-            Precificação
-          </Button>
-        </div>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={onEdit}>Editar</DropdownMenuItem>
+            <DropdownMenuItem onSelect={onPricing}>Precificação</DropdownMenuItem>
+            {!isChild && onGenerateVariants && <DropdownMenuItem onSelect={onGenerateVariants}>Gerar variações</DropdownMenuItem>}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </td>
     </tr>
   );
