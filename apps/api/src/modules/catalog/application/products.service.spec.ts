@@ -84,6 +84,8 @@ describe('ProductsService (integração com Packaging)', () => {
       deactivate: jest.fn(),
       findByExternalId: jest.fn(),
       findChildren: jest.fn().mockResolvedValue([]),
+      findActiveBySkuCode: jest.fn(),
+      findActiveSkuCodesByPackaging: jest.fn(),
     };
     const suppliers = {} as jest.Mocked<SupplierRepository>;
     const taxProfiles = {} as jest.Mocked<TaxProfileRepository>;
@@ -215,6 +217,8 @@ describe('ProductsService (Produto Pai + Variação)', () => {
       deactivate: jest.fn(),
       findByExternalId: jest.fn(),
       findChildren: jest.fn().mockResolvedValue([]),
+      findActiveBySkuCode: jest.fn(),
+      findActiveSkuCodesByPackaging: jest.fn(),
     };
     const suppliers = {} as jest.Mocked<SupplierRepository>;
     const taxProfiles = {} as jest.Mocked<TaxProfileRepository>;

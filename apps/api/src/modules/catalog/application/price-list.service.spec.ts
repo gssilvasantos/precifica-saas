@@ -70,6 +70,8 @@ describe('PriceListService', () => {
       deactivate: jest.fn(),
       findByExternalId: jest.fn(),
       findChildren: jest.fn(),
+      findActiveBySkuCode: jest.fn(),
+      findActiveSkuCodesByPackaging: jest.fn(),
     } as unknown as jest.Mocked<ProductRepository>;
 
     const service = new PriceListService(priceLists, exceptions, products);
