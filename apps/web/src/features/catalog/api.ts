@@ -24,6 +24,10 @@ export interface Product {
   // publicar anúncio em marketplace (resolve atributos herdados + mapeamento
   // de categoria do canal). null = produto ainda sem categoria definida.
   categoryId: string | null;
+  // Produto Pai + Variação — parentProductId aponta para o pai (null = produto
+  // normal ou pai); variantAttributes é a grade da variação (ex.: { Cor: 'Rosa' }).
+  parentProductId: string | null;
+  variantAttributes: Record<string, string> | null;
   weightKg: number;
   packagingWeightKg: number;
   lengthCm: number;
