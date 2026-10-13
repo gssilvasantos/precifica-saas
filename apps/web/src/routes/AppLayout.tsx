@@ -32,7 +32,12 @@ export default function AppLayout() {
     <div className="flex min-h-screen bg-background">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <div className="flex min-h-screen flex-1 flex-col">
+      {/* min-w-0: item flex por padrão não encolhe abaixo da largura do
+          conteúdo mais largo (ex.: uma tabela com min-w-[960px]) — sem isto,
+          o conteúdo "estourava" a tela e o DOCUMENTO inteiro ganhava barra
+          de rolagem horizontal, mesmo tabelas já tendo seu próprio
+          overflow-x-auto local (que é o comportamento desejado, só ali). */}
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
         <header className="flex h-16 items-center justify-between border-b border-border bg-card px-4 md:px-8">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu">
@@ -72,7 +77,7 @@ export default function AppLayout() {
             </DropdownMenu>
           </div>
         </header>
-        <main className="flex-1 px-4 py-6 md:px-8 md:py-8">
+        <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
           <Outlet />
         </main>
       </div>

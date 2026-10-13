@@ -69,10 +69,87 @@
   * {
     @apply border-border;
   }
+  html, body {
+    /* Guarda defensiva (pedido do usuário, 13/10/2026): o sistema nunca deve
+       gerar rolagem horizontal no documento — qualquer tabela/conteúdo
+       largo rola dentro do seu próprio container (overflow-x-auto local),
+       nunca empurra a página inteira para o lado. A causa raiz (flex sem
+       min-w-0 no AppLayout) já foi corrigida; isto é só a rede de segurança. */
+    @apply overflow-x-hidden;
+  }
   body {
     @apply antialiased bg-background text-foreground transition-colors duration-200;
   }
   h1, h2, h3, .font-display {
     @apply font-serif tracking-tight;
   }
+
+  /* Barra de rolagem (Firefox) — trilho fino, sem cor própria (o pedido do
+     usuário é não ter fundo colorido ao passar o mouse; Firefox não tem
+     como desenhar seta via CSS, então aqui fica só o polegar fino). */
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--border)) transparent;
+  }
+}
+
+/* Barra de rolagem (WebKit: Chrome/Edge/Safari) — pedido do usuário: nada
+   de fundo aparecendo no TRILHO ao passar o mouse por cima, só as setas de
+   navegação (sempre visíveis, não só no hover) e o polegar. Cor das setas é
+   fixa (não dá pra referenciar a variável CSS do tema dentro de um
+   background-image de pseudo-elemento de scrollbar em todo navegador), mas
+   o tom escolhido (cinza-azulado neutro) tem contraste aceitável nos dois
+   temas — mesma família do token muted-foreground. */
+::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-track:hover,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--border));
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  /* Só o polegar reage ao hover (affordance padrão de scrollbar) — o
+     trilho ao redor continua transparente, que é o que o usuário pediu. */
+  background-color: rgb(var(--muted-foreground) / 0.6);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-button {
+  display: block;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 8px 8px;
+}
+
+::-webkit-scrollbar-button:vertical:start:decrement {
+  height: 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1 7 L5 3 L9 7' fill='none' stroke='%239097b5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+::-webkit-scrollbar-button:vertical:end:increment {
+  height: 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1 3 L5 7 L9 3' fill='none' stroke='%239097b5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+::-webkit-scrollbar-button:horizontal:start:decrement {
+  width: 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M7 1 L3 5 L7 9' fill='none' stroke='%239097b5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+::-webkit-scrollbar-button:horizontal:end:increment {
+  width: 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3 1 L7 5 L3 9' fill='none' stroke='%239097b5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
