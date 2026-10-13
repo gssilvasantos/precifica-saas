@@ -19,6 +19,8 @@ import { FIXED_EXPENSE_REPOSITORY } from './application/ports/fixed-expense-repo
 import { RECEIVABLE_RECORD_REPOSITORY } from './application/ports/receivable-record-repository.port';
 import { ACCOUNTS_PAYABLE_REPOSITORY } from './application/ports/accounts-payable-repository.port';
 import { ACCOUNTS_PAYABLE_WRITER } from '../../shared/contracts/accounts-payable-writer.port';
+import { DreTaxEstimator } from './application/dre-tax-estimator.service';
+import { TaxIntelligenceModule } from '../tax-intelligence/public-api';
 import { OrdersModule } from '../orders/orders.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { MarketplaceAdsModule } from '../marketplace-ads/marketplace-ads.module';
@@ -50,7 +52,9 @@ import { MarketplaceAdsModule } from '../marketplace-ads/marketplace-ads.module'
   // MarketplaceAdsModule entrou em 01/08/2026 só para consumir
   // ADS_SPEND_READER (linha de publicidade do DRE). Sem ciclo: o módulo de
   // Ads não importa este de volta.
-  imports: [OrdersModule, CatalogModule, MarketplaceAdsModule],
+  // TaxIntelligenceModule (Slice A, 10/2026): TAX_RATE_RESOLVER para o imposto
+  // do DRE. Sem ciclo: Tax importa Orders, não Financial.
+  imports: [OrdersModule, CatalogModule, MarketplaceAdsModule, TaxIntelligenceModule],
   controllers: [
     FixedExpensesController,
     ReceivablesController,
@@ -64,6 +68,7 @@ import { MarketplaceAdsModule } from '../marketplace-ads/marketplace-ads.module'
     ReceivableReconciliationService,
     ReceivableFromOrderListener,
     FinancialOrchestrator,
+    DreTaxEstimator,
     AccountsPayableService,
     SettlementParserRegistry,
     { provide: FIXED_EXPENSE_REPOSITORY, useClass: PrismaFixedExpenseRepository },

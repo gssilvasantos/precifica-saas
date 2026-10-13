@@ -25,6 +25,13 @@ export interface OrderFinancialLineItem {
   quantity: number;
   totalPrice: number;
   taxAmount: number | null;
+  // Preenchidos SÓ pelo consumidor (DreTaxEstimator) quando taxAmount vem null
+  // do Orders e o imposto é estimado pelo Tax Intelligence. Aditivo: o Orders
+  // nunca os preenche. `taxEstimated` = taxAmount foi calculado, não gravado;
+  // `taxUnresolvedReason` = não deu para estimar (taxAmount segue null e o
+  // DRE marca o pedido como INCOMPLETE em vez de assumir imposto zero).
+  taxEstimated?: boolean;
+  taxUnresolvedReason?: string;
   // Custo unitário já resolvido (snapshot do pedido OU custo atual do
   // produto, via fallback do Orders) — null quando nem um nem outro existe.
   costPriceUsed: number | null;
