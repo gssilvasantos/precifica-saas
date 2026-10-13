@@ -3,6 +3,7 @@ import { ORDER_FINANCIALS_READER, ADS_SPEND_READER } from '../../../shared/contr
 import { AppDataMode, OrderFinancialsReader } from '../../../shared/contracts/order-financials-reader.port';
 import { AdsSpendReader } from '../../../shared/contracts/ads-spend-reader.port';
 import { FIXED_EXPENSE_REPOSITORY, FixedExpenseRepository } from './ports/fixed-expense-repository.port';
+import { DreTaxEstimator } from './dre-tax-estimator.service';
 import { buildDreReport, DreReport } from '../domain/dre-report';
 
 // Orquestra a montagem do DRE por canal (Etapa 20) — lê o consolidado
@@ -25,6 +26,8 @@ export class FinancialOrchestrator {
     // isso injeta o repositório direto em vez de uma porta compartilhada —
     // porta só existe para atravessar fronteira de módulo.
     @Inject(FIXED_EXPENSE_REPOSITORY) private readonly fixedExpenses: FixedExpenseRepository,
+    // Imposto dos itens sem taxAmount gravado — estimado pelo Tax Intelligence.
+    private readonly taxEstimator: DreTaxEstimator,
   ) {}
 
   async generateDreReport(tenantId: string, dateFrom?: Date, dateTo?: Date, dataMode?: AppDataMode): Promise<DreReport> {
@@ -42,9 +45,10 @@ export class FinancialOrchestrator {
       // pedido fica zerado e só o total por canal aparece.
       this.adsSpend.sumSpendBySku(tenantId, dateFrom, dateTo, dataMode),
     ]);
+    const linesWithTax = await this.taxEstimator.enrich(tenantId, lines);
     return buildDreReport(
       tenantId,
-      lines,
+      linesWithTax,
       dateFrom ?? null,
       dateTo ?? null,
       new Date(),

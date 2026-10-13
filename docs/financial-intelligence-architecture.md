@@ -120,7 +120,7 @@ modules/financial-intelligence/
 
 ```
 receitaBruta       = soma de totalAmount dos pedidos do período, EXCLUINDO status CANCELADO (não é receita reconhecida)
-deducoes           = soma de taxAmount dos itens + discountAmount dos pedidos
+deducoes           = soma de taxAmount dos itens (gravado ou estimado pelo Tax Intelligence) + discountAmount dos pedidos
 custosVariaveis    = CMV (custoUsado × quantidade, por item) + shippingAmount + feeAmount (comissão do canal)
 margemContribuicao = receitaBruta - deducoes - custosVariaveis
 ```
@@ -136,6 +136,11 @@ Agrupado por `channelCode` em `DreChannelBreakdown[]`, **pré-ordenado por `marg
 **Endpoint:** `GET /financial-intelligence/dre?dateFrom=&dateTo=` (ambos opcionais — sem período, cobre todos os pedidos do tenant), autenticado (`JwtAuthGuard`), devolve `DreReport` pronto para o `Dashboard` consumir diretamente (sem transformação adicional no frontend).
 
 **Sem cache, sempre ao vivo:** mesma filosofia de "nunca cachear custo" do `ProductCatalogReader` desde a Etapa 14 — `FinancialOrchestrator` recalcula a partir do estado atual do banco a cada chamada, sem nenhuma camada de cache intermediária. Para o volume do MVP isso é aceitável; em volume maior, a próxima extensão natural é mover a agregação por período para o banco (`groupBy` no Postgres) em vez de carregar todos os pedidos do período em memória — ver aviso equivalente em `OrderRepository.findAllForPeriod`.
+
+**Imposto nas deduções (13/10/2026).** Até esta data nenhum item de pedido tinha `taxAmount` gravado (5.369 de 5.369 nulos em produção), então `deducoes` somava só descontos e a margem do DRE e das linhas por pedido saía superestimada. Agora `DreTaxEstimator` (`application/dre-tax-estimator.service.ts`) preenche, antes de `buildDreReport`, o `taxAmount` dos itens que vierem nulos: `totalPrice × effectiveRate`, com a alíquota de `TAX_RATE_RESOLVER` (um cálculo por produto e mês do pedido, em cache só durante a chamada). Fica no Financial porque Tax Intelligence importa Orders (RBT12) e Orders importar Tax criaria ciclo.
+- `taxAmount` já gravado nunca é sobrescrito (inclusive 0).
+- Se a alíquota não puder ser resolvida (`TaxRateUnavailableError`, SKU sem produto, erro inesperado), o item mantém `taxAmount = null` com `taxUnresolvedReason`, e o pedido, o canal e o relatório viram `INCOMPLETE` com o motivo em `incompleteOrders`. Nunca se assume imposto zero.
+- Limitações: base de cálculo é o `totalPrice` do item, sem rateio de desconto do pedido; o DAS fixo do MEI (`fixedMonthlyTaxAmount`) **não** entra no DRE; sem faturamento mensal cadastrado, o Simples usa a alíquota manual do tenant (`MANUAL_OVERRIDE`), não a calculada por RBT12. Não exercitado contra dados reais de produção — só testes unitários.
 
 Testes: `dre-report.spec.ts` (cálculo de um canal completo, agrupamento/ordenação multi-canal, exclusão de CANCELADO, os 4 cenários da Regra de Ouro, período vazio sem divisão por zero), `financial-orchestrator.service.spec.ts` (delegação à porta com os argumentos corretos, com/sem período, agregação multi-canal), extensão de `orders.service.spec.ts` (implementação de `listForPeriod`, dedupe de consulta ao catálogo por SKU em todo o período, item sem custo conhecido nunca fabrica valor).
 
