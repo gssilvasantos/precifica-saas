@@ -85,12 +85,12 @@ export default function ProductPricingPage() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
-      <aside className="rounded-2xl bg-surface p-4 shadow-card">
-        <Link to="/catalogo" className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-ink-500 hover:text-gold">
+      <aside className="rounded-2xl border border-border bg-card p-4 shadow-card">
+        <Link to="/catalogo" className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-accent">
           ← Voltar ao catálogo
         </Link>
-        <h2 className="mb-3 font-serif text-lg font-semibold text-ink-900">Produtos</h2>
-        {productsQuery.isLoading && <p className="text-sm text-ink-500">Carregando…</p>}
+        <h2 className="mb-3 font-serif text-lg font-semibold text-foreground">Produtos</h2>
+        {productsQuery.isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
         <ul className="space-y-1">
           {products.map((product) => (
             <li key={product.id}>
@@ -98,7 +98,9 @@ export default function ProductPricingPage() {
                 onClick={() => navigate(`/produtos/${product.id}`)}
                 className={[
                   'w-full rounded-lg px-3 py-2 text-left text-sm transition',
-                  selected?.id === product.id ? 'bg-ink-900 text-white' : 'text-ink-700 hover:bg-canvas',
+                  selected?.id === product.id
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-foreground/80 hover:bg-muted',
                 ].join(' ')}
               >
                 <span className="block font-medium">{product.name}</span>
@@ -108,7 +110,7 @@ export default function ProductPricingPage() {
           ))}
         </ul>
         {!productsQuery.isLoading && products.length === 0 && (
-          <p className="text-sm text-ink-500">
+          <p className="text-sm text-muted-foreground">
             Nenhum produto ainda. Conecte o Olist em Integrações para importar o catálogo.
           </p>
         )}
@@ -116,38 +118,38 @@ export default function ProductPricingPage() {
 
       <main>
         {!selected ? (
-          <div className="flex h-full items-center justify-center rounded-2xl bg-surface p-10 text-ink-500 shadow-card">
+          <div className="flex h-full items-center justify-center rounded-2xl border border-border bg-card p-10 text-muted-foreground shadow-card">
             Selecione um produto para ver a precificação por canal.
           </div>
         ) : (
           <div className="space-y-6">
-            <div className="flex items-start gap-5 rounded-2xl bg-surface p-6 shadow-card">
+            <div className="flex items-start gap-5 rounded-2xl border border-border bg-card p-6 shadow-card">
               {selected.photoUrls[0] ? (
                 <img src={selected.photoUrls[0]} alt={selected.name} className="h-24 w-24 rounded-xl object-cover" />
               ) : (
-                <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-canvas text-xs text-ink-500">
+                <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-muted text-xs text-muted-foreground">
                   sem foto
                 </div>
               )}
               <div>
-                <h1 className="font-serif text-3xl font-semibold text-ink-900">{selected.name}</h1>
-                <p className="mt-1 font-sans text-sm text-ink-500">
-                  SKU <span className="font-semibold text-ink-700">{selected.skuCode}</span> · Custo{' '}
-                  <span className="font-semibold text-ink-700">
+                <h1 className="font-serif text-3xl font-semibold text-foreground">{selected.name}</h1>
+                <p className="mt-1 font-sans text-sm text-muted-foreground">
+                  SKU <span className="font-semibold text-foreground/80">{selected.skuCode}</span> · Custo{' '}
+                  <span className="font-semibold text-foreground/80">
                     {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selected.costPrice)}
                   </span>{' '}
-                  · Estoque <span className="font-semibold text-ink-700">{selected.stockQuantity}</span>
+                  · Estoque <span className="font-semibold text-foreground/80">{selected.stockQuantity}</span>
                 </p>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-end gap-4 rounded-2xl bg-surface p-5 shadow-card">
+            <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-border bg-card p-5 shadow-card">
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">Parcelas</label>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">Parcelas</label>
                 <select
                   value={installments}
                   onChange={(e) => setInstallments(Number(e.target.value))}
-                  className="rounded-lg border border-ink-300 px-3 py-1.5 text-sm"
+                  className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm text-foreground"
                 >
                   {INSTALLMENT_OPTIONS.map((n) => (
                     <option key={n} value={n}>
@@ -157,13 +159,13 @@ export default function ProductPricingPage() {
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Recebimento
                 </label>
                 <select
                   value={receivingWindowDays}
                   onChange={(e) => setReceivingWindowDays(Number(e.target.value))}
-                  className="rounded-lg border border-ink-300 px-3 py-1.5 text-sm"
+                  className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm text-foreground"
                 >
                   {RECEIVING_WINDOWS.map((w) => (
                     <option key={w.days} value={w.days}>
@@ -172,13 +174,13 @@ export default function ProductPricingPage() {
                   ))}
                 </select>
               </div>
-              <label className="flex items-center gap-2 text-sm text-ink-700">
+              <label className="flex items-center gap-2 text-sm text-foreground/80">
                 <input type="checkbox" checked={freeShipping} onChange={(e) => setFreeShipping(e.target.checked)} />
                 Frete grátis (loja absorve)
               </label>
               {freeShipping && (
                 <div>
-                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Custo estimado do frete
                   </label>
                   <input
@@ -187,12 +189,12 @@ export default function ProductPricingPage() {
                     step={0.01}
                     value={estimatedShippingCost}
                     onChange={(e) => setEstimatedShippingCost(Number(e.target.value))}
-                    className="w-28 rounded-lg border border-ink-300 px-3 py-1.5 text-sm"
+                    className="w-28 rounded-lg border border-input bg-background px-3 py-1.5 text-sm text-foreground"
                   />
                 </div>
               )}
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Cupom/desconto absorvido
                 </label>
                 <input
@@ -201,7 +203,7 @@ export default function ProductPricingPage() {
                   step={0.01}
                   value={couponCost}
                   onChange={(e) => setCouponCost(Number(e.target.value))}
-                  className="w-28 rounded-lg border border-ink-300 px-3 py-1.5 text-sm"
+                  className="w-28 rounded-lg border border-input bg-background px-3 py-1.5 text-sm text-foreground"
                 />
               </div>
             </div>

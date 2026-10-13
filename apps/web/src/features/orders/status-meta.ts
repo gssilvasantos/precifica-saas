@@ -11,7 +11,7 @@ export interface OrderStatusMeta {
 }
 
 export const ORDER_STATUS_META: Record<OrderStatus, OrderStatusMeta> = {
-  EM_ABERTO: { label: 'Em aberto', badgeClass: 'bg-muted text-muted-foreground', dotClass: 'bg-ink-500' },
+  EM_ABERTO: { label: 'Em aberto', badgeClass: 'bg-muted text-muted-foreground', dotClass: 'bg-muted-foreground' },
   // Benchmark Tiny ERP (28/07/2026, docs/tiny-erp-benchmark-analysis.md,
   // seção 2.2) — pago, mas preparação ainda não confirmada.
   APROVADO: { label: 'Aprovado', badgeClass: 'bg-purple-500/15 text-purple-700', dotClass: 'bg-purple-500' },

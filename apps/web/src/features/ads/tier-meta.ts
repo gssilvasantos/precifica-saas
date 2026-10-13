@@ -38,9 +38,9 @@ export const TIER_META: Record<CampaignHealthTier, TierMeta> = {
   },
   SEM_DADOS: {
     label: 'Sem dados',
-    dotClass: 'bg-ink-300',
-    textClass: 'text-ink-500',
-    badgeClass: 'bg-ink-300/40 text-ink-500',
+    dotClass: 'bg-muted-foreground/40',
+    textClass: 'text-muted-foreground',
+    badgeClass: 'bg-muted text-muted-foreground',
     cardClass: '',
   },
 };

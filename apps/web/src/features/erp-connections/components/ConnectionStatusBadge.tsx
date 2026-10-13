@@ -12,7 +12,7 @@ export function ConnectionStatusBadge({ loading, connected }: { loading: boolean
         connected ? 'bg-margin-good/15 text-margin-good' : 'bg-muted text-muted-foreground',
       ].join(' ')}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-margin-good' : 'bg-ink-500'}`} />
+      <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-margin-good' : 'bg-muted-foreground'}`} />
       {connected ? 'Conectado' : 'Desconectado'}
     </span>
   );

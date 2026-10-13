@@ -73,14 +73,14 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
-      <div className="w-full max-w-sm rounded-2xl bg-surface p-8 shadow-card">
-        <h1 className="mb-1 font-serif text-2xl font-semibold text-ink-900">Criar conta</h1>
-        <p className="mb-6 text-sm text-ink-500">Cadastre sua empresa para conectar seus canais e ver sua margem real.</p>
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-card">
+        <h1 className="mb-1 font-serif text-2xl font-semibold text-foreground">Criar conta</h1>
+        <p className="mb-6 text-sm text-muted-foreground">Cadastre sua empresa para conectar seus canais e ver sua margem real.</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Nome da empresa
             </label>
             <input
@@ -88,51 +88,51 @@ export default function SignupPage() {
               required
               value={tenantName}
               onChange={(e) => setTenantName(e.target.value)}
-              className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder="Minha Loja Ltda"
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
               CNPJ (opcional)
             </label>
             <input
               type="text"
               value={tenantDocument}
               onChange={(e) => setTenantDocument(e.target.value)}
-              className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder="00.000.000/0001-00"
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">Seu nome</label>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">Seu nome</label>
             <input
               type="text"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder="Seu nome completo"
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">E-mail</label>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">E-mail</label>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onPaste={(e) => e.preventDefault()}
-              className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder="voce@empresa.com.br"
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Confirmar e-mail
             </label>
             <input
@@ -141,7 +141,7 @@ export default function SignupPage() {
               value={confirmEmail}
               onChange={(e) => setConfirmEmail(e.target.value)}
               onPaste={(e) => e.preventDefault()}
-              className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder="Digite o e-mail de novo"
             />
             {confirmEmail.length > 0 && !emailsMatch && (
@@ -150,7 +150,7 @@ export default function SignupPage() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">Senha</label>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">Senha</label>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -158,13 +158,13 @@ export default function SignupPage() {
                 minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-ink-300 px-3 py-2 pr-10 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 pr-10 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder="Mínimo 8 caracteres"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-ink-500 hover:text-ink-900"
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
                 aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                 tabIndex={-1}
               >
@@ -174,7 +174,7 @@ export default function SignupPage() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Confirmar senha
             </label>
             <div className="relative">
@@ -184,13 +184,13 @@ export default function SignupPage() {
                 minLength={8}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full rounded-lg border border-ink-300 px-3 py-2 pr-10 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 pr-10 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder="Repita a senha"
               />
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword((v) => !v)}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-ink-500 hover:text-ink-900"
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
                 aria-label={showConfirmPassword ? 'Ocultar senha' : 'Mostrar senha'}
                 tabIndex={-1}
               >
@@ -204,15 +204,15 @@ export default function SignupPage() {
           <button
             type="submit"
             disabled={isSubmitting || !canSubmit}
-            className="w-full rounded-lg bg-ink-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-ink-700 disabled:opacity-60"
+            className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
           >
             {isSubmitting ? 'Criando conta…' : 'Criar conta'}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-ink-500">
+        <p className="mt-6 text-center text-sm text-muted-foreground">
           Já tem conta?{' '}
-          <Link to="/login" className="font-medium text-gold hover:underline">
+          <Link to="/login" className="font-medium text-accent hover:underline">
             Entrar
           </Link>
         </p>

@@ -24,7 +24,7 @@ export default function ProductPricingCard({ channel, isBestMargin, data, isLoad
   return (
     <div
       className={[
-        'relative flex flex-col gap-4 rounded-2xl bg-surface p-5 shadow-card transition',
+        'relative flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-card transition',
         isBestMargin ? 'animate-goldPulse' : '',
       ].join(' ')}
     >
@@ -42,23 +42,23 @@ export default function ProductPricingCard({ channel, isBestMargin, data, isLoad
           {channel.initial}
         </span>
         <div>
-          <p className="font-sans text-sm font-semibold text-ink-900">{channel.label}</p>
-          {!channel.connected && <p className="text-xs text-ink-500">Aguardando integração</p>}
+          <p className="font-sans text-sm font-semibold text-foreground">{channel.label}</p>
+          {!channel.connected && <p className="text-xs text-muted-foreground">Aguardando integração</p>}
         </div>
       </header>
 
       {!channel.connected && (
-        <p className="rounded-lg bg-canvas px-3 py-4 text-center text-xs text-ink-500">
+        <p className="rounded-lg bg-muted px-3 py-4 text-center text-xs text-muted-foreground">
           Este canal ainda não sincroniza vínculo de SKU/preço — nenhum dado inventado aqui.
         </p>
       )}
 
       {channel.connected && isLoading && (
-        <p className="rounded-lg bg-canvas px-3 py-4 text-center text-xs text-ink-500">Calculando cenário…</p>
+        <p className="rounded-lg bg-muted px-3 py-4 text-center text-xs text-muted-foreground">Calculando cenário…</p>
       )}
 
       {channel.connected && !isLoading && !data && (
-        <p className="rounded-lg bg-canvas px-3 py-4 text-center text-xs text-ink-500">
+        <p className="rounded-lg bg-muted px-3 py-4 text-center text-xs text-muted-foreground">
           Sem vínculo de SKU para este produto ainda. Rode a sincronização em Integrações.
         </p>
       )}
@@ -67,18 +67,18 @@ export default function ProductPricingCard({ channel, isBestMargin, data, isLoad
         <>
           <div className="flex items-end justify-between">
             <div>
-              <p className="text-xs uppercase tracking-wide text-ink-500">Preço de venda</p>
-              <p className="font-sans text-2xl font-bold text-ink-900">{currency.format(data.grossPrice)}</p>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Preço de venda</p>
+              <p className="font-sans text-2xl font-bold text-foreground">{currency.format(data.grossPrice)}</p>
             </div>
             <div className="text-right">
-              <p className="text-xs uppercase tracking-wide text-ink-500">Custo</p>
-              <p className="font-sans text-sm text-ink-700">{currency.format(data.costPrice)}</p>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Custo</p>
+              <p className="font-sans text-sm text-foreground/80">{currency.format(data.costPrice)}</p>
             </div>
           </div>
 
           <MarginBar pct={data.marginPct} />
 
-          <p className="text-xs text-ink-500">{data.feeLabel}</p>
+          <p className="text-xs text-muted-foreground">{data.feeLabel}</p>
           {!data.feeRuleFound && (
             <p className="text-xs text-margin-warning">
               Taxa de gateway não cadastrada ainda — cálculo assumiu 0%. Cadastre em Marketplace Intelligence.

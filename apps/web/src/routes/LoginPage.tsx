@@ -48,31 +48,31 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas px-4">
-      <div className="w-full max-w-sm rounded-2xl bg-surface p-8 shadow-card">
-        <h1 className="mb-1 font-serif text-2xl font-semibold text-ink-900">Precifica</h1>
-        <p className="mb-6 text-sm text-ink-500">Entre para ver a inteligência de precificação da sua conta.</p>
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-card">
+        <h1 className="mb-1 font-serif text-2xl font-semibold text-foreground">Kyneti</h1>
+        <p className="mb-6 text-sm text-muted-foreground">Entre para ver a inteligência de precificação da sua conta.</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">E-mail</label>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">E-mail</label>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder="voce@empresa.com.br"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">Senha</label>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">Senha</label>
             <input
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-ink-300 px-3 py-2 text-sm text-ink-900 outline-none focus:border-gold focus:ring-1 focus:ring-gold"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder="••••••••"
             />
           </div>
@@ -82,31 +82,31 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-lg bg-ink-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-ink-700 disabled:opacity-60"
+            className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
           >
             {isSubmitting ? 'Entrando…' : 'Entrar'}
           </button>
         </form>
 
-        <p className="mt-4 text-center text-sm text-ink-500">
+        <p className="mt-4 text-center text-sm text-muted-foreground">
           Ainda não tem conta?{' '}
-          <Link to="/cadastro" className="font-medium text-gold hover:underline">
+          <Link to="/cadastro" className="font-medium text-accent hover:underline">
             Criar conta
           </Link>
         </p>
 
         {DEV_QUICK_LOGIN && (
           <>
-            <div className="my-4 flex items-center gap-2 text-xs text-ink-500">
-              <div className="h-px flex-1 bg-ink-300" />
+            <div className="my-4 flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="h-px flex-1 bg-border" />
               modo dev
-              <div className="h-px flex-1 bg-ink-300" />
+              <div className="h-px flex-1 bg-border" />
             </div>
             <button
               type="button"
               disabled={isSubmitting}
               onClick={() => doLogin(DEMO_EMAIL, DEMO_PASSWORD)}
-              className="w-full rounded-lg border border-gold px-4 py-2 text-sm font-medium text-gold transition hover:bg-gold hover:text-white disabled:opacity-60"
+              className="w-full rounded-lg border border-accent px-4 py-2 text-sm font-medium text-accent transition hover:bg-accent hover:text-accent-foreground disabled:opacity-60"
             >
               Entrar com conta demo (produtos + Nuvemshop já seedados)
             </button>

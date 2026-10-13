@@ -87,7 +87,7 @@ export default function PerfilFiscalProdutoSection({ canEdit }: Props) {
       )}
 
       {produtosQuery.isSuccess && produtos.length === 0 && (
-        <p className="mt-4 rounded-md border border-border bg-surface/40 px-3 py-2 text-sm text-muted-foreground">
+        <p className="mt-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
           Nenhum produto no catálogo ainda. Importe do Olist ou cadastre um produto antes de classificar.
         </p>
       )}

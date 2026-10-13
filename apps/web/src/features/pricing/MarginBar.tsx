@@ -15,9 +15,9 @@ export default function MarginBar({ pct }: { pct: number }) {
     <div>
       <div className="mb-1 flex items-baseline justify-between">
         <span className={`text-xs font-medium ${text}`}>{label}</span>
-        <span className="font-sans text-sm font-semibold text-ink-900">{pct.toFixed(1)}%</span>
+        <span className="font-sans text-sm font-semibold text-foreground">{pct.toFixed(1)}%</span>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-ink-300/40">
+      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
         <div className={`h-full rounded-full transition-all ${bar}`} style={{ width: `${widthPct}%` }} />
       </div>
     </div>

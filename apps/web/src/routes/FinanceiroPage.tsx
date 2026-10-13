@@ -224,12 +224,16 @@ function SummaryCard({
   highlight?: boolean;
 }) {
   return (
-    <Card className={cn('p-4', highlight ? 'bg-ink-900 text-white border-ink-900' : 'text-foreground')}>
-      <p className={`text-xs font-medium uppercase tracking-wide ${highlight ? 'text-white/60' : 'text-muted-foreground'}`}>
+    <Card className={cn('p-4', highlight ? 'border-primary bg-primary text-primary-foreground' : 'text-foreground')}>
+      <p
+        className={`text-xs font-medium uppercase tracking-wide ${highlight ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}
+      >
         {label}
       </p>
       <p className="mt-1 font-serif text-xl font-semibold">{value}</p>
-      {caption && <p className={`mt-0.5 text-xs ${highlight ? 'text-neon' : 'text-muted-foreground'}`}>{caption}</p>}
+      {caption && (
+        <p className={`mt-0.5 text-xs ${highlight ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{caption}</p>
+      )}
     </Card>
   );
 }
