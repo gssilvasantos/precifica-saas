@@ -1,10 +1,12 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { DollarSign, Wallet, Percent, ShoppingBag } from 'lucide-react';
 import { fetchOrders } from '../features/orders/api';
-import { computeDashboardMetrics } from '../features/orders/dashboard-metrics';
+import { computeDashboardMetrics, computeDailyRevenueSeries } from '../features/orders/dashboard-metrics';
 import { useAppMode } from '../features/app-mode/app-mode-context';
 import KpiCard from '../components/dashboard/KpiCard';
 import ChannelRoiList from '../components/dashboard/ChannelRoiList';
+import RevenueTrendChart from '../components/dashboard/RevenueTrendChart';
 import CircuitBackground from '../components/dashboard/CircuitBackground';
 import AIInsightPanel from '../components/insights/AIInsightPanel';
 import AppModeToggle from '../components/dashboard/AppModeToggle';
@@ -35,8 +37,13 @@ export default function DashboardPage() {
     queryFn: () => fetchOrders({ mode }, 1, 200),
   });
 
-  const orders = ordersQuery.data?.items ?? [];
+  // Memoizado (não só `data?.items ?? []` direto): a expressão com `??`
+  // cria um array novo a cada render quando `data` ainda é undefined, o que
+  // invalidava a dependência dos dois useMemo abaixo a cada render (aviso
+  // novo de lint, reprovado pela baseline do projeto — ver CLAUDE.md do app).
+  const orders = useMemo(() => ordersQuery.data?.items ?? [], [ordersQuery.data]);
   const metrics = useMemo(() => computeDashboardMetrics(orders), [orders]);
+  const dailySeries = useMemo(() => computeDailyRevenueSeries(orders, 14), [orders]);
   const isLoading = ordersQuery.isLoading;
 
   return (
@@ -97,20 +104,38 @@ export default function DashboardPage() {
       {!isLoading && (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiCard label="Receita bruta" value={currency.format(metrics.grossRevenue)} caption="Amostra: últimos pedidos ativos" />
+            <KpiCard
+              label="Receita bruta"
+              value={currency.format(metrics.grossRevenue)}
+              caption="Amostra: últimos pedidos ativos"
+              icon={DollarSign}
+              tone="accent"
+            />
             <KpiCard
               label="Receita líquida"
               value={currency.format(metrics.netRevenue)}
               caption="Já descontada a comissão de cada canal"
+              icon={Wallet}
+              tone="good"
               highlight
             />
             <KpiCard
               label="Margem média"
               value={metrics.averageMarginPct !== null ? `${metrics.averageMarginPct.toFixed(1)}%` : '—'}
               caption="Líquido / bruto, ponderado pelos pedidos"
+              icon={Percent}
+              tone="gold"
             />
-            <KpiCard label="Pedidos ativos" value={String(metrics.activeOrderCount)} caption="Excluindo cancelados" />
+            <KpiCard
+              label="Pedidos ativos"
+              value={String(metrics.activeOrderCount)}
+              caption="Excluindo cancelados"
+              icon={ShoppingBag}
+              tone="warning"
+            />
           </div>
+
+          <RevenueTrendChart data={dailySeries} />
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="lg:col-span-2">

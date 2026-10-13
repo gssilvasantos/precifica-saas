@@ -64,3 +64,45 @@ export function computeDashboardMetrics(orders: Order[]): DashboardMetrics {
     channels,
   };
 }
+
+export interface DailyRevenuePoint {
+  date: string; // yyyy-mm-dd, chave de agrupamento e eixo X do gráfico
+  label: string; // "dd/mm", só para exibição
+  revenue: number;
+  netAmount: number;
+}
+
+// Reestruturação Visual WowDash (13/10/2026) — série diária para o gráfico
+// de tendência do Dashboard. Mesma disciplina de computeDashboardMetrics:
+// 100% derivado dos pedidos já carregados (orderedAt), sem inventar dado —
+// se a amostra (GET /orders, página de 200) não cobrir os `days` pedidos,
+// os dias sem pedido aparecem com revenue/netAmount zerados, nunca omitidos
+// (eixo contínuo, não "pulado").
+export function computeDailyRevenueSeries(orders: Order[], days = 14): DailyRevenuePoint[] {
+  const active = orders.filter((o) => o.status !== 'CANCELADO');
+  const byDay = new Map<string, { revenue: number; netAmount: number }>();
+
+  for (const order of active) {
+    const key = order.orderedAt.slice(0, 10); // yyyy-mm-dd
+    const entry = byDay.get(key) ?? { revenue: 0, netAmount: 0 };
+    entry.revenue += order.totalAmount;
+    entry.netAmount += order.netAmount;
+    byDay.set(key, entry);
+  }
+
+  const today = new Date();
+  const points: DailyRevenuePoint[] = [];
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const entry = byDay.get(key) ?? { revenue: 0, netAmount: 0 };
+    points.push({
+      date: key,
+      label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+      revenue: entry.revenue,
+      netAmount: entry.netAmount,
+    });
+  }
+  return points;
+}

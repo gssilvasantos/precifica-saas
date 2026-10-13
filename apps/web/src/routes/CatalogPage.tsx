@@ -33,6 +33,11 @@ export default function CatalogPage() {
     return { product, avgPrice, marginPct, statusInfo, channelCount: skuListings.length };
   });
 
+  // Tiras de resumo (Reestruturação Visual WowDash, 13/10/2026) — contagem
+  // real sobre `rows` já calculado acima, nenhum dado novo buscado.
+  const semNcmCount = products.filter((p) => !p.ncm).length;
+  const margemBaixaOuPrejuizoCount = rows.filter((r) => r.statusInfo.status === 'BAIXA' || r.statusInfo.status === 'PREJUIZO').length;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -46,10 +51,29 @@ export default function CatalogPage() {
         <Button onClick={() => setForm({})}>Novo produto</Button>
       </div>
 
+      {!isLoading && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Card className="p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Produtos cadastrados</p>
+            <p className="mt-1 text-xl font-semibold text-foreground">{products.length}</p>
+          </Card>
+          <Card className="p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Margem baixa ou prejuízo</p>
+            <p className={`mt-1 text-xl font-semibold ${margemBaixaOuPrejuizoCount > 0 ? 'text-margin-danger' : 'text-foreground'}`}>
+              {margemBaixaOuPrejuizoCount}
+            </p>
+          </Card>
+          <Card className="p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sem NCM cadastrado</p>
+            <p className={`mt-1 text-xl font-semibold ${semNcmCount > 0 ? 'text-margin-warning' : 'text-foreground'}`}>{semNcmCount}</p>
+          </Card>
+        </div>
+      )}
+
       <Card className="overflow-hidden p-0">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] text-left text-sm">
-            <thead>
+            <thead className="bg-muted/50">
               <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="px-5 py-3 font-medium">Foto</th>
                 <th className="px-5 py-3 font-medium">Produto</th>

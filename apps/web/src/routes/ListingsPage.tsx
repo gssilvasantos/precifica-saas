@@ -3,10 +3,85 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../features/auth/auth-context';
 import { fetchProducts, updateProductCategory } from '../features/catalog/api';
 import { fetchListingPublications, fetchProductCategories, publishListing } from '../features/marketplace-publishing/api';
+import { fetchChannelListings } from '../features/channels/api';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { extractErrorMessage } from '../lib/extract-error-message';
+
+const channelDateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+const channelCurrency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// Reestruturação Visual WowDash (13/10/2026) — a "Listagem por canal" pedida
+// (tabela de anúncios sincronizados de cada marketplace, por SKU) não tinha
+// uma tela própria: `ChannelListing` (GET /erp-integration/channel-listings)
+// já é buscado no app, mas só como insumo de cálculo de preço médio no
+// Catálogo/Precificação — nunca exibido como lista em si. Esta seção reusa
+// o MESMO fetchChannelListings já existente (nenhum endpoint novo), filtrado
+// pelo produto selecionado, como tabela real por SKU/canal.
+function ChannelListingsSection({ skuCode }: { skuCode: string }) {
+  const listingsQuery = useQuery({ queryKey: ['channel-listings'], queryFn: fetchChannelListings });
+  const listings = (listingsQuery.data ?? []).filter((l) => l.skuCode === skuCode);
+
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center justify-between border-b border-border px-5 py-3">
+        <h3 className="text-sm font-semibold text-foreground">Anúncios sincronizados por canal</h3>
+        <span className="text-xs text-muted-foreground">SKU {skuCode}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead className="bg-muted/50">
+            <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-5 py-3 font-medium">Canal</th>
+              <th className="px-5 py-3 font-medium">ID externo</th>
+              <th className="px-5 py-3 font-medium">Preço atual</th>
+              <th className="px-5 py-3 font-medium">Última sincronização</th>
+              <th className="px-5 py-3 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {listingsQuery.isLoading && (
+              <tr>
+                <td colSpan={5} className="px-5 py-6 text-center text-muted-foreground">
+                  Carregando anúncios…
+                </td>
+              </tr>
+            )}
+            {!listingsQuery.isLoading && listings.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-5 py-6 text-center text-muted-foreground">
+                  Nenhum anúncio sincronizado ainda para este SKU.
+                </td>
+              </tr>
+            )}
+            {listings.map((listing) => (
+              <tr key={listing.id} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
+                <td className="px-5 py-3">
+                  <Badge variant="secondary" className="normal-case">
+                    {listing.channelCode}
+                  </Badge>
+                </td>
+                <td className="px-5 py-3 font-sans text-foreground">{listing.externalId}</td>
+                <td className="px-5 py-3 font-sans text-foreground">
+                  {listing.currentPrice !== null ? channelCurrency.format(listing.currentPrice) : <span className="text-muted-foreground">—</span>}
+                </td>
+                <td className="px-5 py-3 font-sans text-muted-foreground">{channelDateFormatter.format(new Date(listing.lastSyncedAt))}</td>
+                <td className="px-5 py-3 text-right">
+                  {listing.url && (
+                    <a href={listing.url} target="_blank" rel="noreferrer" className="text-xs font-medium text-accent hover:underline">
+                      Ver anúncio
+                    </a>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 const inputClass =
@@ -154,9 +229,10 @@ export default function ListingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-serif text-3xl font-semibold text-foreground">Publicar Anúncio Novo</h1>
+        <h1 className="font-serif text-3xl font-semibold text-foreground">Listagens por Canal</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Escolha um produto para ver o histórico de publicações e criar um novo anúncio em um marketplace.
+          Escolha um produto para ver os anúncios sincronizados por canal, o histórico de publicações e criar um novo
+          anúncio em um marketplace.
         </p>
       </div>
 
@@ -179,6 +255,8 @@ export default function ListingsPage() {
           <Card className="p-5">
             <CategoryPicker productId={selectedProduct.id} categoryId={selectedProduct.categoryId} canEdit={canEdit} />
           </Card>
+
+          <ChannelListingsSection skuCode={selectedProduct.skuCode} />
 
           <PublishForm
             skuCode={selectedProduct.skuCode}

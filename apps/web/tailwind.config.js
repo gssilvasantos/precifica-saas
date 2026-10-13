@@ -3,37 +3,48 @@ import tailwindcssAnimate from 'tailwindcss-animate';
 /** @type {import('tailwindcss').Config} */
 export default {
   // Dark mode via classe `.dark` na tag <html> (ver src/features/theme/theme-context.tsx)
-  // — não `media` (preferência do SO): "tecnológico" é o padrão DA MARCA,
-  // não uma escolha do sistema operacional do usuário. Ver seção 2 do pedido
-  // do usuário: dark é o padrão, light é a alternativa.
+  // — Light é o padrão da marca a partir da Reestruturação Visual WowDash
+  // (pedido explícito do usuário, 13/10/2026): o painel precisa se parecer
+  // com um admin dashboard SaaS moderno "estilo WowDash" (Tailwind + shadcn,
+  // base clara, acento azul/indigo), não mais o "Dashboard de Inteligência"
+  // grafite+neon da Etapa 18. Dark continua disponível como alternativa.
   darkMode: ['class'],
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       fontFamily: {
-        // Serifada para títulos/nome de produto — estética premium pedida.
-        serif: ['"Playfair Display"', 'Georgia', 'serif'],
+        // Reestruturação Visual WowDash (13/10/2026): o template de
+        // referência não usa serifada em lugar nenhum — todo texto, de
+        // título a número de tabela, é sans (Inter). Em vez de caçar cada
+        // `font-serif` espalhado pelo app (29 arquivos), o token em si passa
+        // a resolver para Inter: toda classe `font-serif` existente continua
+        // válida, só deixa de parecer "premium editorial" e passa a parecer
+        // "dashboard SaaS", sem precisar tocar cada arquivo individualmente.
+        serif: ['Inter', 'system-ui', 'sans-serif'],
         // Sans densa para números, SKU e tabelas — legibilidade em primeiro lugar.
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
       colors: {
         // ====================================================================
-        // Paleta Kyneti "nomeada" (histórica, Etapa 18) — mantida intacta,
-        // NENHUM arquivo existente quebra. Continua a fonte da verdade para
-        // os tons em si; os tokens semânticos abaixo (background/foreground/
-        // primary/...) só REFERENCIAM estes valores via CSS variable, para
-        // que os componentes shadcn (ui/*.tsx) e o dark mode funcionem sem
-        // duplicar a paleta.
+        // Paleta Kyneti "nomeada" — fonte da verdade para os tons em si; os
+        // tokens semânticos abaixo (background/foreground/primary/...) só
+        // REFERENCIAM estes valores via CSS variable, para que os componentes
+        // shadcn (ui/*.tsx) e o dark mode funcionem sem duplicar a paleta.
+        //
+        // Reestruturação Visual WowDash (13/10/2026): `ink` deixa de ser
+        // grafite puro e passa a ser uma escala azul-ardósia/"navy" — o tom
+        // de fundo escuro característico de admin dashboards (sidebar/hero
+        // escuro com um leve matiz azul, não preto neutro).
         // ====================================================================
-        canvas: '#F8F9FA',
+        canvas: '#F4F6FA',
         surface: '#FFFFFF',
         ink: {
-          950: '#0D0D0F', // grafite profundo — fundo do Dark Mode (padrão tecnológico)
-          900: '#1A1A1E',
-          800: '#27272C', // tom médio novo — superfícies secundárias no Dark Mode
-          700: '#3F3F46',
-          500: '#71717A',
-          300: '#D4D4D8',
+          950: '#0F1324', // navy profundo — fundo do Dark Mode / hero
+          900: '#171B2E',
+          800: '#1F2438', // superfícies secundárias no Dark Mode
+          700: '#2B3150',
+          500: '#8B91AC',
+          300: '#D7DAE6',
         },
         // Semáforo de margem (conceito pedido: vermelho/amarelo/verde por faixa).
         margin: {
@@ -56,17 +67,19 @@ export default {
           shopee: '#EE4D2D',
           nuvemshop: '#4A25AA',
         },
-        // Identidade Kyneti (Etapa 18, telas de Dashboard/Pedidos) — "cinza
-        // chumbo, fundo branco, detalhes azul neon". O chumbo/fundo branco JÁ
-        // é a paleta `ink`/`canvas`/`surface` acima (não duplicada de
-        // propósito); `neon` é o único tom novo, reservado para o acento de
-        // alta intelligence (KPIs em destaque, insights de IA, estados
-        // críticos que pedem atenção imediata) — nunca usado como cor de
-        // texto padrão, que continua sendo `ink`.
+        // Acento de marca — Reestruturação Visual WowDash (13/10/2026):
+        // o azul neon/cyan "Dashboard de Inteligência" (#00F0FF) dá lugar a
+        // um azul-índigo de SaaS dashboard, o acento dominante do template
+        // de referência (botão primário, item ativo do menu, anel de foco,
+        // glow de KPI/insight de IA, acentos de gráfico). Nome do token
+        // (`neon`) mantido de propósito — é referenciado por dezenas de
+        // classes (`bg-neon`, `text-accent`, `shadow-neonGlow`,
+        // `animate-neonPulse`) em todo o app; renomear exigiria editar cada
+        // arquivo só por estética de nome, sem ganho visual.
         neon: {
-          DEFAULT: '#00F0FF',
-          dim: 'rgba(0, 240, 255, 0.12)',
-          glow: 'rgba(0, 240, 255, 0.55)',
+          DEFAULT: '#4F46E5',
+          dim: 'rgba(79, 70, 229, 0.12)',
+          glow: 'rgba(79, 70, 229, 0.55)',
         },
 
         // ====================================================================
@@ -77,14 +90,11 @@ export default {
         // do Tailwind funcionarem (`bg-primary/60` etc.), mesmo padrão já
         // usado em `bg-neon/10` na paleta nomeada acima.
         //
-        // Racional de cor por tema (pedido do usuário): grafite é a BASE em
-        // ambos os temas; neon é sempre "destaque", nunca a cor de fundo de
-        // botão padrão — no Dark Mode, `primary` vira um neutro claro (alto
-        // contraste sobre grafite profundo), não neon, para não virar um
-        // painel "néon por toda parte" (o pedido foi "sério, robusto,
-        // tecnológico", não estética de vitrine). Neon continua reservado
-        // para: anel de foco, indicador ativo do menu, glow de KPI em
-        // destaque, e acentos de gráfico.
+        // Racional de cor por tema (Reestruturação WowDash): o azul-índigo
+        // de marca (`accent`, ver `neon` acima) é também o `primary` padrão
+        // em ambos os temas — botão de ação principal, item ativo do menu —
+        // igual ao template de referência, onde o azul do botão primário é
+        // a mesma cor do destaque. `ring`/foco usa o mesmo tom.
         // ====================================================================
         background: 'rgb(var(--background) / <alpha-value>)',
         foreground: 'rgb(var(--foreground) / <alpha-value>)',
@@ -128,7 +138,7 @@ export default {
       boxShadow: {
         card: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
         goldGlow: '0 0 0 1px rgba(201,162,39,0.6), 0 0 24px 4px rgba(201,162,39,0.35)',
-        neonGlow: '0 0 0 1px rgba(0,240,255,0.5), 0 0 20px 2px rgba(0,240,255,0.30)',
+        neonGlow: '0 0 0 1px rgba(79,70,229,0.5), 0 0 20px 2px rgba(79,70,229,0.30)',
       },
       keyframes: {
         goldPulse: {
@@ -136,8 +146,8 @@ export default {
           '50%': { boxShadow: '0 0 0 1px rgba(201,162,39,0.8), 0 0 30px 6px rgba(201,162,39,0.55)' },
         },
         neonPulse: {
-          '0%, 100%': { boxShadow: '0 0 0 1px rgba(0,240,255,0.45), 0 0 14px 1px rgba(0,240,255,0.25)' },
-          '50%': { boxShadow: '0 0 0 1px rgba(0,240,255,0.75), 0 0 22px 4px rgba(0,240,255,0.5)' },
+          '0%, 100%': { boxShadow: '0 0 0 1px rgba(79,70,229,0.45), 0 0 14px 1px rgba(79,70,229,0.25)' },
+          '50%': { boxShadow: '0 0 0 1px rgba(79,70,229,0.75), 0 0 22px 4px rgba(79,70,229,0.5)' },
         },
         // Feedback visual da tela de Conferência (Sprint 27, Item 2 da fila
         // de validação em produção — ver ConferenciaDetalhePage.tsx).

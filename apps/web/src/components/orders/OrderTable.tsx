@@ -190,7 +190,7 @@ export default function OrderTable({ insights = [] }: Props) {
       <Card className="overflow-hidden p-0">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[960px] text-left text-sm">
-            <thead>
+            <thead className="bg-muted/50">
               <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="px-5 py-3 font-medium">Canal</th>
                 <th className="px-5 py-3 font-medium">Pedido</th>
@@ -244,7 +244,20 @@ export default function OrderTable({ insights = [] }: Props) {
                     <td className="px-5 py-3 font-sans text-foreground">{currency.format(order.totalAmount)}</td>
                     <td className="px-5 py-3 font-sans">
                       <span className="font-semibold text-foreground">{currency.format(order.netAmount)}</span>
-                      {marginPct !== null && <span className="ml-1.5 text-xs text-muted-foreground">({marginPct.toFixed(1)}%)</span>}
+                      {marginPct !== null && (
+                        <span
+                          className={cn(
+                            'ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium',
+                            marginPct < 10
+                              ? 'bg-margin-danger/15 text-margin-danger'
+                              : marginPct <= 25
+                                ? 'bg-margin-warning/15 text-margin-warning'
+                                : 'bg-margin-good/15 text-margin-good',
+                          )}
+                        >
+                          {marginPct.toFixed(1)}%
+                        </span>
+                      )}
                     </td>
                     <td className="px-5 py-3">
                       <OrderStatusBadge status={order.status} />

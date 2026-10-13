@@ -17,15 +17,16 @@ function readInitialTheme(): Theme {
   // que o script inline em index.html já fez ANTES do React montar — aqui só
   // sincroniza o estado do React com o que já está de fato aplicado no DOM,
   // nunca decide de novo (evita um segundo "flash" se os dois discordarem).
-  if (typeof document === 'undefined') return 'dark';
+  if (typeof document === 'undefined') return 'light';
   return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
-// Dark é o padrão tecnológico da marca (pedido explícito do usuário) — Light
-// existe como alternativa, nunca o inverso. Persistido em localStorage (app
-// real do usuário, não um artifact de chat — localStorage é apropriado
-// aqui), aplicado via classe `.dark` no <html> para o Tailwind (`darkMode:
-// ['class']`, ver tailwind.config.js) resolver todos os tokens automaticamente.
+// Reestruturação Visual WowDash (13/10/2026, pedido explícito do usuário):
+// Light é o padrão da marca agora — Dark existe como alternativa. Persistido
+// em localStorage (app real do usuário, não um artifact de chat —
+// localStorage é apropriado aqui), aplicado via classe `.dark` no <html>
+// para o Tailwind (`darkMode: ['class']`, ver tailwind.config.js) resolver
+// todos os tokens automaticamente.
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(readInitialTheme);
 
