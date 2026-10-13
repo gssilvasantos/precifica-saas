@@ -130,7 +130,10 @@ export default function ProductForm({ produto, onClose }: Props) {
     Number(campos.minimumMarginPct) <= Number(campos.desiredMarginPct);
 
   const campo = (nome: string, rotulo: string, extras: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
-    <label className="text-xs font-medium text-foreground">
+    // flex-col + justify-end: quando um rótulo quebra em duas linhas (ex.: "Peso da
+    // embalagem (kg)" numa coluna estreita), a célula da grade fica mais alta e
+    // o input desce junto com os vizinhos — todos alinhados pela base.
+    <label className="flex flex-col justify-end text-xs font-medium text-foreground">
       {rotulo}
       <input
         value={campos[nome]}
