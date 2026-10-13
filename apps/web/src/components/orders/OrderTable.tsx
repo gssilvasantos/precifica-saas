@@ -113,17 +113,20 @@ export default function OrderTable({ insights = [] }: Props) {
           shadcn/ui: pill com tokens semânticos (primary/muted) em vez de
           bg-ink-900/bg-canvas hardcoded, mesmo racional do Button ativo da
           Pagination — resolve Light/Dark sozinho. */}
-      {/* Uma linha só, sem quebra — com muitos status (8 abas + "Todos") a
-          largura passa da tela em telas menores, então a barra rola na
-          horizontal em vez de empurrar "Cancelado" para uma segunda linha. */}
-      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+      {/* Sem rolagem — pedido explícito do usuário (13/10/2026): o menu de
+          status se ajusta à página, nunca ganha scrollbar própria. Com 8
+          status + "Todos" nem sempre cabe tudo numa linha só; quando não
+          cabe, quebra para a linha seguinte (flex-wrap padrão, cada pill
+          mantém seu tamanho natural — não espreme texto a ponto de ficar
+          ilegível). */}
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => {
             setStatus('');
             setPage(1);
           }}
           className={cn(
-            'shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition',
+            'rounded-full px-3 py-1.5 text-xs font-medium transition',
             status === '' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
           )}
         >
@@ -140,7 +143,7 @@ export default function OrderTable({ insights = [] }: Props) {
                 setPage(1);
               }}
               className={cn(
-                'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition',
+                'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition',
                 status === s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
               )}
             >
