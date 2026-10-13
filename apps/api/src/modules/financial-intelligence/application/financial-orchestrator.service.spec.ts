@@ -1,6 +1,7 @@
 import { FinancialOrchestrator } from './financial-orchestrator.service';
 import { OrderFinancialLine, OrderFinancialsReader } from '../../../shared/contracts/order-financials-reader.port';
 import { AdsSpendReader } from '../../../shared/contracts/ads-spend-reader.port';
+import { DreTaxEstimator } from './dre-tax-estimator.service';
 import { FixedExpense } from '../domain/fixed-expense.entity';
 
 function buildLine(overrides: Partial<OrderFinancialLine> = {}): OrderFinancialLine {
@@ -24,6 +25,10 @@ function item(skuCode: string, quantity: number) {
 }
 
 describe('FinancialOrchestrator', () => {
+  // Estimador neutro: os testes abaixo exercitam Ads/despesas fixas; o imposto
+  // tem spec próprio (dre-tax-estimator.service.spec.ts).
+  const passthroughEstimator = { enrich: jest.fn(async (_t: string, l: OrderFinancialLine[]) => l) } as unknown as DreTaxEstimator;
+
   function buildOrchestrator(
     lines: OrderFinancialLine[],
     adSpend: { channelCode: string; spend: number; hasData: boolean }[] = [],
@@ -46,7 +51,7 @@ describe('FinancialOrchestrator', () => {
       deactivate: jest.fn(),
     };
     return {
-      orchestrator: new FinancialOrchestrator(orderFinancials, adsSpend, expenses),
+      orchestrator: new FinancialOrchestrator(orderFinancials, adsSpend, expenses, passthroughEstimator),
       orderFinancials,
       adsSpend,
       expenses,

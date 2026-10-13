@@ -179,6 +179,10 @@ function isCostIncomplete(line: OrderFinancialLine): boolean {
   return line.items.some((item) => !item.costKnown);
 }
 
+function isTaxUnresolved(line: OrderFinancialLine): boolean {
+  return line.items.some((item) => item.taxAmount === null && item.taxUnresolvedReason !== undefined);
+}
+
 function isFeeSuspicious(line: OrderFinancialLine): boolean {
   return line.feeAmount === 0 && !KNOWN_ZERO_FEE_CHANNELS.includes(line.channelCode);
 }
@@ -190,6 +194,12 @@ function buildIncompleteRef(line: OrderFinancialLine): DreIncompleteOrderRef | n
   if (unknownCostItems.length > 0) {
     const skus = unknownCostItems.map((item) => item.skuCode ?? '(sem SKU)').join(', ');
     reasons.push(`Custo desconhecido para ${unknownCostItems.length} item(ns) (SKU: ${skus})`);
+  }
+
+  const taxItems = line.items.filter((item) => item.taxAmount === null && item.taxUnresolvedReason !== undefined);
+  if (taxItems.length > 0) {
+    const detail = Array.from(new Set(taxItems.map((item) => item.taxUnresolvedReason))).join('; ');
+    reasons.push(`Imposto não calculado para ${taxItems.length} item(ns): ${detail}`);
   }
 
   if (isFeeSuspicious(line)) {
@@ -226,7 +236,7 @@ function computeChannelBreakdown(
   const margemContribuicao = receitaBruta - deducoes - custosVariaveis;
   const margemContribuicaoPct = receitaBruta > 0 ? (margemContribuicao / receitaBruta) * 100 : null;
 
-  const dataQuality: DreDataQuality = lines.some((l) => isCostIncomplete(l) || isFeeSuspicious(l)) ? 'INCOMPLETE' : 'COMPLETE';
+  const dataQuality: DreDataQuality = lines.some((l) => isCostIncomplete(l) || isFeeSuspicious(l) || isTaxUnresolved(l)) ? 'INCOMPLETE' : 'COMPLETE';
 
   // Ads não afeta dataQuality: não ter gasto de mídia é um estado legítimo
   // (o lojista pode simplesmente não anunciar), diferente de não saber o
@@ -303,7 +313,7 @@ function computeOrderLine(line: OrderFinancialLine, adsCostPerUnitBySku: Map<str
     0,
   );
 
-  const dataQuality: DreDataQuality = isCostIncomplete(line) || isFeeSuspicious(line) ? 'INCOMPLETE' : 'COMPLETE';
+  const dataQuality: DreDataQuality = isCostIncomplete(line) || isFeeSuspicious(line) || isTaxUnresolved(line) ? 'INCOMPLETE' : 'COMPLETE';
 
   return {
     orderId: line.orderId,
