@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { motion } from 'framer-motion';
 import type { ChannelPerformance } from '../../features/orders/dashboard-metrics';
 import { getChannelMeta } from '../../features/orders/channels';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
+import { Stagger, RevealItem } from '../motion/Reveal';
 import { cn } from '../../lib/utils';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
@@ -39,23 +41,30 @@ export default function ChannelRoiList({ channels }: Props) {
           </p>
         )}
 
-        <ul className="space-y-4">
+        <Stagger as="ul" className="space-y-4">
           {channels.map((channel) => {
             const meta = getChannelMeta(channel.channelCode);
             const widthPct = (channel.revenue / maxRevenue) * 100;
             const isSelected = selected === channel.channelCode;
             const isDimmed = selected !== null && !isSelected;
             return (
-              <li key={channel.channelCode}>
-                <button
+              <RevealItem as="li" key={channel.channelCode}>
+                {/* `motion.button`: feedback tátil (leve scale) ao passar o
+                    mouse/tocar — pedido do usuário por "motion action" nos
+                    controles. A barra cresce de 0 até `widthPct` só na
+                    MONTAGEM (gráfico "desenhando-se"), igual a um chart de
+                    verdade, em vez de aparecer pronta de supetão. */}
+                <motion.button
                   type="button"
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
                   onClick={() => setSelected((atual) => (atual === channel.channelCode ? null : channel.channelCode))}
                   aria-pressed={isSelected}
                   title={`Destacar ${meta.label}`}
                   className={cn(
-                    'w-full rounded-lg px-2 py-1.5 text-left transition',
+                    'w-full rounded-lg px-2 py-1.5 text-left transition-colors',
                     isSelected ? 'bg-accent/10' : 'hover:bg-muted/50',
-                    isDimmed && 'opacity-40',
+                    isDimmed && 'opacity-40 transition-opacity',
                   )}
                 >
                   <div className="mb-1 flex items-center justify-between text-sm">
@@ -74,13 +83,18 @@ export default function ChannelRoiList({ channels }: Props) {
                     </span>
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-accent" style={{ width: `${widthPct}%` }} />
+                    <motion.div
+                      className="h-full rounded-full bg-accent"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${widthPct}%` }}
+                      transition={{ duration: 0.5, ease: 'easeOut', delay: 0.1 }}
+                    />
                   </div>
-                </button>
-              </li>
+                </motion.button>
+              </RevealItem>
             );
           })}
-        </ul>
+        </Stagger>
       </CardContent>
     </Card>
   );

@@ -10,6 +10,7 @@ import {
 import { parseOptions } from '../parse-options';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
+import ModalShell from '../../../components/motion/ModalShell';
 
 interface Props {
   parent: Product;
@@ -65,12 +66,12 @@ export default function GenerateVariantsDialog({ parent, onClose, onCreated }: P
     setLinhas((atual) => atual.map((l, idx) => (idx === i ? { ...l, [campo]: valor } : l)));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm">
+    <ModalShell onClose={onClose} maxWidthClassName="max-w-2xl">
       <Card
         role="dialog"
         aria-modal="true"
         aria-labelledby="gerar-variacoes-titulo"
-        className="my-8 w-full max-w-2xl p-6"
+        className="p-6"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -154,6 +155,6 @@ export default function GenerateVariantsDialog({ parent, onClose, onCreated }: P
           </Button>
         </div>
       </Card>
-    </div>
+    </ModalShell>
   );
 }

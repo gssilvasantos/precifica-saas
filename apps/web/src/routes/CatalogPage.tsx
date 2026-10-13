@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { fetchProducts, type Product } from '../features/catalog/api';
 import ProductForm from '../features/catalog/components/ProductForm';
 import GenerateVariantsDialog from '../features/catalog/components/GenerateVariantsDialog';
@@ -11,6 +12,7 @@ import { fetchChannelListings } from '../features/channels/api';
 import { averageChannelPrice, computeMarginStatus, grossMarginPct } from '../features/catalog/margin-status';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { Stagger, RevealItem } from '../components/motion/Reveal';
 import { cn } from '../lib/utils';
 
 const PAGE_SIZE = 50;
@@ -105,56 +107,71 @@ export default function CatalogPage() {
       </div>
 
       {!isLoading && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Stagger className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {/* Cards de resumo interativos (pedido do usuário, 13/10/2026):
               clicar filtra a tabela abaixo por esse critério; clicar de novo
               no mesmo card limpa o filtro. "Produtos cadastrados" é sempre
-              o atalho para limpar — não é um filtro em si, só mostra o total. */}
-          <button
-            type="button"
-            onClick={() => {
-              setCardFilter(null);
-              setPage(1);
-            }}
-            aria-pressed={cardFilter === null}
-            title="Mostrar todos os produtos"
-            className={cn(
-              'rounded-xl border p-4 text-left transition',
-              cardFilter === null ? 'border-accent bg-accent/5 ring-1 ring-accent/60' : 'border-border bg-card hover:bg-muted/50',
-            )}
-          >
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Produtos cadastrados</p>
-            <p className="mt-1 text-xl font-semibold text-foreground">{products.length}</p>
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleFilter('MARGEM_BAIXA')}
-            aria-pressed={cardFilter === 'MARGEM_BAIXA'}
-            title="Filtrar: produtos com margem baixa ou prejuízo"
-            className={cn(
-              'rounded-xl border p-4 text-left transition',
-              cardFilter === 'MARGEM_BAIXA' ? 'border-accent bg-accent/5 ring-1 ring-accent/60' : 'border-border bg-card hover:bg-muted/50',
-            )}
-          >
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Margem baixa ou prejuízo</p>
-            <p className={`mt-1 text-xl font-semibold ${margemBaixaOuPrejuizoCount > 0 ? 'text-margin-danger' : 'text-foreground'}`}>
-              {margemBaixaOuPrejuizoCount}
-            </p>
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleFilter('SEM_NCM')}
-            aria-pressed={cardFilter === 'SEM_NCM'}
-            title="Filtrar: produtos sem NCM cadastrado"
-            className={cn(
-              'rounded-xl border p-4 text-left transition',
-              cardFilter === 'SEM_NCM' ? 'border-accent bg-accent/5 ring-1 ring-accent/60' : 'border-border bg-card hover:bg-muted/50',
-            )}
-          >
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sem NCM cadastrado</p>
-            <p className={`mt-1 text-xl font-semibold ${semNcmCount > 0 ? 'text-margin-warning' : 'text-foreground'}`}>{semNcmCount}</p>
-          </button>
-        </div>
+              o atalho para limpar — não é um filtro em si, só mostra o total.
+              `motion.button` (feedback tátil de hover/tap) + entrada em
+              cascata via Stagger/RevealItem — pedido do usuário por "motion
+              action" nos controles do sistema todo. */}
+          <RevealItem>
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => {
+                setCardFilter(null);
+                setPage(1);
+              }}
+              aria-pressed={cardFilter === null}
+              title="Mostrar todos os produtos"
+              className={cn(
+                'w-full rounded-xl border p-4 text-left transition-colors',
+                cardFilter === null ? 'border-accent bg-accent/5 ring-1 ring-accent/60' : 'border-border bg-card hover:bg-muted/50',
+              )}
+            >
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Produtos cadastrados</p>
+              <p className="mt-1 text-xl font-semibold text-foreground">{products.length}</p>
+            </motion.button>
+          </RevealItem>
+          <RevealItem>
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => toggleFilter('MARGEM_BAIXA')}
+              aria-pressed={cardFilter === 'MARGEM_BAIXA'}
+              title="Filtrar: produtos com margem baixa ou prejuízo"
+              className={cn(
+                'w-full rounded-xl border p-4 text-left transition-colors',
+                cardFilter === 'MARGEM_BAIXA' ? 'border-accent bg-accent/5 ring-1 ring-accent/60' : 'border-border bg-card hover:bg-muted/50',
+              )}
+            >
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Margem baixa ou prejuízo</p>
+              <p className={`mt-1 text-xl font-semibold ${margemBaixaOuPrejuizoCount > 0 ? 'text-margin-danger' : 'text-foreground'}`}>
+                {margemBaixaOuPrejuizoCount}
+              </p>
+            </motion.button>
+          </RevealItem>
+          <RevealItem>
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => toggleFilter('SEM_NCM')}
+              aria-pressed={cardFilter === 'SEM_NCM'}
+              title="Filtrar: produtos sem NCM cadastrado"
+              className={cn(
+                'w-full rounded-xl border p-4 text-left transition-colors',
+                cardFilter === 'SEM_NCM' ? 'border-accent bg-accent/5 ring-1 ring-accent/60' : 'border-border bg-card hover:bg-muted/50',
+              )}
+            >
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sem NCM cadastrado</p>
+              <p className={`mt-1 text-xl font-semibold ${semNcmCount > 0 ? 'text-margin-warning' : 'text-foreground'}`}>{semNcmCount}</p>
+            </motion.button>
+          </RevealItem>
+        </Stagger>
       )}
 
       <Card className="overflow-hidden p-0">

@@ -10,6 +10,7 @@ import RevenueTrendChart from '../components/dashboard/RevenueTrendChart';
 import CircuitBackground from '../components/dashboard/CircuitBackground';
 import AIInsightPanel from '../components/insights/AIInsightPanel';
 import AppModeToggle from '../components/dashboard/AppModeToggle';
+import { Stagger, RevealItem } from '../components/motion/Reveal';
 import { Skeleton } from '../components/ui/skeleton';
 import { Badge } from '../components/ui/badge';
 import { Card } from '../components/ui/card';
@@ -103,37 +104,49 @@ export default function DashboardPage() {
 
       {!isLoading && (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiCard
-              label="Receita bruta"
-              value={currency.format(metrics.grossRevenue)}
-              caption="Amostra: últimos pedidos ativos"
-              icon={DollarSign}
-              tone="accent"
-            />
-            <KpiCard
-              label="Receita líquida"
-              value={currency.format(metrics.netRevenue)}
-              caption="Já descontada a comissão de cada canal"
-              icon={Wallet}
-              tone="good"
-              highlight
-            />
-            <KpiCard
-              label="Margem média"
-              value={metrics.averageMarginPct !== null ? `${metrics.averageMarginPct.toFixed(1)}%` : '—'}
-              caption="Líquido / bruto, ponderado pelos pedidos"
-              icon={Percent}
-              tone="gold"
-            />
-            <KpiCard
-              label="Pedidos ativos"
-              value={String(metrics.activeOrderCount)}
-              caption="Excluindo cancelados"
-              icon={ShoppingBag}
-              tone="warning"
-            />
-          </div>
+          {/* Stagger/RevealItem (pedido do usuário, 13/10/2026: "motion
+              action") — entrada em cascata dos 4 KPIs ao montar a tela, não
+              a cada re-render (a key muda só quando os dados mudam de
+              verdade, então reabrir a mesma amostra não re-anima à toa). */}
+          <Stagger className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <RevealItem>
+              <KpiCard
+                label="Receita bruta"
+                value={currency.format(metrics.grossRevenue)}
+                caption="Amostra: últimos pedidos ativos"
+                icon={DollarSign}
+                tone="accent"
+              />
+            </RevealItem>
+            <RevealItem>
+              <KpiCard
+                label="Receita líquida"
+                value={currency.format(metrics.netRevenue)}
+                caption="Já descontada a comissão de cada canal"
+                icon={Wallet}
+                tone="good"
+                highlight
+              />
+            </RevealItem>
+            <RevealItem>
+              <KpiCard
+                label="Margem média"
+                value={metrics.averageMarginPct !== null ? `${metrics.averageMarginPct.toFixed(1)}%` : '—'}
+                caption="Líquido / bruto, ponderado pelos pedidos"
+                icon={Percent}
+                tone="gold"
+              />
+            </RevealItem>
+            <RevealItem>
+              <KpiCard
+                label="Pedidos ativos"
+                value={String(metrics.activeOrderCount)}
+                caption="Excluindo cancelados"
+                icon={ShoppingBag}
+                tone="warning"
+              />
+            </RevealItem>
+          </Stagger>
 
           <RevenueTrendChart data={dailySeries} />
 

@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
 import { Menu, Moon, Sun, LogOut } from 'lucide-react';
 import { useAuth } from '../features/auth/auth-context';
 import { useTheme } from '../features/theme/theme-context';
 import Sidebar from '../components/Sidebar';
 import { Button } from '../components/ui/button';
 import { Avatar, AvatarFallback } from '../components/ui/avatar';
+import PageTransition from '../components/motion/PageTransition';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +26,7 @@ import {
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { pathname } = useLocation();
   const [isSidebarOpen, setSidebarOpen] = useState(false);
 
   const initials = (user?.role ?? '?').slice(0, 2).toUpperCase();
@@ -78,7 +81,17 @@ export default function AppLayout() {
           </div>
         </header>
         <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
-          <Outlet />
+          {/* `key={pathname}` força o PageTransition a desmontar/remontar a
+              cada troca de rota, para o fade+slide rodar de novo. AnimatePresence
+              aqui só cobre a animação de ENTRADA de forma limpa (troca de
+              `key`); como as rotas são trocadas pelo React Router de uma vez
+              (sem duas rotas coexistindo), não há uma transição de saída da
+              página antiga para animar de verdade. */}
+          <AnimatePresence mode="wait" initial={false}>
+            <PageTransition key={pathname}>
+              <Outlet />
+            </PageTransition>
+          </AnimatePresence>
         </main>
       </div>
     </div>

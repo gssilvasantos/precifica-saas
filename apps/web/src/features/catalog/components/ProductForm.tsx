@@ -5,6 +5,7 @@ import { fetchSuppliers } from '../../suppliers/api';
 import { fetchPackagings } from '../../packaging/api';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
+import ModalShell from '../../../components/motion/ModalShell';
 
 // Cadastro de produto — criar e editar.
 //
@@ -145,8 +146,8 @@ export default function ProductForm({ produto, onClose }: Props) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm">
-      <Card className="my-8 w-full max-w-3xl p-6">
+    <ModalShell onClose={onClose}>
+      <Card className="p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="font-serif text-xl font-semibold text-foreground">
@@ -315,6 +316,6 @@ export default function ProductForm({ produto, onClose }: Props) {
           </div>
         </div>
       </Card>
-    </div>
+    </ModalShell>
   );
 }
