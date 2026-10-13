@@ -48,7 +48,7 @@ const MAPA: Area[] = [
         status: 'PARCIAL',
         rota: '/catalogo',
         pendencia:
-          'O formulário cobre os campos essenciais e o vínculo com fornecedor e embalagem (troca, sem remoção). Ainda não expõe pela tela: geração de variações e estrutura de kit — as duas existem no servidor.',
+          'O formulário cobre os campos essenciais e o vínculo com fornecedor e embalagem (troca, sem remoção). A geração de variações a partir do pai fica no botão Variações do catálogo (até 100 por vez). Ainda não expõe pela tela: estrutura de kit — existe no servidor.',
       },
       {
         nome: 'Categorias e Publicação',

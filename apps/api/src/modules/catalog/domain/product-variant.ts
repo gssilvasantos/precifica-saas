@@ -95,6 +95,16 @@ export function isValidAttributeDefinitions(
 // Verde/P, Verde/M). Começa de [{}] (uma combinação vazia) e vai
 // "multiplicando" um atributo de cada vez via flatMap — é o jeito padrão
 // de computar produto cartesiano sem loop aninhado explícito.
+// Teto de combinações por chamada. A geração é sequencial e não atômica (uma
+// falha no meio deixa as anteriores criadas), então um produto cartesiano
+// enorme — 10 cores × 10 tamanhos × 10 tons — viraria centenas de produtos de
+// uma vez, difíceis de desfazer. 100 cobre qualquer grade real de cosméticos.
+export const MAX_VARIANT_COMBINATIONS = 100;
+
+export function countVariantCombinations(definitions: VariantAttributeDefinition[]): number {
+  return definitions.reduce((total, def) => total * def.options.length, 1);
+}
+
 export function generateVariantCombinations(
   definitions: VariantAttributeDefinition[],
 ): VariantAttributes[] {
