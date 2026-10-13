@@ -410,6 +410,30 @@ describe('ProductsService (Produto Pai + Variação)', () => {
       );
     });
 
+    it('recusa grade que passa do teto de combinações, sem criar nada', async () => {
+      const { service, products } = buildService({ 'parent-1': parentProduct });
+      const opcoes = (n: number) => Array.from({ length: n }, (_, i) => `O${i}`);
+
+      await expect(
+        service.generateVariantCombinations('tenant-1', 'parent-1', [
+          { name: 'Cor', options: opcoes(11) },
+          { name: 'Tom', options: opcoes(10) },
+        ]),
+      ).rejects.toThrow('110 variações');
+      expect(products.create).not.toHaveBeenCalled();
+    });
+
+    it('aceita grade exatamente no teto', async () => {
+      const { service } = buildService({ 'parent-1': parentProduct });
+      const opcoes = (n: number) => Array.from({ length: n }, (_, i) => `O${i}`);
+
+      const result = await service.generateVariantCombinations('tenant-1', 'parent-1', [
+        { name: 'Cor', options: opcoes(10) },
+        { name: 'Tom', options: opcoes(10) },
+      ]);
+      expect(result).toHaveLength(100);
+    });
+
     it('rejeita quando o produto informado não existe no tenant', async () => {
       const { service, products } = buildService({});
 

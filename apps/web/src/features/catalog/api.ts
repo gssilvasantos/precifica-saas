@@ -24,6 +24,10 @@ export interface Product {
   // publicar anúncio em marketplace (resolve atributos herdados + mapeamento
   // de categoria do canal). null = produto ainda sem categoria definida.
   categoryId: string | null;
+  // Produto Pai + Variação — parentProductId aponta para o pai (null = produto
+  // normal ou pai); variantAttributes é a grade da variação (ex.: { Cor: 'Rosa' }).
+  parentProductId: string | null;
+  variantAttributes: Record<string, string> | null;
   weightKg: number;
   packagingWeightKg: number;
   lengthCm: number;
@@ -43,6 +47,14 @@ export interface Product {
   gtin: string | null;
   fiscalOriginCode: number | null;
   cest: string | null;
+
+  // Vínculos de cadastro. Espelham Product.supplierId/packagingId/isKit do
+  // backend, que já devolve a entidade inteira — o tipo só não os declarava.
+  // Fornecedor e embalagem são configuração do Kyneti (não do ERP), então são
+  // editáveis também em produto espelhado do Olist.
+  supplierId: string | null;
+  packagingId: string | null;
+  isKit: boolean;
 }
 
 export interface ProductWriteInput {
@@ -61,6 +73,10 @@ export interface ProductWriteInput {
   gtin?: string | null;
   fiscalOriginCode?: number | null;
   cest?: string | null;
+  // Só ids: o backend valida que pertencem ao tenant. O DTO não aceita null
+  // aqui, então o vínculo pode ser definido ou trocado, mas ainda não removido.
+  supplierId?: string;
+  packagingId?: string;
 }
 
 export async function createProduct(input: ProductWriteInput): Promise<Product> {
@@ -144,5 +160,21 @@ export interface BulkMapPriceImportSummary {
 
 export async function bulkImportMapPrice(fileContent: string): Promise<BulkMapPriceImportSummary> {
   const { data } = await apiClient.post<BulkMapPriceImportSummary>('/products/bulk-import/map-price', { fileContent });
+  return data;
+}
+
+// Geração de variações a partir de um produto pai. Espelha
+// GenerateVariantCombinationsDto: 1–5 atributos, 1–50 opções cada, e o backend
+// recusa grade com mais de 100 combinações. O servidor monta SKU e nome.
+export interface VariantAttributeInput {
+  name: string;
+  options: string[];
+}
+
+export const MAX_VARIANT_COMBINATIONS = 100;
+export const MAX_VARIANT_ATTRIBUTES = 5;
+
+export async function generateVariantCombinations(parentId: string, attributes: VariantAttributeInput[]): Promise<Product[]> {
+  const { data } = await apiClient.post<Product[]>(`/products/${parentId}/variants/generate-combinations`, { attributes });
   return data;
 }

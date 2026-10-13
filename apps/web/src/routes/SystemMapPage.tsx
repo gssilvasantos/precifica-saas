@@ -48,7 +48,7 @@ const MAPA: Area[] = [
         status: 'PARCIAL',
         rota: '/catalogo',
         pendencia:
-          'O formulário cobre os campos essenciais. Ainda não expõe pela tela: vínculo com fornecedor e embalagem, geração de variações e estrutura de kit — tudo isso existe no servidor.',
+          'O formulário cobre os campos essenciais e o vínculo com fornecedor e embalagem (troca, sem remoção). A geração de variações a partir do pai fica no botão Variações do catálogo (até 100 por vez). Ainda não expõe pela tela: estrutura de kit — existe no servidor.',
       },
       {
         nome: 'Categorias e Publicação',
@@ -155,7 +155,7 @@ const MAPA: Area[] = [
         status: 'PARCIAL',
         rota: '/financeiro',
         pendencia:
-          'Os cartões de resumo ainda não viraram cascata vertical, e as deduções usam a alíquota fixa em vez do cálculo por regime.',
+          'Os cartões de resumo ainda não viraram cascata vertical. O imposto das deduções vem do Tax Intelligence, mas hoje usa a alíquota manual: sem o faturamento mensal cadastrado não há cálculo por RBT12, e o DAS fixo do MEI não entra no DRE. Pedido sem alíquota resolvida aparece como incompleto, nunca com imposto zero.',
       },
       {
         nome: 'Notas Fiscais',
@@ -173,9 +173,10 @@ const MAPA: Area[] = [
         nome: 'Regimes tributários (Tax Intelligence)',
         descricao:
           'Calcula a alíquota efetiva em vez de perguntar: MEI, Simples Nacional (Anexos I a V, alíquota por RBT12, segregação de ST e monofásico por produto), Lucro Presumido e Lucro Real. Reproduz um extrato oficial do PGDAS-D ao centavo.',
-        status: 'SEM_TELA',
+        status: 'PARCIAL',
+        rota: '/configuracoes-fiscais',
         pendencia:
-          'Não há onde cadastrar regime, perfil fiscal do produto e faturamento anterior — e sem isso o cálculo bloqueia, que é o comportamento correto mas inutilizável.',
+          'A tela existe (regime, faturamento anterior e perfil fiscal do produto), mas o faturamento mensal dos 12 meses anteriores ainda não foi cadastrado; enquanto isso o Simples usa a alíquota manual em vez da calculada.',
       },
     ],
   },
@@ -191,11 +192,11 @@ const MAPA: Area[] = [
       {
         nome: 'Importação do ERP Olist',
         descricao:
-          'Espelha o catálogo do ERP — nome, custo, estoque, peso, dimensões, fotos e os campos fiscais (NCM, CEST, GTIN e origem). Respeita o limite de requisições e reprocessa em caso de bloqueio.',
+          'Espelha o catálogo do ERP — nome, custo, estoque (pela API v3, incremental), peso, dimensões, fotos e os campos fiscais (NCM, CEST, GTIN e origem). Respeita o limite de requisições e reprocessa em caso de bloqueio.',
         status: 'PARCIAL',
         rota: '/integracoes',
         pendencia:
-          'Importa produtos simples e variações (cada variação vira um produto próprio, com custo e estoque dela). Falta trazer a árvore de categorias do ERP.',
+          'Importa produtos simples e variações (cada variação vira um produto próprio, com custo e estoque dela). O caminho de categoria de cada produto é gravado, mas a árvore de categorias do ERP não é importada por inteiro.',
       },
       {
         nome: 'Governança de Marketplace',

@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createProduct, updateProduct, type Product, type ProductWriteInput } from '../api';
+import { fetchSuppliers } from '../../suppliers/api';
+import { fetchPackagings } from '../../packaging/api';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
 
@@ -53,6 +55,8 @@ function valoresIniciais(produto?: Product): Campos {
     ncm: produto?.ncm ?? '',
     cest: produto?.cest ?? '',
     gtin: produto?.gtin ?? '',
+    supplierId: produto?.supplierId ?? '',
+    packagingId: produto?.packagingId ?? '',
     fiscalOriginCode: produto?.fiscalOriginCode !== null && produto?.fiscalOriginCode !== undefined
       ? String(produto.fiscalOriginCode)
       : '',
@@ -69,6 +73,13 @@ export default function ProductForm({ produto, onClose }: Props) {
   const editando = produto !== undefined;
   const [campos, setCampos] = useState<Campos>(() => valoresIniciais(produto));
   const [erro, setErro] = useState<string | null>(null);
+
+  const suppliersQuery = useQuery({ queryKey: ['suppliers'], queryFn: fetchSuppliers });
+  const packagingsQuery = useQuery({ queryKey: ['packagings'], queryFn: fetchPackagings });
+  // Só ativos, mais o já vinculado (que pode ter sido desativado depois): sem
+  // isso o select mostraria "Nenhum" para um produto que tem vínculo.
+  const suppliers = (suppliersQuery.data ?? []).filter((s) => s.isActive || s.id === produto?.supplierId);
+  const packagings = (packagingsQuery.data ?? []).filter((p) => p.isActive || p.id === produto?.packagingId);
 
   const set = (nome: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setCampos((atual) => ({ ...atual, [nome]: e.target.value }));
@@ -89,6 +100,8 @@ export default function ProductForm({ produto, onClose }: Props) {
     cest: texto(campos.cest),
     gtin: texto(campos.gtin),
     fiscalOriginCode: campos.fiscalOriginCode.trim() === '' ? null : Number(campos.fiscalOriginCode),
+    ...(campos.supplierId !== '' ? { supplierId: campos.supplierId } : {}),
+    ...(campos.packagingId !== '' ? { packagingId: campos.packagingId } : {}),
   });
 
   const mutation = useMutation({
@@ -117,12 +130,15 @@ export default function ProductForm({ produto, onClose }: Props) {
     Number(campos.minimumMarginPct) <= Number(campos.desiredMarginPct);
 
   const campo = (nome: string, rotulo: string, extras: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
-    <label className="text-xs font-medium text-foreground">
-      {rotulo}
+    // Rótulo numa linha só (whitespace-nowrap) e texto centralizado: todos os campos
+    // de uma linha da grade têm a mesma altura e ficam alinhados. Por isso os rótulos
+    // são curtos — se um precisar de mais espaço, abrevie, não deixe quebrar.
+    <label className="flex min-w-0 flex-col text-center text-xs font-medium text-foreground">
+      <span className="whitespace-nowrap">{rotulo}</span>
       <input
         value={campos[nome]}
         onChange={set(nome)}
-        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-center text-sm text-foreground outline-none focus:border-accent"
         {...extras}
       />
     </label>
@@ -178,6 +194,62 @@ export default function ProductForm({ produto, onClose }: Props) {
 
           <section className="space-y-3">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+              Fornecedor e embalagem
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              A embalagem soma seu custo ao custo efetivo do produto e entra no peso e nas dimensões do frete. O
+              vínculo pode ser trocado, mas ainda não removido por aqui.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex min-w-0 flex-col text-center text-xs font-medium text-foreground">
+                <span className="whitespace-nowrap">Fornecedor</span>
+                <select
+                  value={campos.supplierId}
+                  onChange={set('supplierId')}
+                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-center text-sm text-foreground outline-none [text-align-last:center] focus:border-accent"
+                >
+                  <option value="">{suppliersQuery.isLoading ? 'Carregando…' : 'Nenhum'}</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                      {s.isActive ? '' : ' (inativo)'}
+                    </option>
+                  ))}
+                </select>
+                {suppliersQuery.isError && (
+                  <span className="mt-1 block text-destructive">Não foi possível carregar os fornecedores.</span>
+                )}
+                {!suppliersQuery.isLoading && !suppliersQuery.isError && suppliers.length === 0 && (
+                  <span className="mt-1 block text-muted-foreground">Nenhum fornecedor cadastrado — cadastre em Fornecedores.</span>
+                )}
+              </label>
+              <label className="flex min-w-0 flex-col text-center text-xs font-medium text-foreground">
+                <span className="whitespace-nowrap">Embalagem</span>
+                <select
+                  value={campos.packagingId}
+                  onChange={set('packagingId')}
+                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-center text-sm text-foreground outline-none [text-align-last:center] focus:border-accent"
+                >
+                  <option value="">{packagingsQuery.isLoading ? 'Carregando…' : 'Nenhuma'}</option>
+                  {packagings.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} — R$ {p.costPrice.toFixed(2)}
+                      {p.isActive ? '' : ' (inativa)'}
+                    </option>
+                  ))}
+                </select>
+                {packagingsQuery.isError && (
+                  <span className="mt-1 block text-destructive">Não foi possível carregar as embalagens.</span>
+                )}
+                {!packagingsQuery.isLoading && !packagingsQuery.isError && packagings.length === 0 && (
+                  <span className="mt-1 block text-muted-foreground">Nenhuma embalagem cadastrada — cadastre em Embalagens.</span>
+                )}
+              </label>
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
               Peso e dimensões
             </h3>
             <p className="text-sm text-muted-foreground">
@@ -185,7 +257,7 @@ export default function ProductForm({ produto, onClose }: Props) {
             </p>
             <div className="grid gap-3 sm:grid-cols-5">
               {campo('weightKg', 'Peso (kg) *', { type: 'number', step: '0.001', min: '0' })}
-              {campo('packagingWeightKg', 'Peso da embalagem (kg)', { type: 'number', step: '0.001', min: '0' })}
+              {campo('packagingWeightKg', 'Peso emb. (kg)', { type: 'number', step: '0.001', min: '0' })}
               {campo('lengthCm', 'Compr. (cm) *', { type: 'number', step: '0.1', min: '0' })}
               {campo('widthCm', 'Largura (cm) *', { type: 'number', step: '0.1', min: '0' })}
               {campo('heightCm', 'Altura (cm) *', { type: 'number', step: '0.1', min: '0' })}
@@ -203,12 +275,12 @@ export default function ProductForm({ produto, onClose }: Props) {
               {campo('ncm', 'NCM', { placeholder: '3304.99.90', maxLength: 10 })}
               {campo('cest', 'CEST', { placeholder: '20.063.00', maxLength: 10 })}
               {campo('gtin', 'GTIN / EAN', { placeholder: '7891234567890', maxLength: 14 })}
-              <label className="text-xs font-medium text-foreground">
-                Origem da mercadoria
+              <label className="flex min-w-0 flex-col text-center text-xs font-medium text-foreground">
+                <span className="whitespace-nowrap">Origem da mercadoria</span>
                 <select
                   value={campos.fiscalOriginCode}
                   onChange={set('fiscalOriginCode')}
-                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-center text-sm text-foreground outline-none [text-align-last:center] focus:border-accent"
                 >
                   <option value="">Não informada</option>
                   {ORIGENS_FISCAIS.map((o) => (
