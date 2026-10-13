@@ -11,6 +11,7 @@ import { fetchChannelListings } from '../features/channels/api';
 import { averageChannelPrice, computeMarginStatus, grossMarginPct } from '../features/catalog/margin-status';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { cn } from '../lib/utils';
 
 const PAGE_SIZE = 50;
 
@@ -19,11 +20,19 @@ const PAGE_SIZE = 50;
 // para não existir a combinação impossível de fechado-com-produto.
 type FormState = { produto?: Product } | null;
 
+// Tiras de resumo clicáveis (pedido do usuário, 13/10/2026: "quero o sistema
+// todo com controles interativos" → filtrar/destacar na própria tela, sem
+// navegar). `null` = sem filtro (equivalente ao card "Produtos cadastrados").
+// Clicar no card já ativo limpa o filtro — mesmo padrão das abas de status
+// do OrderTable.
+type CardFilter = 'MARGEM_BAIXA' | 'SEM_NCM' | null;
+
 export default function CatalogPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState<FormState>(null);
   // Pais expandidos. Começa tudo recolhido: o catálogo lista um pai por linha.
   const [page, setPage] = useState(1);
+  const [cardFilter, setCardFilter] = useState<CardFilter>(null);
   const [gerarPara, setGerarPara] = useState<Product | null>(null);
   const [expandidos, setExpandidos] = useState<Set<string>>(() => new Set());
   const alternar = (id: string) =>
@@ -48,21 +57,39 @@ export default function CatalogPage() {
     return { product, avgPrice, marginPct, statusInfo, channelCount: skuListings.length };
   });
 
+  // Tiras de resumo (Reestruturação Visual WowDash, 13/10/2026) — contagem
+  // real sobre `rows` já calculado acima, nenhum dado novo buscado. As
+  // contagens usam `rows`/`products` completos (não filtrados), senão o
+  // card que representa o próprio filtro ativo mudaria de número ao ser
+  // clicado — o card é um contador fixo, só a tabela abaixo reage.
+  const semNcmCount = products.filter((p) => !p.ncm).length;
+  const margemBaixaOuPrejuizoCount = rows.filter((r) => r.statusInfo.status === 'BAIXA' || r.statusInfo.status === 'PREJUIZO').length;
+
+  // Filtro aplicado só na listagem — pedido explícito do usuário (13/10/2026):
+  // os cards de resumo viram controles que filtram a própria tabela abaixo,
+  // sem navegar para outra tela nem abrir modal.
+  const filteredRows =
+    cardFilter === 'MARGEM_BAIXA'
+      ? rows.filter((r) => r.statusInfo.status === 'BAIXA' || r.statusInfo.status === 'PREJUIZO')
+      : cardFilter === 'SEM_NCM'
+        ? rows.filter((r) => !r.product.ncm)
+        : rows;
+
   // Um produto PAI por linha, no máximo PAGE_SIZE por página; as variações do pai
   // expandido aparecem logo abaixo dele e não entram na contagem da página.
   // Paginação no cliente: GET /products ainda devolve a lista inteira (dívida
   // conhecida — o agrupamento pai/filho precisa dela completa).
-  const groups = groupByParent(rows);
+  const groups = groupByParent(filteredRows);
   const totalPages = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageGroups = groups.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const firstShown = groups.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const lastShown = Math.min(currentPage * PAGE_SIZE, groups.length);
 
-  // Tiras de resumo (Reestruturação Visual WowDash, 13/10/2026) — contagem
-  // real sobre `rows` já calculado acima, nenhum dado novo buscado.
-  const semNcmCount = products.filter((p) => !p.ncm).length;
-  const margemBaixaOuPrejuizoCount = rows.filter((r) => r.statusInfo.status === 'BAIXA' || r.statusInfo.status === 'PREJUIZO').length;
+  const toggleFilter = (next: Exclude<CardFilter, null>) => {
+    setCardFilter((atual) => (atual === next ? null : next));
+    setPage(1);
+  };
 
   return (
     <div className="space-y-6">
@@ -79,20 +106,54 @@ export default function CatalogPage() {
 
       {!isLoading && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Card className="p-4">
+          {/* Cards de resumo interativos (pedido do usuário, 13/10/2026):
+              clicar filtra a tabela abaixo por esse critério; clicar de novo
+              no mesmo card limpa o filtro. "Produtos cadastrados" é sempre
+              o atalho para limpar — não é um filtro em si, só mostra o total. */}
+          <button
+            type="button"
+            onClick={() => {
+              setCardFilter(null);
+              setPage(1);
+            }}
+            aria-pressed={cardFilter === null}
+            title="Mostrar todos os produtos"
+            className={cn(
+              'rounded-xl border p-4 text-left transition',
+              cardFilter === null ? 'border-accent bg-accent/5 ring-1 ring-accent/60' : 'border-border bg-card hover:bg-muted/50',
+            )}
+          >
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Produtos cadastrados</p>
             <p className="mt-1 text-xl font-semibold text-foreground">{products.length}</p>
-          </Card>
-          <Card className="p-4">
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleFilter('MARGEM_BAIXA')}
+            aria-pressed={cardFilter === 'MARGEM_BAIXA'}
+            title="Filtrar: produtos com margem baixa ou prejuízo"
+            className={cn(
+              'rounded-xl border p-4 text-left transition',
+              cardFilter === 'MARGEM_BAIXA' ? 'border-accent bg-accent/5 ring-1 ring-accent/60' : 'border-border bg-card hover:bg-muted/50',
+            )}
+          >
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Margem baixa ou prejuízo</p>
             <p className={`mt-1 text-xl font-semibold ${margemBaixaOuPrejuizoCount > 0 ? 'text-margin-danger' : 'text-foreground'}`}>
               {margemBaixaOuPrejuizoCount}
             </p>
-          </Card>
-          <Card className="p-4">
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleFilter('SEM_NCM')}
+            aria-pressed={cardFilter === 'SEM_NCM'}
+            title="Filtrar: produtos sem NCM cadastrado"
+            className={cn(
+              'rounded-xl border p-4 text-left transition',
+              cardFilter === 'SEM_NCM' ? 'border-accent bg-accent/5 ring-1 ring-accent/60' : 'border-border bg-card hover:bg-muted/50',
+            )}
+          >
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sem NCM cadastrado</p>
             <p className={`mt-1 text-xl font-semibold ${semNcmCount > 0 ? 'text-margin-warning' : 'text-foreground'}`}>{semNcmCount}</p>
-          </Card>
+          </button>
         </div>
       )}
 
@@ -122,10 +183,30 @@ export default function CatalogPage() {
               </tr>
             )}
 
-            {!isLoading && groups.length === 0 && (
+            {!isLoading && groups.length === 0 && products.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-5 py-8 text-center text-muted-foreground">
                   Nenhum produto ainda. Conecte o Olist em Integrações para importar o catálogo, ou rode o seed demo.
+                </td>
+              </tr>
+            )}
+
+            {/* Vazio por filtro ≠ vazio por ausência de dado — mensagem própria
+                com saída clara (regra de UI do projeto). */}
+            {!isLoading && groups.length === 0 && products.length > 0 && (
+              <tr>
+                <td colSpan={7} className="px-5 py-8 text-center text-muted-foreground">
+                  Nenhum produto corresponde a este filtro.{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCardFilter(null);
+                      setPage(1);
+                    }}
+                    className="font-medium text-accent underline-offset-2 hover:underline"
+                  >
+                    Limpar filtro
+                  </button>
                 </td>
               </tr>
             )}
