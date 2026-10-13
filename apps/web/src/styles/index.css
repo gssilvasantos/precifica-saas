@@ -16,6 +16,14 @@
    ============================================================================ */
 
 :root {
+  /* color-scheme avisa o NAVEGADOR (não é um token nosso) qual esquema usar
+     nos controles NATIVOS de formulário — spinner de <input type=number>,
+     checkbox, calendário de <input type=date>, scrollbar nativo. Sem isto,
+     o navegador desenha esses controles no claro por padrão mesmo com o
+     resto da UI em Dark Mode (ex.: o quadrado branco atrás das setinhas do
+     "Ir para página" no paginador — bug relatado pelo usuário, 13/10/2026). */
+  color-scheme: light;
+
   /* Light Mode — padrão da marca. Canvas cinza-azulado frio, cards brancos,
      acento índigo (mesmo tom do `neon` nomeado em tailwind.config.js). */
   --background: 244 246 250;       /* canvas */
@@ -41,6 +49,8 @@
 }
 
 .dark {
+  color-scheme: dark;
+
   /* Dark Mode — alternativa: navy profundo como base, mesmo acento índigo
      (um tom mais claro, indigo-500, para manter contraste sobre o navy). */
   --background: 15 19 36;          /* ink-950 — navy profundo */

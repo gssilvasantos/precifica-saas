@@ -113,24 +113,27 @@ export default function OrderTable({ insights = [] }: Props) {
           shadcn/ui: pill com tokens semânticos (primary/muted) em vez de
           bg-ink-900/bg-canvas hardcoded, mesmo racional do Button ativo da
           Pagination — resolve Light/Dark sozinho. */}
-      {/* Sem rolagem — pedido explícito do usuário (13/10/2026): o menu de
-          status se ajusta à página, nunca ganha scrollbar própria. Com 8
-          status + "Todos" nem sempre cabe tudo numa linha só; quando não
-          cabe, quebra para a linha seguinte (flex-wrap padrão, cada pill
-          mantém seu tamanho natural — não espreme texto a ponto de ficar
-          ilegível). */}
-      <div className="flex flex-wrap gap-2">
+      {/* Sem quebra de linha e sem rolagem — pedido explícito do usuário
+          (13/10/2026): nem flex-wrap, nem overflow-x-auto. Com 8 status +
+          "Todos" nem sempre cabe tudo numa linha na largura natural; a
+          única forma física de caber sem quebrar e sem rolar é cada pill
+          poder ENCOLHER (min-w-0 + shrink) e truncar o rótulo (reticências)
+          quando o espaço aperta — o ponto colorido e a contagem nunca
+          encolhem (shrink-0), só o texto do nome trunca. `title` no botão
+          garante que o nome completo continua acessível (tooltip nativo). */}
+      <div className="flex gap-1.5">
         <button
           onClick={() => {
             setStatus('');
             setPage(1);
           }}
           className={cn(
-            'rounded-full px-3 py-1.5 text-xs font-medium transition',
+            'min-w-0 shrink rounded-full px-3 py-1.5 text-xs font-medium transition',
             status === '' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
           )}
         >
-          Todos <span className={status === '' ? 'text-primary-foreground/70' : 'text-muted-foreground'}>({totalCount})</span>
+          <span className="truncate">Todos</span>{' '}
+          <span className={status === '' ? 'text-primary-foreground/70' : 'text-muted-foreground'}>({totalCount})</span>
         </button>
         {ORDER_STATUS_TABS.map((s) => {
           const meta = ORDER_STATUS_META[s];
@@ -138,18 +141,21 @@ export default function OrderTable({ insights = [] }: Props) {
           return (
             <button
               key={s}
+              title={`${meta.label} (${count})`}
               onClick={() => {
                 setStatus(s);
                 setPage(1);
               }}
               className={cn(
-                'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition',
+                'flex min-w-0 shrink items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition',
                 status === s ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/70',
               )}
             >
-              <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
-              {meta.label}
-              <span className={status === s ? 'text-primary-foreground/70' : 'text-muted-foreground'}>({count})</span>
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotClass}`} />
+              <span className="truncate">{meta.label}</span>
+              <span className={cn('shrink-0', status === s ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+                ({count})
+              </span>
             </button>
           );
         })}
