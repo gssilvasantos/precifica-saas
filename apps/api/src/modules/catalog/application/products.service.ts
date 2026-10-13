@@ -24,6 +24,8 @@ import {
   isValidVariantAttributes,
   isValidAttributeDefinitions,
   generateVariantCombinations,
+  countVariantCombinations,
+  MAX_VARIANT_COMBINATIONS,
   buildVariantSkuCode,
   buildVariantName,
   VariantAttributeDefinition,
@@ -300,6 +302,13 @@ export class ProductsService {
     if (!isValidAttributeDefinitions(attributes)) {
       throw new BadRequestException(
         'Informe ao menos um atributo com nome e ao menos uma opção cada (ex.: [{"name":"Cor","options":["Azul","Verde"]}]).',
+      );
+    }
+
+    const total = countVariantCombinations(attributes);
+    if (total > MAX_VARIANT_COMBINATIONS) {
+      throw new BadRequestException(
+        `A grade geraria ${total} variações; o máximo por vez é ${MAX_VARIANT_COMBINATIONS}. Reduza as opções ou gere em etapas.`,
       );
     }
 

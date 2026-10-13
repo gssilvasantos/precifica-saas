@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { fetchProducts, type Product } from '../features/catalog/api';
 import ProductForm from '../features/catalog/components/ProductForm';
+import GenerateVariantsDialog from '../features/catalog/components/GenerateVariantsDialog';
 import CatalogRow from '../features/catalog/components/CatalogRow';
 import { groupByParent } from '../features/catalog/group-variants';
 import { fetchChannelListings } from '../features/channels/api';
@@ -19,6 +20,7 @@ export default function CatalogPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState<FormState>(null);
   // Pais expandidos. Começa tudo recolhido: o catálogo lista um pai por linha.
+  const [gerarPara, setGerarPara] = useState<Product | null>(null);
   const [expandidos, setExpandidos] = useState<Set<string>>(() => new Set());
   const alternar = (id: string) =>
     setExpandidos((atual) => {
@@ -125,6 +127,7 @@ export default function CatalogPage() {
                       onToggle={() => alternar(item.product.id)}
                       onEdit={() => setForm({ produto: item.product })}
                       onPricing={() => navigate(`/produtos/${item.product.id}`)}
+                      onGenerateVariants={() => setGerarPara(item.product)}
                     />
                     {aberto &&
                       children.map((child) => (
@@ -144,6 +147,13 @@ export default function CatalogPage() {
         </div>
       </Card>
 
+      {gerarPara && (
+        <GenerateVariantsDialog
+          parent={gerarPara}
+          onClose={() => setGerarPara(null)}
+          onCreated={(id) => setExpandidos((atual) => new Set(atual).add(id))}
+        />
+      )}
       {form && <ProductForm produto={form.produto} onClose={() => setForm(null)} />}
     </div>
   );

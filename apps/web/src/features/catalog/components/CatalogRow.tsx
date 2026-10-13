@@ -22,6 +22,8 @@ interface Props {
   onToggle?: () => void;
   onEdit: () => void;
   onPricing: () => void;
+  // Só em produto que não é variação (a hierarquia tem um nível só).
+  onGenerateVariants?: () => void;
 }
 
 function variantLabel(attrs: Product['variantAttributes']): string | null {
@@ -30,7 +32,7 @@ function variantLabel(attrs: Product['variantAttributes']): string | null {
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
-export default function CatalogRow({ row, isChild = false, variantCount, expanded = false, onToggle, onEdit, onPricing }: Props) {
+export default function CatalogRow({ row, isChild = false, variantCount, expanded = false, onToggle, onEdit, onPricing, onGenerateVariants }: Props) {
   const { product, avgPrice, marginPct, statusInfo } = row;
   const hasChildren = (variantCount ?? 0) > 0;
   const grade = isChild ? variantLabel(product.variantAttributes) : null;
@@ -95,6 +97,11 @@ export default function CatalogRow({ row, isChild = false, variantCount, expande
       </td>
       <td className="px-5 py-3 text-right">
         <div className="flex justify-end gap-2">
+          {!isChild && onGenerateVariants && (
+            <Button variant="ghost" size="sm" onClick={onGenerateVariants}>
+              Variações
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={onEdit}>
             Editar
           </Button>
