@@ -51,6 +51,26 @@ async function main() {
     });
   }
 
+  console.log('Configurando schedule de sincronização da tabela de comissão da Shopee...');
+  const shopeeFeeRuleMarketplaceId = marketplacesByCode.get('SHOPEE');
+  if (shopeeFeeRuleMarketplaceId) {
+    await prisma.providerSyncSchedule.upsert({
+      where: { providerCode: 'SHOPEE_FEE_SCHEDULE_DOCS_V1' },
+      create: {
+        providerCode: 'SHOPEE_FEE_SCHEDULE_DOCS_V1',
+        marketplaceId: shopeeFeeRuleMarketplaceId,
+        capability: 'FEE_RULES',
+        intervalMinutes: 1440, // diário — mesma cadência do Mercado Livre/Nuvemshop
+        // Mesma decisão de governança — e aqui ainda mais importante: a
+        // tabela vem de documentação de terceiro (OFFICIAL_DOCS), não de uma
+        // chamada à API da Shopee — precisa de confirmação humana antes de
+        // valer para qualquer cálculo real.
+        autoTrust: false,
+      },
+      update: {},
+    });
+  }
+
   console.log('Configurando schedule de sincronização da taxa de gateway da Nuvemshop...');
   const nuvemshopId = marketplacesByCode.get('NUVEMSHOP');
   if (nuvemshopId) {

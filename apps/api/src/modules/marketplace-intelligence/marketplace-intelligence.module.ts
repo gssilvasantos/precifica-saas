@@ -23,6 +23,7 @@ import { MercadoLivreListingProvider } from './infrastructure/providers/mercado-
 import { ShopeeApiClient } from './infrastructure/providers/shopee/shopee-api-client';
 import { ShopeeOrderProvider } from './infrastructure/providers/shopee/shopee-order.provider';
 import { ShopeeListingProvider } from './infrastructure/providers/shopee/shopee-listing.provider';
+import { ShopeeFeeRuleProvider } from './infrastructure/providers/shopee/shopee-fee-rule.provider';
 import { SyncSchedulerJob } from './infrastructure/scheduler/sync-scheduler.job';
 import { MercadoLivreChannelListingSyncService } from './application/mercado-livre-channel-listing-sync.service';
 import { MercadoLivreChannelListingSyncSchedulerJob } from './infrastructure/scheduler/mercado-livre-channel-listing-sync-scheduler.job';
@@ -156,6 +157,12 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // separada, reaproveita a MESMA conexão. Exportada abaixo para o futuro
     // módulo marketplace-publishing.
     ShopeeListingProvider,
+    // Fecha o segundo gap diagnosticado em 13/10/2026 (a pedido do Gui) — a
+    // Shopee tinha conexão/listagem funcionando mas nenhuma capacidade
+    // FEE_RULES (ao contrário do Mercado Livre, que já importava comissão
+    // real desde a Etapa 4). Ver racional completo e aviso de honestidade no
+    // próprio provider.
+    ShopeeFeeRuleProvider,
     // Fecha o gap diagnosticado em 03/10/2026 (a pedido do Gui) — mesmo
     // racional de MercadoLivreChannelListingSyncService/SchedulerJob acima,
     // mas sem emitir evento de reconciliação do radar de concorrência (ver
@@ -169,7 +176,12 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // nunca alterar MarketplaceProviderRegistry/RuleSyncOrchestrator.
     {
       provide: MARKETPLACE_PROVIDERS,
-      useFactory: (ml: MercadoLivreFeeRuleProvider, nuvemshop: NuvemshopFeeRuleProvider, nuvemshopPriceUpdate: NuvemshopPriceUpdateProvider) => [
+      useFactory: (
+        ml: MercadoLivreFeeRuleProvider,
+        nuvemshop: NuvemshopFeeRuleProvider,
+        nuvemshopPriceUpdate: NuvemshopPriceUpdateProvider,
+        shopeeFeeRule: ShopeeFeeRuleProvider,
+      ) => [
         ml,
         nuvemshop,
         // Push de preço (31/07/2026) — segunda capacidade da Nuvemshop
@@ -177,8 +189,10 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
         // classe separada pelo mesmo racional de MercadoLivreOrderProvider
         // etc.: uma capacidade por classe, mesmo canal.
         nuvemshopPriceUpdate,
+        // Shopee FEE_RULES (13/10/2026) — tabela OFFICIAL_DOCS, ver provider.
+        shopeeFeeRule,
       ],
-      inject: [MercadoLivreFeeRuleProvider, NuvemshopFeeRuleProvider, NuvemshopPriceUpdateProvider],
+      inject: [MercadoLivreFeeRuleProvider, NuvemshopFeeRuleProvider, NuvemshopPriceUpdateProvider, ShopeeFeeRuleProvider],
     },
 
     { provide: MARKETPLACE_REPOSITORY, useClass: PrismaMarketplaceRepository },

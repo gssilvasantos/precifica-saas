@@ -1,11 +1,15 @@
 import { Module } from '@nestjs/common';
 import { NuvemshopMarginSimulatorService } from './application/nuvemshop-margin-simulator.service';
+import { MercadoLivreMarginSimulatorService } from './application/mercado-livre-margin-simulator.service';
+import { ShopeeMarginSimulatorService } from './application/shopee-margin-simulator.service';
 import { CompetitorSignalListener } from './application/competitor-signal.listener';
 import { PackagingCostChangeListener } from './application/packaging-cost-change.listener';
 import { PricingDecisionService } from './application/pricing-decision.service';
 import { DefaultPricingStrategist } from './domain/default-pricing-strategist';
 import { PRICING_STRATEGIST } from './domain/pricing-strategist';
 import { NuvemshopMarginSimulatorController } from './interface/controllers/nuvemshop-margin-simulator.controller';
+import { MercadoLivreMarginSimulatorController } from './interface/controllers/mercado-livre-margin-simulator.controller';
+import { ShopeeMarginSimulatorController } from './interface/controllers/shopee-margin-simulator.controller';
 import { PricingDecisionController } from './interface/controllers/pricing-decision.controller';
 import { ApplyPricingDecisionController } from './interface/controllers/apply-pricing-decision.controller';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -59,9 +63,19 @@ import { TaxIntelligenceModule } from '../tax-intelligence/public-api';
     // Este módulo não conhece RBT12, anexo do Simples nem tabela de faixa.
     TaxIntelligenceModule,
   ],
-  controllers: [NuvemshopMarginSimulatorController, PricingDecisionController, ApplyPricingDecisionController],
+  controllers: [
+    NuvemshopMarginSimulatorController,
+    // Simuladores de margem de ML/Shopee (13/10/2026) — mesma forma do
+    // simulador da Nuvemshop, ver racional nos respectivos services.
+    MercadoLivreMarginSimulatorController,
+    ShopeeMarginSimulatorController,
+    PricingDecisionController,
+    ApplyPricingDecisionController,
+  ],
   providers: [
     NuvemshopMarginSimulatorService,
+    MercadoLivreMarginSimulatorService,
+    ShopeeMarginSimulatorService,
     CompetitorSignalListener,
     PackagingCostChangeListener,
     PricingDecisionService,

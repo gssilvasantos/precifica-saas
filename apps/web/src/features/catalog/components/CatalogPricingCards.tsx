@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { simulateNuvemshopMargin } from '../../pricing/api';
+import { simulateNuvemshopMargin, simulateMercadoLivreMargin, simulateShopeeMargin } from '../../pricing/api';
 import { CHANNELS } from '../../pricing/channels';
 import type { ChannelListing } from '../../channels/api';
 import type { Product } from '../api';
@@ -25,27 +25,64 @@ interface Props {
 export default function CatalogPricingCards({ product, listings }: Props) {
   const skuListings = listings.filter((l) => l.skuCode === product.skuCode);
   const nuvemshopListing = skuListings.find((l) => l.channelCode === 'NUVEMSHOP');
+  const mercadoLivreListing = skuListings.find((l) => l.channelCode === 'MERCADO_LIVRE');
+  const shopeeListing = skuListings.find((l) => l.channelCode === 'SHOPEE');
 
-  const simulateQuery = useQuery({
+  const nuvemshopQuery = useQuery({
     queryKey: ['nuvemshop-simulate-mini', product.skuCode],
     queryFn: () => simulateNuvemshopMargin({ skuCode: product.skuCode, installments: 1, receivingWindowDays: 0 }),
     enabled: !!nuvemshopListing,
     retry: false,
   });
 
-  const nuvemshopData: ChannelMiniPricingData | null = simulateQuery.data
-    ? {
-        price: simulateQuery.data.grossPrice,
-        custoTotal: simulateQuery.data.grossPrice - simulateQuery.data.netMargin,
-        marginPct: simulateQuery.data.netMarginPct,
-        lucroRs: simulateQuery.data.netMargin,
-      }
-    : null;
+  // Mercado Livre e Shopee (13/10/2026) — mesmo padrão de query da
+  // Nuvemshop acima, cada um com sua própria key/enabled, para um canal sem
+  // vínculo não disparar chamada nem aparecer como "calculando".
+  const mercadoLivreQuery = useQuery({
+    queryKey: ['mercado-livre-simulate-mini', product.skuCode],
+    queryFn: () => simulateMercadoLivreMargin({ skuCode: product.skuCode }),
+    enabled: !!mercadoLivreListing,
+    retry: false,
+  });
 
-  // Hoje só a Nuvemshop calcula de ponta a ponta (ChannelListing + regra de
-  // taxa de gateway) — mesmo racional de ProductPricingPage.tsx. Quando
-  // ML/Shopee tiverem o mesmo pipeline, entram aqui sem mudar esta estrutura.
-  const dataByChannel: Record<string, ChannelMiniPricingData | null> = { NUVEMSHOP: nuvemshopData };
+  const shopeeQuery = useQuery({
+    queryKey: ['shopee-simulate-mini', product.skuCode],
+    queryFn: () => simulateShopeeMargin({ skuCode: product.skuCode }),
+    enabled: !!shopeeListing,
+    retry: false,
+  });
+
+  const toMiniData = (data: { grossPrice: number; netMargin: number; netMarginPct: number } | undefined): ChannelMiniPricingData | null =>
+    data
+      ? {
+          price: data.grossPrice,
+          custoTotal: data.grossPrice - data.netMargin,
+          marginPct: data.netMarginPct,
+          lucroRs: data.netMargin,
+        }
+      : null;
+
+  const dataByChannel: Record<string, ChannelMiniPricingData | null> = {
+    NUVEMSHOP: toMiniData(nuvemshopQuery.data),
+    MERCADO_LIVRE: toMiniData(mercadoLivreQuery.data),
+    SHOPEE: toMiniData(shopeeQuery.data),
+  };
+
+  const loadingByChannel: Record<string, boolean> = {
+    NUVEMSHOP: nuvemshopQuery.isFetching,
+    MERCADO_LIVRE: mercadoLivreQuery.isFetching,
+    SHOPEE: shopeeQuery.isFetching,
+  };
+
+  // "sem regra validada" é um estado diferente de "canal não vinculado":
+  // o simulador respondeu, só não achou MarketplaceRule com status VALIDADA
+  // pra esse SKU ainda (ver feeRuleFound no backend) — normalmente porque a
+  // regra está PENDENTE_VALIDACAO em /governanca-marketplace.
+  const feeRuleMissingByChannel: Record<string, boolean> = {
+    NUVEMSHOP: nuvemshopQuery.data?.feeRuleFound === false,
+    MERCADO_LIVRE: mercadoLivreQuery.data?.feeRuleFound === false,
+    SHOPEE: shopeeQuery.data?.feeRuleFound === false,
+  };
 
   const bestChannelCode = Object.entries(dataByChannel)
     .filter((entry): entry is [string, ChannelMiniPricingData] => entry[1] !== null)
@@ -68,9 +105,15 @@ export default function CatalogPricingCards({ product, listings }: Props) {
           <ChannelPricingMiniCard
             channel={channel}
             isBestMargin={channel.code === bestChannelCode}
-            isLoading={channel.code === 'NUVEMSHOP' && simulateQuery.isFetching}
+            isLoading={loadingByChannel[channel.code] ?? false}
             data={dataByChannel[channel.code] ?? null}
-            disconnectedMessage={!channel.connected ? 'Aguardando integração — sem regra de taxa cadastrada' : undefined}
+            disconnectedMessage={
+              !channel.connected
+                ? 'Aguardando integração — sem regra de taxa cadastrada'
+                : feeRuleMissingByChannel[channel.code]
+                  ? 'Sem regra de comissão validada ainda — ver Governança de Marketplace'
+                  : undefined
+            }
           />
         </RevealItem>
       ))}
