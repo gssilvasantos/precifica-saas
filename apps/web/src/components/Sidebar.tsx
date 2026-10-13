@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutGrid,
@@ -178,13 +178,21 @@ export default function Sidebar({ isOpen, onClose }: Props) {
     return NAV_GROUPS.map((g) => g.id);
   });
 
-  // O grupo da rota atual nunca fica fechado: navegar por link direto ou
-  // recarregar a página não pode esconder onde o usuário está.
+  // O grupo da rota atual é aberto automaticamente quando a NAVEGAÇÃO muda
+  // de grupo (link direto, F5, clique em outro item) — mas só nesse momento.
+  // Antes isto dependia de `abertos` inteiro, então o próprio clique do
+  // usuário para FECHAR o grupo da página em que ele já está (ex.: Vendas,
+  // estando em /ads) mudava `abertos`, disparava o efeito de novo, via
+  // `grupoDaRotaAtual` continuar igual e reabria o grupo na hora — o botão
+  // "não fechava". Usar um ref com a última rota-grupo processada faz o
+  // efeito agir só na transição de rota, nunca como reação ao toggle manual.
+  const ultimoGrupoDaRotaRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (grupoDaRotaAtual && !abertos.includes(grupoDaRotaAtual)) {
-      setAbertos((atual) => [...atual, grupoDaRotaAtual]);
+    if (grupoDaRotaAtual && grupoDaRotaAtual !== ultimoGrupoDaRotaRef.current) {
+      setAbertos((atual) => (atual.includes(grupoDaRotaAtual) ? atual : [...atual, grupoDaRotaAtual]));
     }
-  }, [grupoDaRotaAtual, abertos]);
+    ultimoGrupoDaRotaRef.current = grupoDaRotaAtual;
+  }, [grupoDaRotaAtual]);
 
   useEffect(() => {
     try {
