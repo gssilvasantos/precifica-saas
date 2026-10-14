@@ -46,6 +46,12 @@ export interface FindBuyBoxTransitionsFilter {
 export interface BuyBoxStatusChangeRepository {
   create(data: BuyBoxStatusChangeCreateData): Promise<void>;
   findByTenant(filter: FindBuyBoxTransitionsFilter): Promise<BuyBoxStatusChangeRecord[]>;
+  // Retenção (ADR-0004, 14/10/2026) — varredura de manutenção cruzando
+  // todos os tenants por natureza (apaga por data, não por conta
+  // específica), chamada só pelo job de limpeza em background
+  // (BuyBoxStatusChangeRetentionCleanupJob). Retorna quantas linhas foram
+  // apagadas, para o job logar.
+  deleteOlderThan(cutoff: Date): Promise<number>;
 }
 
 export const BUY_BOX_STATUS_CHANGE_REPOSITORY = Symbol('BUY_BOX_STATUS_CHANGE_REPOSITORY');

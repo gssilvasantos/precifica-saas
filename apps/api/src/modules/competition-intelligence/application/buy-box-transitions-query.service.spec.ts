@@ -17,6 +17,10 @@ class FakeBuyBoxStatusChangeRepository implements BuyBoxStatusChangeRepository {
     this.lastFilter = filter;
     return this.records;
   }
+
+  async deleteOlderThan(): Promise<number> {
+    throw new Error('não usado neste teste');
+  }
 }
 
 describe('BuyBoxTransitionsQueryService', () => {

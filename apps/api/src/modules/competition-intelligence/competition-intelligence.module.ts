@@ -5,6 +5,7 @@ import { CompetitiveOpportunityReaderService } from './application/competitive-o
 import { MonitoredListingsAdminService } from './application/monitored-listings-admin.service';
 import { CompetitiveOpportunitiesQueryService } from './application/competitive-opportunities-query.service';
 import { BuyBoxTransitionsQueryService } from './application/buy-box-transitions-query.service';
+import { BuyBoxStatusChangeRetentionService } from './application/buy-box-status-change-retention.service';
 import { MercadoLivreMonitoringAutoRegistrationService } from './application/mercado-livre-monitoring-auto-registration.service';
 import { MercadoLivreChannelListingSyncedListener } from './application/mercado-livre-channel-listing-synced.listener';
 
@@ -16,6 +17,7 @@ import { ManualSheetRadar } from './infrastructure/radars/manual-sheet-radar';
 import { MercadoLivreCatalogRadar } from './infrastructure/radars/mercado-livre-catalog-radar';
 import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marketplace-intelligence.module';
 import { CompetitionMonitorSchedulerJob } from './infrastructure/scheduler/competition-monitor-scheduler.job';
+import { BuyBoxStatusChangeRetentionCleanupJob } from './infrastructure/scheduler/buy-box-status-change-retention-cleanup.job';
 
 import { CompetitiveOpportunitiesController } from './interface/controllers/competitive-opportunities.controller';
 
@@ -46,7 +48,9 @@ import { ErpIntegrationModule } from '../erp-integration/erp-integration.module'
     MonitoredListingsAdminService,
     CompetitiveOpportunitiesQueryService,
     BuyBoxTransitionsQueryService,
+    BuyBoxStatusChangeRetentionService,
     CompetitionMonitorSchedulerJob,
+    BuyBoxStatusChangeRetentionCleanupJob,
 
     // Ativação do radar de catálogo para tenants reais (18/09/2026, "Só
     // ligar o radar") — assina CHANNEL_LISTING_EVENTS.MERCADO_LIVRE_SYNCED

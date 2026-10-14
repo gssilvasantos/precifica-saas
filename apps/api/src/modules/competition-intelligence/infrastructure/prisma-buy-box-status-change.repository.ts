@@ -29,6 +29,13 @@ export class PrismaBuyBoxStatusChangeRepository implements BuyBoxStatusChangeRep
     return records.map((r) => this.toDomain(r));
   }
 
+  async deleteOlderThan(cutoff: Date): Promise<number> {
+    const { count } = await this.prisma.competitiveOpportunityStatusChange.deleteMany({
+      where: { detectedAt: { lt: cutoff } },
+    });
+    return count;
+  }
+
   private toDomain(record: {
     id: string;
     tenantId: string;
