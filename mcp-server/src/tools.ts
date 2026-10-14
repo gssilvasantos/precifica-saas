@@ -109,6 +109,30 @@ export function registerKynetiTools(server: McpServer, client: KyneteClient, wri
   );
 
   server.registerTool(
+    'kyneti_list_buy_box_transitions',
+    {
+      description:
+        'Histórico de TRANSIÇÕES de buy box (quando um SKU passou a ganhar/perder, e de quem) — diferente de kyneti_list_competitive_opportunities, que só traz o estado atual. newStatus=LOSING responde "quais SKUs passaram a perder recentemente". Fonte: GET /competition-intelligence/buy-box-transitions.',
+      inputSchema: {
+        newStatus: z
+          .enum(['WINNING', 'LOSING', 'UNKNOWN'])
+          .optional()
+          .describe('Filtra pelo status PARA ONDE a transição foi — ex.: LOSING = só quem passou a perder'),
+        skuCode: z.string().optional().describe('Restringe a um SKU específico'),
+        detectedSince: z.string().optional().describe('ISO 8601 — só transições detectadas a partir deste instante, ex.: 2026-10-13T00:00:00Z'),
+        limit: z.number().int().positive().max(500).optional().describe('Padrão 100, teto 500 (aplicado no servidor)'),
+      },
+    },
+    async (params) => {
+      try {
+        return toResult(await client.get('/competition-intelligence/buy-box-transitions', params));
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
     'kyneti_list_orders',
     {
       description: 'Lista pedidos com filtros de canal, status e período (paginado). Fonte: GET /orders.',

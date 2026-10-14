@@ -64,6 +64,8 @@ export const COMPETITION_EVENTS = {
 
 `PriceChangedEvent`/`NewCompetitorDetectedEvent` continuam log-only (nenhuma regra de "quando reagir" foi pedida para eles). `BuyBoxLostEvent` deixou de ser stub: `CompetitorSignalListener.handleBuyBoxLost` chama `PricingDecisionService.decideAndMaybeApply` (Pricing Intelligence) — calcula a decisão sempre, e só a **aplica** de fato (via `PRICE_UPDATE_DISPATCHER`) se `Product.autoRepricingEnabled = true`; para os demais produtos, fica log-only, mesmo comportamento de antes. Ver `docs/pricing-intelligence-architecture.md` para o motor de decisão.
 
+"Log-only" aqui descreve só a ausência de reação automática — não a ausência de registro durável. Desde 14/10/2026, **toda** transição de `buyBoxStatus` (não só `-> LOSING`) também é persistida em `CompetitiveOpportunityStatusChange` pelo próprio orquestrador, no mesmo ponto onde esses eventos são emitidos (ver seção 5 e seção 11) — então "quais SKUs passaram a perder o buy box desde ontem" é uma consulta, não algo que só existia em log de aplicação.
+
 ## 4. Onde fica a lógica de "Oportunidade" (e a decisão de reagir)
 
 Duas coisas diferentes, deliberadamente em lugares diferentes:
@@ -89,13 +91,14 @@ export function calculateOpportunity(input: {
 
 ## 5. Persistência — histórico vs. read-model, deliberadamente separados
 
-Três tabelas, três papéis (schema `competition_intelligence`):
+Quatro tabelas, quatro papéis (schema `competition_intelligence`):
 
 | Tabela | Papel | Quem lê |
 |---|---|---|
 | `MonitoredCompetitorListing` | Configuração: o que monitorar (SKU, concorrente, radar, canal nosso opcional) | Orquestrador |
 | `CompetitorOfferSnapshot` | **Histórico append-only** — uma linha por coleta. Índice por `(tenantId, skuCode, collectedAt)` | Futuro Analytics (série temporal) |
 | `CompetitiveOpportunity` | **Read-model enxuto** — uma linha por `(tenantId, skuCode)`, sempre a última leitura processada (upsert) | Pricing Engine, via porta `CompetitorSnapshotReader` |
+| `CompetitiveOpportunityStatusChange` | **Histórico append-only, só de transições** de `buyBoxStatus` — uma linha por mudança (não por coleta). Ver seção 11 | `GET /competition-intelligence/buy-box-transitions`, MCP `kyneti_list_buy_box_transitions` |
 
 Esta é a resposta direta à pergunta "como desenhar isso para o Analytics consumir sem afetar a performance do Pricing Engine": são tabelas **fisicamente diferentes**, não a mesma tabela com dois padrões de acesso. O Pricing Engine nunca faz `SELECT` no histórico — ele consulta `CompetitiveOpportunity` por `(tenantId, skuCode)`, O(1), sempre a última leitura. O histórico completo (que cresce sem limite e serve consultas analíticas de range/série temporal) fica isolado em `CompetitorOfferSnapshot`, sem nenhum índice ou acesso otimizado para lookup pontual — ele não precisa disso, porque ninguém no caminho de precificação o lê.
 
@@ -141,6 +144,25 @@ model CompetitiveOpportunity {
   @@id([tenantId, skuCode])
   @@schema("competition_intelligence")
 }
+
+model CompetitiveOpportunityStatusChange {
+  id                  String        @id @default(uuid())
+  tenantId            String
+  skuCode             String
+  channelCode         String?
+  previousStatus      BuyBoxStatus? // nulo = primeira leitura processada, sem transição anterior
+  newStatus           BuyBoxStatus
+  ourPrice            Decimal?
+  bestCompetitorPrice Decimal
+  bestCompetitorLabel String
+  priceGapPct         Float
+  rank                Int?
+  detectedAt          DateTime
+  createdAt           DateTime      @default(now())
+  @@index([tenantId, detectedAt])
+  @@index([tenantId, skuCode, detectedAt])
+  @@schema("competition_intelligence")
+}
 ```
 
 ## 6. Porta de leitura consumida por outros módulos
@@ -175,25 +197,30 @@ shared/contracts/
 modules/competition-intelligence/
   domain/
     opportunity-calculator.ts          # cálculo puro: gap, ranking, buy box
+    status-change-recorder.ts          # cálculo puro: o que conta como transição digna de registro
     events/competition-events.ts       # nomes de evento + tipos de payload
   application/
     ports/
       monitored-listing-repository.port.ts
       competitor-offer-snapshot-repository.port.ts
       competitive-opportunity-repository.port.ts
+      buy-box-status-change-repository.port.ts
     competition-radar-registry.service.ts   # + token COMPETITION_RADARS
     competition-monitor-orchestrator.service.ts
     competitive-opportunity-reader.service.ts   # implementa a porta compartilhada
     monitored-listings-admin.service.ts
     competitive-opportunities-query.service.ts
+    buy-box-transitions-query.service.ts
   infrastructure/
     prisma-monitored-listing.repository.ts
     prisma-competitor-offer-snapshot.repository.ts
     prisma-competitive-opportunity.repository.ts
+    prisma-buy-box-status-change.repository.ts
     radars/manual-sheet-radar.ts
     scheduler/competition-monitor-scheduler.job.ts
   interface/
     dto/create-monitored-listing.dto.ts
+    dto/list-buy-box-transitions-query.dto.ts
     controllers/competitive-opportunities.controller.ts
   competition-intelligence.module.ts
 
@@ -264,6 +291,30 @@ modules/competition-intelligence/
 - Anúncio sem SKU cadastrado no Mercado Livre (nem `seller_custom_field` nem atributo `SELLER_SKU`) é descartado do sync, não vinculado — não há como associá-lo a um `Product` do Kyneti por SKU sem inventar um.
 - `MercadoLivreMonitoringAutoRegistrationService.reconcile()` só enxerga `MonitoredCompetitorListing` **ativos** (`findAllActiveByTenant`) — um listing que o usuário desativou manualmente pela tela "Radar de Concorrência" é recriado no próximo sync, como se nunca tivesse sido desligado. Resolver isso (silenciar um anúncio específico permanentemente) é uma decisão de produto separada, não implementada aqui.
 - Igual à Nuvemshop, os dois novos schedulers (`MercadoLivreChannelListingSyncSchedulerJob`, e o `CompetitionMonitorSchedulerJob` que já existia) rodam sob `TenantContextStore.runAsService()` (bypass de RLS) do início ao fim do ciclo, inclusive os listeners de evento disparados durante ele — mesmo padrão já aceito e documentado nos jobs irmãos (`NuvemshopSyncSchedulerJob`, `competition-monitor-scheduler.job.ts`); hardening futuro não bloqueante, não uma exceção nova introduzida por esta fatia.
+
+## 11. Histórico de transições de buy box (`CompetitiveOpportunityStatusChange`, 14/10/2026)
+
+**Motivação:** `CompetitiveOpportunity` é upsert — só a última leitura. `BuyBoxLostEvent` (seção 3) existe, mas até esta data só virava log de aplicação. Não dava para responder, depois do fato, "quais SKUs passaram a perder o buy box desde ontem" sem grep em log — pergunta real, feita pelo usuário a partir de uma notificação do Mercado Livre.
+
+**Onde grava:** `CompetitionMonitorOrchestrator.recordStatusChangeIfAny()`, chamado logo após o upsert de `CompetitiveOpportunity` (mesmo `detectedAt`), antes de `emitDiffEvents`. A regra de "o que conta como transição" é pura (`domain/status-change-recorder.ts`, `buildStatusChangeRecord`): grava sempre que `newStatus !== previousStatus`, incluindo a primeira leitura processável (`previousStatus = null`); não grava manutenção do mesmo status. Cobre **toda** transição (`WINNING -> LOSING`, `LOSING -> WINNING`, envolvendo `UNKNOWN`), não só `-> LOSING` — mais barato gravar tudo do que decidir depois que faltou o caso de recuperação. Falha ao gravar o histórico é capturada e logada, nunca derruba o pipeline principal (o upsert de `CompetitiveOpportunity`, que é o que o Pricing Engine depende, já aconteceu antes).
+
+**Contrato HTTP:**
+
+| | |
+|---|---|
+| Rota | `GET /competition-intelligence/buy-box-transitions` |
+| Autenticação | `JwtAuthGuard` + `RolesGuard` + `ModuleAccessGuard` (`ModuleCode.CATALOG`) — mesmo guard de `/opportunities`, qualquer papel |
+| Autorização | `tenantId` vem do token (`CurrentUser`), nunca do cliente; RLS reforça no banco |
+| Query params | `newStatus?: WINNING\|LOSING\|UNKNOWN`, `skuCode?: string`, `detectedSince?: ISO 8601`, `limit?: number` (padrão 100, teto 500, aplicado no servidor em `BuyBoxTransitionsQueryService` — ver `.claude/rules/backend.md` "Limites e proteção") |
+| Saída | Array de `BuyBoxStatusChangeRecord` (ver `application/ports/buy-box-status-change-repository.port.ts`), mais recente primeiro |
+| Erros | 401/403 dos guards padrão; `400` do `ValidationPipe` global para query param inválido (ex.: `newStatus` fora do enum) |
+| Paginação | Sem cursor — só `limit` + `detectedSince` como corte. Suficiente para o volume atual (consulta pontual, não dashboard paginado); se isso virar tela de uso diário, vale cursor de verdade |
+
+**MCP:** `kyneti_list_buy_box_transitions` (`mcp-server/src/tools.ts`), mesmos parâmetros do endpoint. `newStatus=LOSING` é a consulta que responde diretamente "quais SKUs passaram a perder".
+
+**Limitação conhecida, registrada e não resolvida nesta fatia:** é uma tabela de evento/log (`competitive_opportunity_status_changes`) sem política de retenção definida — `.claude/rules/database.md` ("Auditoria e histórico") exige isso **antes** de a tabela crescer. Cresce no máximo uma linha por transição real (não por coleta, como `CompetitorOfferSnapshot`), o que deve manter o volume baixo no curto prazo, mas não há TTL, archival nem rotina de limpeza implementados. Revisitar se o volume de monitoramento crescer muito (mesmo "revisitar se crescer" já registrado para `CompetitionMonitorOrchestrator.runAll()`, seção 12).
+
+**Não testado contra banco real:** sem Postgres descartável disponível neste ambiente (sem Docker local funcional; criação de branch de desenvolvimento do Supabase foi cancelada — provavelmente exige confirmação de custo não disponível aqui), a migration foi gerada com `prisma migrate diff` (schema-to-schema, determinístico, sem necessidade de banco) e validada com `prisma validate` + `prisma generate`, mas **nunca aplicada** a um Postgres de verdade. `npm test`, `npm run typecheck` e `npm run lint` rodaram limpos (ver relatório da tarefa). Antes de `prisma migrate deploy` em produção: aplicar primeiro em banco descartável ou branch do Supabase, confirmar que a policy de RLS funciona (um tenant não lê transição de outro) e só então aplicar o arquivo RLS manual.
 
 ## 12. Simplificações conscientes da primeira fatia (histórico, ainda válidas)
 

@@ -16,6 +16,10 @@ import {
   CompetitiveOpportunityRecord,
   CompetitiveOpportunityRepository,
 } from './ports/competitive-opportunity-repository.port';
+import {
+  BUY_BOX_STATUS_CHANGE_REPOSITORY,
+  BuyBoxStatusChangeRepository,
+} from './ports/buy-box-status-change-repository.port';
 import { CHANNEL_LISTING_READER } from '../../../shared/contracts/tokens';
 import { ChannelListingReader } from '../../../shared/contracts/channel-listing-reader.port';
 import {
@@ -27,6 +31,7 @@ import {
   ProviderHealthRepository,
 } from '../../../shared/sync-ops/ports/provider-health-repository.port';
 import { calculateOpportunity, InvalidOpportunityInputError, OpportunityResult } from '../domain/opportunity-calculator';
+import { buildStatusChangeRecord } from '../domain/status-change-recorder';
 import { COMPETITION_EVENTS } from '../domain/events/competition-events';
 
 export const PROVIDER_CODE = 'COMPETITION_RADAR_MONITOR';
@@ -52,6 +57,7 @@ export class CompetitionMonitorOrchestrator {
     @Inject(MONITORED_LISTING_REPOSITORY) private readonly listings: MonitoredListingRepository,
     @Inject(COMPETITOR_OFFER_SNAPSHOT_REPOSITORY) private readonly snapshots: CompetitorOfferSnapshotRepository,
     @Inject(COMPETITIVE_OPPORTUNITY_REPOSITORY) private readonly opportunities: CompetitiveOpportunityRepository,
+    @Inject(BUY_BOX_STATUS_CHANGE_REPOSITORY) private readonly statusChanges: BuyBoxStatusChangeRepository,
     @Inject(CHANNEL_LISTING_READER) private readonly channelListings: ChannelListingReader,
     @Inject(PROVIDER_SYNC_LOG_REPOSITORY) private readonly syncLogs: ProviderSyncLogRepository,
     @Inject(PROVIDER_HEALTH_REPOSITORY) private readonly health: ProviderHealthRepository,
@@ -149,6 +155,7 @@ export class CompetitionMonitorOrchestrator {
       detectedAt,
     });
 
+    await this.recordStatusChangeIfAny(listing, previous, result, ourPrice, detectedAt);
     this.emitDiffEvents(listing, previous, result, ourPrice, detectedAt);
     return true;
   }
@@ -157,6 +164,43 @@ export class CompetitionMonitorOrchestrator {
     if (!listing.channelCode) return null; // sem canal vinculado — não inventa preço (buyBoxStatus fica UNKNOWN)
     const ourListing = await this.channelListings.findBySku(listing.tenantId, listing.channelCode, listing.skuCode);
     return ourListing?.currentPrice ?? null;
+  }
+
+  // Grava em CompetitiveOpportunityStatusChange sempre que buildStatusChangeRecord
+  // (regra pura, domain/status-change-recorder.ts) identifica uma transição —
+  // é o que sustenta "quais SKUs passaram a perder o buy box desde ontem"
+  // depois do fato, sem depender de log. Roda sempre, independente de haver
+  // reação automática configurada (não é o mesmo gate de BUY_BOX_LOST, que só
+  // cobre -> LOSING; aqui registramos toda mudança de status).
+  private async recordStatusChangeIfAny(
+    listing: MonitoredListing,
+    previous: CompetitiveOpportunityRecord | null,
+    current: OpportunityResult,
+    ourPrice: number | null,
+    detectedAt: Date,
+  ): Promise<void> {
+    const record = buildStatusChangeRecord({
+      tenantId: listing.tenantId,
+      skuCode: listing.skuCode,
+      channelCode: listing.channelCode ?? null,
+      previousStatus: previous?.buyBoxStatus ?? null,
+      result: current,
+      ourPrice,
+      detectedAt,
+    });
+    if (!record) return;
+
+    try {
+      await this.statusChanges.create(record);
+    } catch (error) {
+      // Falha ao gravar o histórico de transição NÃO pode derrubar o
+      // pipeline principal (upsert de CompetitiveOpportunity já aconteceu) —
+      // loga e segue, mesma disciplina do catch em runAll() para falha por
+      // listing individual.
+      this.logger.error(
+        `Falha ao gravar transição de buy box para SKU ${listing.skuCode} (tenant ${listing.tenantId}): ${(error as Error).message}`,
+      );
+    }
   }
 
   private emitDiffEvents(

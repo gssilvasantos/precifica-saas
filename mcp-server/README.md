@@ -104,6 +104,7 @@ uma camada extra na frente. Vamos confirmar isso juntos depois do deploy.
 | `kyneti_get_pricing_decision` | `GET /pricing-intelligence/decisions/:skuCode` | Recomendação de preço calculada para um SKU |
 | `kyneti_list_competitive_opportunities` | `GET /competition-intelligence/opportunities` | Oportunidades de precificação por concorrência |
 | `kyneti_list_monitored_listings` | `GET /competition-intelligence/monitored-listings` | Anúncios de concorrentes monitorados |
+| `kyneti_list_buy_box_transitions` | `GET /competition-intelligence/buy-box-transitions` | Histórico de transições de buy box (quando um SKU passou a ganhar/perder) |
 | `kyneti_list_orders` | `GET /orders` | Pedidos, com filtro de canal/status/período |
 | `kyneti_order_status_counts` | `GET /orders/status-counts` | Contagem de pedidos por status |
 | `kyneti_get_order_margin` | `GET /orders/:id/margin` | Margem real de um pedido |

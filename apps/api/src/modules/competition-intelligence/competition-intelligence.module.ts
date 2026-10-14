@@ -4,12 +4,14 @@ import { CompetitionMonitorOrchestrator } from './application/competition-monito
 import { CompetitiveOpportunityReaderService } from './application/competitive-opportunity-reader.service';
 import { MonitoredListingsAdminService } from './application/monitored-listings-admin.service';
 import { CompetitiveOpportunitiesQueryService } from './application/competitive-opportunities-query.service';
+import { BuyBoxTransitionsQueryService } from './application/buy-box-transitions-query.service';
 import { MercadoLivreMonitoringAutoRegistrationService } from './application/mercado-livre-monitoring-auto-registration.service';
 import { MercadoLivreChannelListingSyncedListener } from './application/mercado-livre-channel-listing-synced.listener';
 
 import { PrismaMonitoredListingRepository } from './infrastructure/prisma-monitored-listing.repository';
 import { PrismaCompetitorOfferSnapshotRepository } from './infrastructure/prisma-competitor-offer-snapshot.repository';
 import { PrismaCompetitiveOpportunityRepository } from './infrastructure/prisma-competitive-opportunity.repository';
+import { PrismaBuyBoxStatusChangeRepository } from './infrastructure/prisma-buy-box-status-change.repository';
 import { ManualSheetRadar } from './infrastructure/radars/manual-sheet-radar';
 import { MercadoLivreCatalogRadar } from './infrastructure/radars/mercado-livre-catalog-radar';
 import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marketplace-intelligence.module';
@@ -20,6 +22,7 @@ import { CompetitiveOpportunitiesController } from './interface/controllers/comp
 import { MONITORED_LISTING_REPOSITORY } from './application/ports/monitored-listing-repository.port';
 import { COMPETITOR_OFFER_SNAPSHOT_REPOSITORY } from './application/ports/competitor-offer-snapshot-repository.port';
 import { COMPETITIVE_OPPORTUNITY_REPOSITORY } from './application/ports/competitive-opportunity-repository.port';
+import { BUY_BOX_STATUS_CHANGE_REPOSITORY } from './application/ports/buy-box-status-change-repository.port';
 import { COMPETITOR_SNAPSHOT_READER } from '../../shared/contracts/tokens';
 import { SyncOpsModule } from '../../shared/sync-ops/sync-ops.module';
 import { ErpIntegrationModule } from '../erp-integration/erp-integration.module';
@@ -42,6 +45,7 @@ import { ErpIntegrationModule } from '../erp-integration/erp-integration.module'
     CompetitiveOpportunityReaderService,
     MonitoredListingsAdminService,
     CompetitiveOpportunitiesQueryService,
+    BuyBoxTransitionsQueryService,
     CompetitionMonitorSchedulerJob,
 
     // Ativação do radar de catálogo para tenants reais (18/09/2026, "Só
@@ -72,6 +76,7 @@ import { ErpIntegrationModule } from '../erp-integration/erp-integration.module'
     { provide: MONITORED_LISTING_REPOSITORY, useClass: PrismaMonitoredListingRepository },
     { provide: COMPETITOR_OFFER_SNAPSHOT_REPOSITORY, useClass: PrismaCompetitorOfferSnapshotRepository },
     { provide: COMPETITIVE_OPPORTUNITY_REPOSITORY, useClass: PrismaCompetitiveOpportunityRepository },
+    { provide: BUY_BOX_STATUS_CHANGE_REPOSITORY, useClass: PrismaBuyBoxStatusChangeRepository },
 
     // Exporta a PORTA, nunca a classe concreta — Pricing Intelligence só
     // conhece COMPETITOR_SNAPSHOT_READER + a interface CompetitorSnapshotReader.

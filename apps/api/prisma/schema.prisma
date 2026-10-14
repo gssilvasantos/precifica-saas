@@ -1267,7 +1267,7 @@ model ChannelListing {
 // ============================================================================
 // Competition Intelligence — radar de concorrência (docs/competition-intelligence-architecture.md).
 //
-// Três tabelas, cada uma com um papel:
+// Quatro tabelas, cada uma com um papel:
 // 1. MonitoredCompetitorListing — CONFIGURAÇÃO: qual SKU nosso deve ser
 //    comparado com qual oferta de concorrente, e por qual radar. Não é
 //    histórico nem read-model, é o "o que monitorar".
@@ -1281,6 +1281,9 @@ model ChannelListing {
 //    É a ÚNICA tabela deste módulo que o Pricing Engine consulta — O(1) por
 //    SKU, nunca um scan de histórico. Atualizada pelo orquestrador sempre
 //    que um novo snapshot é processado.
+// 4. CompetitiveOpportunityStatusChange — HISTÓRICO curto, append-only, só
+//    de TRANSIÇÕES de buyBoxStatus. Ver comentário na própria model, logo
+//    abaixo da definição de CompetitiveOpportunity.
 // ============================================================================
 
 enum CompetitionRadarSourceType {
@@ -1359,6 +1362,37 @@ model CompetitiveOpportunity {
 
   @@id([tenantId, skuCode])
   @@map("competitive_opportunities")
+  @@schema("competition_intelligence")
+}
+
+// 4. CompetitiveOpportunityStatusChange — HISTÓRICO curto, append-only, só de
+//    TRANSIÇÕES de buyBoxStatus (não de toda leitura — isso já é
+//    CompetitorOfferSnapshot). Existe porque CompetitiveOpportunity é upsert
+//    (só a última leitura) e o evento COMPETITION_EVENTS.BUY_BOX_LOST, hoje,
+//    só vira log — não dá pra responder "quais SKUs passaram a perder o buy
+//    box nas últimas 24h" depois do fato sem isso. Escrita pelo mesmo
+//    orquestrador que já faz o upsert de CompetitiveOpportunity, no mesmo
+//    ponto onde emitDiffEvents já detecta a transição.
+model CompetitiveOpportunityStatusChange {
+  id                  String        @id @default(uuid())
+  tenantId            String
+  skuCode             String
+  channelCode         String?
+  previousStatus      BuyBoxStatus? // nulo = primeira leitura processada para este SKU, sem transição anterior
+  newStatus           BuyBoxStatus
+  ourPrice            Decimal?      @db.Decimal(12, 2)
+  bestCompetitorPrice Decimal       @db.Decimal(12, 2)
+  bestCompetitorLabel String
+  priceGapPct         Float
+  rank                Int?
+  detectedAt          DateTime // mesmo instante do CompetitiveOpportunity.detectedAt que gerou esta transição
+  createdAt           DateTime      @default(now())
+
+  // Consulta típica: transições recentes de um tenant, mais recentes primeiro;
+  // e "só quem virou LOSING" via filtro em newStatus na mesma consulta.
+  @@index([tenantId, detectedAt])
+  @@index([tenantId, skuCode, detectedAt])
+  @@map("competitive_opportunity_status_changes")
   @@schema("competition_intelligence")
 }
 

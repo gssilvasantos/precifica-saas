@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import {
   JwtAuthGuard,
   RolesGuard,
@@ -12,8 +12,10 @@ import {
 } from '../../../identity-access/public-api';
 import { MonitoredListingsAdminService } from '../../application/monitored-listings-admin.service';
 import { CompetitiveOpportunitiesQueryService } from '../../application/competitive-opportunities-query.service';
+import { BuyBoxTransitionsQueryService } from '../../application/buy-box-transitions-query.service';
 import { CompetitionMonitorOrchestrator } from '../../application/competition-monitor-orchestrator.service';
 import { CreateMonitoredListingDto } from '../dto/create-monitored-listing.dto';
+import { ListBuyBoxTransitionsQueryDto } from '../dto/list-buy-box-transitions-query.dto';
 
 // Gate de módulo: CATALOG — radar de preço de concorrência alimenta decisão
 // de precificação do produto (mesma tela de Produtos).
@@ -24,12 +26,21 @@ export class CompetitiveOpportunitiesController {
   constructor(
     private readonly listingsAdmin: MonitoredListingsAdminService,
     private readonly opportunities: CompetitiveOpportunitiesQueryService,
+    private readonly transitions: BuyBoxTransitionsQueryService,
     private readonly orchestrator: CompetitionMonitorOrchestrator,
   ) {}
 
   @Get('opportunities')
   findOpportunities(@CurrentUser() user: AuthenticatedUser) {
     return this.opportunities.findAllByTenant(user.tenantId);
+  }
+
+  // Histórico de TRANSIÇÕES de buy box (quem passou a ganhar/perder, e
+  // quando) — diferente de /opportunities, que só traz o estado atual.
+  // newStatus=LOSING responde "quais SKUs passaram a perder o buy box".
+  @Get('buy-box-transitions')
+  findBuyBoxTransitions(@CurrentUser() user: AuthenticatedUser, @Query() query: ListBuyBoxTransitionsQueryDto) {
+    return this.transitions.findByTenant({ tenantId: user.tenantId, ...query });
   }
 
   @Get('monitored-listings')
