@@ -5,7 +5,7 @@ import {
   RECEIVABLE_RECORD_REPOSITORY,
   ReceivableRecordRepository,
 } from './ports/receivable-record-repository.port';
-import { SettlementFileFormat } from '../../../shared/contracts/settlement-report-parser.contract';
+import { RawSettlementEntry, SettlementFileFormat } from '../../../shared/contracts/settlement-report-parser.contract';
 import { FINANCIAL_EVENTS } from '../domain/financial-events';
 
 // Resultado de negócio, não exceção — mesma filosofia do PriceUpdateDispatcher
@@ -20,10 +20,22 @@ export interface ReconciliationResult {
 }
 
 // Único ponto que marca um ReceivableRecord como PAID — casa cada
-// RawSettlementEntry (já normalizado pelo SettlementReportParser certo,
-// resolvido via SettlementParserRegistry) contra a tabela ReceivableRecord
-// pela chave (tenantId, marketplaceSource, externalReference), a mesma
-// desenhada no índice @@index([tenantId, marketplaceSource, externalReference]).
+// RawSettlementEntry contra a tabela ReceivableRecord pela chave
+// (tenantId, marketplaceSource, externalReference), a mesma desenhada no
+// índice @@index([tenantId, marketplaceSource, externalReference]).
+//
+// Dois CAMINHOS alimentam RawSettlementEntry[], mesma lógica de match para
+// os dois (applyEntries, abaixo) — nunca duplicada:
+// 1. `reconcile()` — upload manual de arquivo (CSV/JSON), via
+//    SettlementReportParser resolvido por SettlementParserRegistry. Único
+//    caminho até 13/10/2026.
+// 2. `reconcileEntries()` — dado já estruturado, vindo de uma chamada
+//    autenticada à API do canal (ver PaymentReconciliationCapableProvider,
+//    shared/contracts/marketplace-provider.contract.ts, e
+//    ChannelPaymentReconciliationOrchestrator). Adicionado para fechar o
+//    gap documentado no comentário de SettlementImportController: "um
+//    futuro job/webhook por canal chamaria ReceivableReconciliationService
+//    no mesmo lugar" — este é esse lugar.
 @Injectable()
 export class ReceivableReconciliationService {
   private readonly logger = new Logger(ReceivableReconciliationService.name);
@@ -47,6 +59,33 @@ export class ReceivableReconciliationService {
     }
 
     const entries = parser.parse(fileContent, format);
+    const result = await this.applyEntries(tenantId, marketplaceCode, entries);
+    this.logger.log(
+      `Reconciliação (arquivo) ${marketplaceCode} (tenant ${tenantId}): ${result.matched} casados, ${result.alreadyReconciled} já reconciliados antes, ${result.unmatchedReferences.length} sem match.`,
+    );
+    return result;
+  }
+
+  // Caminho webhook/API (13/10/2026) — entries já vêm normalizadas pelo
+  // PROVIDER do canal (ex.: MercadoLivreChannelPaymentProvider), nunca de um
+  // parser de arquivo. Mesma idempotência/mesmo evento de `reconcile()`.
+  async reconcileEntries(
+    tenantId: string,
+    marketplaceCode: string,
+    entries: RawSettlementEntry[],
+  ): Promise<ReconciliationResult> {
+    const result = await this.applyEntries(tenantId, marketplaceCode, entries);
+    this.logger.log(
+      `Reconciliação (API) ${marketplaceCode} (tenant ${tenantId}): ${result.matched} casados, ${result.alreadyReconciled} já reconciliados antes, ${result.unmatchedReferences.length} sem match.`,
+    );
+    return result;
+  }
+
+  private async applyEntries(
+    tenantId: string,
+    marketplaceCode: string,
+    entries: RawSettlementEntry[],
+  ): Promise<ReconciliationResult> {
     let matched = 0;
     let alreadyReconciled = 0;
     const unmatchedReferences: string[] = [];
@@ -63,8 +102,9 @@ export class ReceivableReconciliationService {
         continue;
       }
 
-      // Idempotente: reimportar o mesmo arquivo (ou um arquivo sobreposto)
-      // não reprocessa nem reemite o evento para um repasse já reconciliado.
+      // Idempotente: reimportar o mesmo arquivo/reexecutar a mesma consulta
+      // de API (ou uma janela sobreposta) não reprocessa nem reemite o
+      // evento para um repasse já reconciliado.
       if (receivable.status === 'PAID') {
         alreadyReconciled++;
         continue;
@@ -80,10 +120,6 @@ export class ReceivableReconciliationService {
       });
       matched++;
     }
-
-    this.logger.log(
-      `Reconciliação ${marketplaceCode} (tenant ${tenantId}): ${matched} casados, ${alreadyReconciled} já reconciliados antes, ${unmatchedReferences.length} sem match.`,
-    );
 
     return { matched, alreadyReconciled, unmatchedReferences };
   }

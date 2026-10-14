@@ -19,6 +19,7 @@ import { MercadoLivreApiClient } from './infrastructure/providers/mercado-livre/
 import { MercadoLivreFeeRuleProvider } from './infrastructure/providers/mercado-livre/mercado-livre-fee-rule.provider';
 import { MercadoLivreOrderProvider } from './infrastructure/providers/mercado-livre/mercado-livre-order.provider';
 import { MercadoLivreAdsProvider } from './infrastructure/providers/mercado-livre/mercado-livre-ads.provider';
+import { MercadoLivreChannelPaymentProvider } from './infrastructure/providers/mercado-livre/mercado-livre-channel-payment.provider';
 import { MercadoLivreListingProvider } from './infrastructure/providers/mercado-livre/mercado-livre-listing.provider';
 import { ShopeeApiClient } from './infrastructure/providers/shopee/shopee-api-client';
 import { ShopeeOrderProvider } from './infrastructure/providers/shopee/shopee-order.provider';
@@ -110,6 +111,12 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     // MercadoLivreAdsProvider: classe separada, reaproveita a MESMA conexão
     // OAuth2. Exportada abaixo para o futuro módulo marketplace-publishing.
     MercadoLivreListingProvider,
+    // Conciliação por canal (13/10/2026, a pedido do Gui) — sexta
+    // capacidade do Mercado Livre (PAYMENT_RECONCILIATION), mesmo racional
+    // de MercadoLivreOrderProvider: classe separada, reaproveita a MESMA
+    // conexão OAuth2. Exportada abaixo para o módulo Financial Intelligence
+    // registrar em PAYMENT_RECONCILIATION_PROVIDERS.
+    MercadoLivreChannelPaymentProvider,
     // Sprint 22 — OAuth2 real por vendedor (docs/auth-security.md). Injetada
     // diretamente em MercadoLivreOrderProvider/MercadoLivreAdsProvider (mesmo
     // módulo, sem precisar de token em shared/contracts) e usada pelo
@@ -228,6 +235,9 @@ import { ObservabilityModule } from '../../shared/observability/observability.mo
     MercadoLivreOrderProvider,
     MercadoLivreAdsProvider,
     MercadoLivreListingProvider,
+    // Conciliação por canal (13/10/2026) — módulo Financial Intelligence
+    // importa este módulo só para consumir esta classe já registrada acima.
+    MercadoLivreChannelPaymentProvider,
     MercadoLivreApiClient,
     MercadoLivreConnectionService,
     MercadoLivreListingProvider,

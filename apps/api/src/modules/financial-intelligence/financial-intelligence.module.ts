@@ -6,6 +6,12 @@ import { ReceivableFromOrderListener } from './application/receivable-from-order
 import { FinancialOrchestrator } from './application/financial-orchestrator.service';
 import { AccountsPayableService } from './application/accounts-payable.service';
 import { SettlementParserRegistry, SETTLEMENT_REPORT_PARSERS } from './application/settlement-parser-registry.service';
+import {
+  PaymentReconciliationProviderRegistry,
+  PAYMENT_RECONCILIATION_PROVIDERS,
+} from './application/payment-reconciliation-provider-registry.service';
+import { ChannelPaymentReconciliationOrchestrator } from './application/channel-payment-reconciliation-orchestrator.service';
+import { PaymentWebhookListener } from './application/payment-webhook.listener';
 import { PrismaFixedExpenseRepository } from './infrastructure/prisma-fixed-expense.repository';
 import { PrismaReceivableRecordRepository } from './infrastructure/prisma-receivable-record.repository';
 import { PrismaAccountsPayableRepository } from './infrastructure/prisma-accounts-payable.repository';
@@ -24,6 +30,9 @@ import { TaxIntelligenceModule } from '../tax-intelligence/public-api';
 import { OrdersModule } from '../orders/orders.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { MarketplaceAdsModule } from '../marketplace-ads/marketplace-ads.module';
+import { MarketplaceIntelligenceModule } from '../marketplace-intelligence/marketplace-intelligence.module';
+import { MercadoLivreChannelPaymentProvider } from '../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-channel-payment.provider';
+import { ObservabilityModule } from '../../shared/observability/observability.module';
 
 // Bounded context próprio (DRE + Contas a Receber) — ver
 // docs/financial-intelligence-architecture.md. A reconciliação lê só as
@@ -54,7 +63,16 @@ import { MarketplaceAdsModule } from '../marketplace-ads/marketplace-ads.module'
   // Ads não importa este de volta.
   // TaxIntelligenceModule (Slice A, 10/2026): TAX_RATE_RESOLVER para o imposto
   // do DRE. Sem ciclo: Tax importa Orders, não Financial.
-  imports: [OrdersModule, CatalogModule, MarketplaceAdsModule, TaxIntelligenceModule],
+  // MarketplaceIntelligenceModule (13/10/2026, conciliação por canal) — só
+  // para consumir MercadoLivreChannelPaymentProvider (exportado de lá),
+  // registrado abaixo em PAYMENT_RECONCILIATION_PROVIDERS. Mesmo racional de
+  // OrdersModule importando MarketplaceIntelligenceModule para
+  // MercadoLivreOrderProvider — sem ciclo: MarketplaceIntelligenceModule não
+  // importa este módulo de volta.
+  // ObservabilityModule — só para consumir ALERT_SERVICE
+  // (ChannelPaymentReconciliationOrchestrator avisa se a conciliação de um
+  // tenant falhar).
+  imports: [OrdersModule, CatalogModule, MarketplaceAdsModule, TaxIntelligenceModule, MarketplaceIntelligenceModule, ObservabilityModule],
   controllers: [
     FixedExpensesController,
     ReceivablesController,
@@ -71,6 +89,16 @@ import { MarketplaceAdsModule } from '../marketplace-ads/marketplace-ads.module'
     DreTaxEstimator,
     AccountsPayableService,
     SettlementParserRegistry,
+    // Conciliação por canal (13/10/2026) — fecha o gap documentado no
+    // comentário de SettlementImportController ("um futuro job/webhook por
+    // canal chamaria ReceivableReconciliationService no mesmo lugar").
+    // PaymentReconciliationProviderRegistry + ChannelPaymentReconciliationOrchestrator
+    // seguem o MESMO padrão Fetch->Reconcile de OrderProviderRegistry/
+    // OrderSyncOrchestrator; PaymentWebhookListener é quem os dispara, a
+    // partir do evento emitido por WebhooksController (topic "payments").
+    PaymentReconciliationProviderRegistry,
+    ChannelPaymentReconciliationOrchestrator,
+    PaymentWebhookListener,
     { provide: FIXED_EXPENSE_REPOSITORY, useClass: PrismaFixedExpenseRepository },
     { provide: RECEIVABLE_RECORD_REPOSITORY, useClass: PrismaReceivableRecordRepository },
     { provide: ACCOUNTS_PAYABLE_REPOSITORY, useClass: PrismaAccountsPayableRepository },
@@ -82,6 +110,15 @@ import { MarketplaceAdsModule } from '../marketplace-ads/marketplace-ads.module'
     {
       provide: SETTLEMENT_REPORT_PARSERS,
       useFactory: () => [new GenericSettlementParser('NUVEMSHOP')],
+    },
+    // Registro central de providers de conciliação de pagamento — adicionar
+    // um canal novo (Shopee...) é acrescentar mais uma entrada aqui, nunca
+    // alterar PaymentReconciliationProviderRegistry/
+    // ChannelPaymentReconciliationOrchestrator.
+    {
+      provide: PAYMENT_RECONCILIATION_PROVIDERS,
+      useFactory: (ml: MercadoLivreChannelPaymentProvider) => [ml],
+      inject: [MercadoLivreChannelPaymentProvider],
     },
     // Ordem de Compra (Fase 1) — AccountsPayableService implementa
     // AccountsPayableWriter (createSingle); exporta a PORTA, nunca a classe

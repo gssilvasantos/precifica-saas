@@ -195,6 +195,18 @@ export interface MlOAuthTokenResponse {
   refresh_token: string; // NOVO refresh_token — sempre substitui o anterior
 }
 
+// Pagamento liquidado, já normalizado pelo client a partir de
+// /v1/payments/search (ver fetchSettledPayments) — mesmo shape de
+// RawSettlementEntry (shared/contracts/settlement-report-parser.contract.ts),
+// mas definido localmente para o client não depender de financial-intelligence;
+// o provider (mercado-livre-channel-payment.provider.ts) é quem faz o mapeamento
+// trivial para o contrato compartilhado.
+export interface MlSettledPayment {
+  externalReference: string;
+  amount: number;
+  settledAt: Date;
+}
+
 // Cliente sobre a API do Mercado Livre — dois grupos de endpoint:
 // (1) PÚBLICOS (categories/listing_prices), sem OAuth, documentados desde a
 // Etapa 4; (2) AUTENTICADOS (oauth/token, orders/search), que exigem
@@ -777,6 +789,81 @@ export class MercadoLivreApiClient {
     }
 
     return orders;
+  }
+
+  // --- Conciliação de pagamentos (13/10/2026, a pedido do Gui — "módulo de
+  // conciliação por canal") ---
+  //
+  // AVISO DE HONESTIDADE: o shape abaixo segue a documentação pública da API
+  // de Pagamentos (`GET /v1/payments/search`), nunca exercitada contra uma
+  // chamada real neste sandbox (sem credencial real disponível aqui — ver
+  // docs/auth-security.md). Dois pontos em aberto, só confirmáveis com o
+  // primeiro webhook real em produção (ver também a pesquisa trazida pelo
+  // Gui em 13/10/2026 sobre separação de escopos ML/Mercado Pago):
+  // 1. A partir de agosto/2026 o Mercado Livre separou os escopos de
+  //    Mercado Livre e Mercado Pago — se o app Kyneti não tiver o escopo de
+  //    leitura financeira do Mercado Pago habilitado, esta chamada pode
+  //    devolver 401/403 mesmo com um access_token ML válido. Não há como
+  //    confirmar isso sem testar contra uma conta real conectada.
+  // 2. `/v1/payments/search` traz PAGAMENTOS aprovados (date_approved), não
+  //    necessariamente o DINHEIRO já liberado na conta do vendedor
+  //    (parcelamento/retenção por reputação atrasam a liberação real). Se
+  //    isso se mostrar impreciso em produção, o candidato mais forte é
+  //    `/users/{user_id}/billing/payments` (API de faturamento) — não
+  //    implementado ainda por falta de confirmação do formato de resposta.
+  //
+  // `payment.order.id` é o identificador que casa com
+  // RawOrderCandidate.externalOrderId (a MESMA chave usada por
+  // ReceivableRecord.externalReference, ver ReceivableFromOrderListener) —
+  // pagamento sem pedido vinculado (ex.: saldo avulso, estorno) é
+  // descartado: nunca fabricamos uma referência de match.
+  async fetchSettledPayments(sellerId: string, accessToken: string, since: Date): Promise<MlSettledPayment[]> {
+    const payments: MlSettledPayment[] = [];
+    let offset = 0;
+    const limit = 50;
+    const beginDate = since.toISOString();
+    const endDate = new Date().toISOString();
+
+    while (true) {
+      const url =
+        `${BASE_URL}/v1/payments/search?seller_id=${sellerId}&status=approved&range=date_approved` +
+        `&begin_date=${encodeURIComponent(beginDate)}&end_date=${encodeURIComponent(endDate)}` +
+        `&sort=date_approved&criteria=asc&offset=${offset}&limit=${limit}`;
+      const response = await this.request(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!response.ok) {
+        throw new Error(`Mercado Livre /v1/payments/search retornou HTTP ${response.status} (offset ${offset})`);
+      }
+      const data = (await response.json()) as { results?: unknown[]; paging?: { total?: number } };
+      const batch = Array.isArray(data.results) ? data.results : [];
+      if (batch.length === 0) break;
+
+      for (const raw of batch) {
+        const settled = this.toSettledPayment(raw);
+        if (settled) payments.push(settled);
+      }
+      offset += batch.length;
+      const total = data.paging?.total ?? offset;
+      if (offset >= total) break;
+    }
+
+    return payments;
+  }
+
+  private toSettledPayment(raw: unknown): MlSettledPayment | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const order = (obj.order ?? {}) as Record<string, unknown>;
+    const externalReference = order.id != null ? String(order.id) : null;
+    if (!externalReference) return null; // pagamento sem pedido vinculado — nunca fabricamos a chave de match
+
+    const dateApproved = obj.date_approved ? new Date(String(obj.date_approved)) : null;
+    if (!dateApproved || Number.isNaN(dateApproved.getTime())) return null;
+
+    return {
+      externalReference,
+      amount: Number(obj.transaction_amount ?? 0),
+      settledAt: dateApproved,
+    };
   }
 
   // Status REAL de envio — bug de produção (24/07/2026): o objeto `shipping`

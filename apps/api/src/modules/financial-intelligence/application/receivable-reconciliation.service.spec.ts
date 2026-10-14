@@ -89,4 +89,57 @@ describe('ReceivableReconciliationService', () => {
     expect(emitSpy).not.toHaveBeenCalled();
     expect(result).toEqual({ matched: 0, alreadyReconciled: 1, unmatchedReferences: [] });
   });
+
+  // Caminho webhook/API (13/10/2026) — mesma lógica de match de reconcile(),
+  // só que sem passar por SettlementParserRegistry/parse de arquivo.
+  describe('reconcileEntries (caminho webhook/API, sem arquivo)', () => {
+    it('casa um repasse PENDING e marca PAID, emitindo RECEIVABLE_PAID — sem consultar o SettlementParserRegistry', async () => {
+      const { service, registry, repository, emitSpy } = buildService(undefined, pendingReceivable);
+
+      const result = await service.reconcileEntries('tenant-1', 'MERCADO_LIVRE', [
+        { externalReference: 'ORDER-1', amount: 150.5, settledAt: new Date('2026-07-11') },
+      ]);
+
+      expect(registry.findByMarketplaceCode).not.toHaveBeenCalled();
+      expect(repository.markPaid).toHaveBeenCalledWith('rec-1', { status: 'PAID', paidAt: new Date('2026-07-11') });
+      expect(emitSpy).toHaveBeenCalledWith(
+        'financial-intelligence.receivable-paid',
+        expect.objectContaining({ tenantId: 'tenant-1', receivableId: 'rec-1', marketplaceSource: 'MERCADO_LIVRE' }),
+      );
+      expect(result).toEqual({ matched: 1, alreadyReconciled: 0, unmatchedReferences: [] });
+    });
+
+    it('entrada sem ReceivableRecord correspondente: conta como não casado, não lança exceção', async () => {
+      const { service, repository } = buildService(undefined, null);
+
+      const result = await service.reconcileEntries('tenant-1', 'MERCADO_LIVRE', [
+        { externalReference: 'ORDER-SEM-MATCH', amount: 10, settledAt: new Date() },
+      ]);
+
+      expect(result.unmatchedReferences).toEqual(['ORDER-SEM-MATCH']);
+      expect(repository.markPaid).not.toHaveBeenCalled();
+    });
+
+    it('é idempotente: reconciliar um repasse já PAID não reprocessa nem reemite o evento', async () => {
+      const alreadyPaid: ReceivableRecord = { ...pendingReceivable, status: 'PAID', paidAt: new Date('2026-07-05') };
+      const { service, repository, emitSpy } = buildService(undefined, alreadyPaid);
+
+      const result = await service.reconcileEntries('tenant-1', 'MERCADO_LIVRE', [
+        { externalReference: 'ORDER-1', amount: 150.5, settledAt: new Date('2026-07-11') },
+      ]);
+
+      expect(repository.markPaid).not.toHaveBeenCalled();
+      expect(emitSpy).not.toHaveBeenCalled();
+      expect(result).toEqual({ matched: 0, alreadyReconciled: 1, unmatchedReferences: [] });
+    });
+
+    it('lista vazia de entries: retorna zerado, nunca consulta o repositório', async () => {
+      const { service, repository } = buildService(undefined, null);
+
+      const result = await service.reconcileEntries('tenant-1', 'MERCADO_LIVRE', []);
+
+      expect(result).toEqual({ matched: 0, alreadyReconciled: 0, unmatchedReferences: [] });
+      expect(repository.findByExternalReference).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -47,7 +47,39 @@ ReceivableReconciliationService.reconcile(tenantId, marketplaceCode, fileContent
 
 **Idempotência:** reimportar o mesmo arquivo (ou um arquivo sobreposto) não reprocessa nem reemite evento para um `ReceivableRecord` já `PAID` — contado em `alreadyReconciled`, separado de `matched`.
 
-**Caminho manual, hoje:** `POST /financial-intelligence/settlements/import` recebe o conteúdo do arquivo como texto no corpo da requisição (não multipart) — simplificação consciente para não puxar uma dependência de upload só para este endpoint administrativo. Um futuro job/webhook por canal chamaria `ReceivableReconciliationService.reconcile(...)` no mesmo lugar.
+**Caminho manual:** `POST /financial-intelligence/settlements/import` recebe o conteúdo do arquivo como texto no corpo da requisição (não multipart) — simplificação consciente para não puxar uma dependência de upload só para este endpoint administrativo. Continua existindo para qualquer canal sem integração automática (hoje, todos exceto Mercado Livre) e como fallback se o webhook falhar.
+
+### 3.1 Caminho automático (webhook/API) — conciliação por canal (13/10/2026)
+
+Mesmo destino (`ReceivableReconciliationService`), origem diferente: em vez de um arquivo enviado manualmente, a chamada vem de uma API autenticada do canal, disparada pela chegada de um webhook. O serviço nunca soube a diferença — foi por isso que `reconcile()` virou um wrapper fino sobre um método privado (`applyEntries`), e o caminho novo só precisou de um método público a mais (`reconcileEntries`, que pula o parser de arquivo e recebe `RawSettlementEntry[]` já pronto).
+
+```
+Mercado Livre envia POST /api/webhooks/mercado_livre { topic: "payments", resource: ... }
+        │
+        ▼
+WebhooksController.receive() — lê SÓ o campo `topic` (nunca aplica dado do corpo) e:
+        │ 1. dispara o nudge de pedidos de sempre (OrderSyncOrchestrator) — inalterado
+        │ 2. emite WEBHOOK_EVENTS.RECEIVED { channel: 'MERCADO_LIVRE', topic: 'payments' }
+        ▼
+PaymentWebhookListener (financial-intelligence) — reage só a topic === 'payments'
+        │
+        ▼
+ChannelPaymentReconciliationOrchestrator.syncChannel('MERCADO_LIVRE')
+        │ 1. PaymentReconciliationProviderRegistry.findByMarketplaceCode('MERCADO_LIVRE')
+        │ 2. para cada tenant ativo (provider.listTenantIdsToSync): provider.fetchSettledPayments({tenantId, since})
+        │    (janela de 30 dias — SETTLEMENT_LOOKBACK_MS, maior que a janela de pedidos de propósito)
+        │ 3. ReceivableReconciliationService.reconcileEntries(tenantId, marketplaceCode, entries)
+        ▼
+mesma lógica de match de reconcile() (applyEntries) — { matched, alreadyReconciled, unmatchedReferences }
+```
+
+`PaymentReconciliationCapableProvider` (`shared/contracts/marketplace-provider.contract.ts`) é a abstração de provider — mesmo padrão `FeeRuleCapableProvider`/`OrderCapableProvider`, registrada em `PAYMENT_RECONCILIATION_PROVIDERS` (`financial-intelligence.module.ts`). Hoje só `MercadoLivreChannelPaymentProvider` (marketplace-intelligence), consumindo `MercadoLivreApiClient.fetchSettledPayments` (`GET /v1/payments/search`).
+
+**Honestidade técnica (sem credencial real disponível para testar neste ambiente):**
+- `fetchSettledPayments` nunca foi exercitado contra uma chamada real — shape montado a partir da documentação pública de `/v1/payments/search`.
+- A partir de agosto/2026 o Mercado Livre separou os escopos de Mercado Livre e Mercado Pago (achado trazido pelo Gui, 13/10/2026) — se o app Kyneti não tiver o escopo de leitura financeira do Mercado Pago habilitado, a chamada pode devolver 401/403 mesmo com token ML válido. Não confirmado.
+- `/v1/payments/search` reporta pagamento APROVADO (`date_approved`), não necessariamente o dinheiro já LIBERADO na conta do vendedor (parcelamento/retenção por reputação atrasam a liberação real). Se isso se mostrar impreciso em produção, o candidato mais forte é `/users/{user_id}/billing/payments` — não implementado por falta de confirmação do formato de resposta.
+- Sem scheduler/cron próprio ainda — a conciliação automática só roda quando o webhook chega (entrega não garantida por nenhum provedor de webhook). Risco aceito nesta primeira fatia porque o `ReceivableRecord` já existe como `PENDING` desde a criação do pedido; o pior caso é ficar pendente por mais tempo que o real, nunca perder o registro. Mitigação futura: job agendado chamando `syncChannel()` periodicamente como fallback (mesmo padrão de `OrdersSyncSchedulerJob`), não implementado.
 
 ## 4. Reprecificação reativa — como `PricingDecisionService` é acionado quando o custo muda
 
@@ -90,7 +122,7 @@ Nenhum consumidor além dos descritos acima existe hoje; ambos seguem a mesma co
 - **Entradas projetadas:** `ReceivableRecord` com `status = PENDING` já é, por definição, "dinheiro esperado numa data" — a projeção soma isso por período.
 - **Saídas projetadas:** `FixedExpense` (`recurrenceType` + `dueDay`) já contém tudo que uma projeção precisa para "expandir" cada despesa em ocorrências futuras num calendário — a tabela guarda a REGRA, a projeção calcula as ocorrências sob demanda (não armazena uma linha por mês).
 - **O que falta:** um serviço de projeção (`CashFlowProjectionService`, módulo futuro ou dentro deste) que combine as duas fontes por período e um endpoint de consulta — nenhuma mudança de schema é esperada para isso, só uma nova camada de leitura/agregação sobre o que já existe.
-- **Reconciliação automática:** hoje é manual (endpoint `POST /settlements/import`); a extensão natural é um job agendado por canal que busca o relatório direto da API do marketplace e chama `ReceivableReconciliationService.reconcile(...)` — o serviço já está pronto para isso, só falta o job.
+- **Reconciliação automática:** implementada para Mercado Livre via webhook (seção 3.1) — ainda sem scheduler/cron próprio como fallback (só reage à chegada do webhook); extensão natural para outro canal é registrar mais um `PaymentReconciliationCapableProvider`.
 
 ## 7. DRE em tempo real por canal (Etapa 20)
 
@@ -160,8 +192,8 @@ Espelho do lado "a pagar" de `ReceivableRecord` — mesmo schema Postgres (`fina
 - Parser de repasse é genérico (seção 3), não específico de cada marketplace real.
 - Importação de arquivo é por texto no corpo da requisição, não upload multipart.
 - `FixedExpense` não afeta o Floor Price (seção 4) — decisão consciente, não lacuna.
-- Sem workflow de aprovação/reconciliação automática ainda — tudo aqui é cadastro + reconciliação manual.
+- Reconciliação automática existe só para Mercado Livre (seção 3.1), via webhook, sem scheduler de fallback; outros canais seguem com reconciliação manual (upload de arquivo). Sem workflow de aprovação para nenhum dos dois caminhos.
 - DRE (seção 7) não inclui `FixedExpense` nem `AccountsPayable` (seção 9) na margem — é margem de contribuição por pedido/canal, não lucro líquido do período (ratear despesa fixa/variável por canal exigiria a mesma premissa de volume ainda não decidida na seção 4).
 - DRE carrega todos os pedidos do período em memória para agregar (aceitável para volume de MVP, ver seção 7).
 - `AccountsPayable` com `occurrence` SEMANAL/MENSAL/TRIMESTRAL não gera automaticamente a próxima ocorrência — só PARCELADA gera múltiplas linhas hoje (ver seção 9).
-- Testes: `generic-settlement-parser.spec.ts` (parsing JSON/CSV, casos de erro), `receivable-reconciliation.service.spec.ts` (match, sem match, idempotência), `packaging.service.spec.ts` (evento emitido só quando `costPrice` muda de fato), `packaging-cost-change.listener.spec.ts` (fan-out para SKUs vinculados, falha em um não trava os demais), testes de DRE listados na seção 7, `accounts-payable.entity.spec.ts` (rateio de parcelas, status derivado) e `accounts-payable.service.spec.ts` (baixa idempotente, cancelamento, validação de fornecedor) para a seção 9.
+- Testes: `generic-settlement-parser.spec.ts` (parsing JSON/CSV, casos de erro), `receivable-reconciliation.service.spec.ts` (match, sem match, idempotência — caminho de arquivo E `reconcileEntries`), `payment-reconciliation-provider-registry.service.spec.ts`, `channel-payment-reconciliation-orchestrator.service.spec.ts` (multi-tenant, falha isolada por tenant, alerta), `payment-webhook.listener.spec.ts` (filtro por topic), `webhooks.controller.spec.ts` (módulo Orders — extração de topic, emissão do evento), `mercado-livre-channel-payment.provider.spec.ts` (módulo Marketplace Intelligence), `packaging.service.spec.ts` (evento emitido só quando `costPrice` muda de fato), `packaging-cost-change.listener.spec.ts` (fan-out para SKUs vinculados, falha em um não trava os demais), testes de DRE listados na seção 7, `accounts-payable.entity.spec.ts` (rateio de parcelas, status derivado) e `accounts-payable.service.spec.ts` (baixa idempotente, cancelamento, validação de fornecedor) para a seção 9.

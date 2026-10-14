@@ -3,6 +3,8 @@
 // Interface Segregation: um provider só implementa a(s) capacidade(s) que
 // de fato sabe entregar — nunca uma interface única "faz tudo".
 
+import { RawSettlementEntry } from './settlement-report-parser.contract';
+
 export enum ProviderCapability {
   FEE_RULES = 'FEE_RULES',
   SHIPPING_POLICY = 'SHIPPING_POLICY',
@@ -40,6 +42,12 @@ export enum ProviderCapability {
   // do canal para um pedido já existente — diferente de LISTING_CREATE
   // (cria um anúncio) e de ORDERS (lê o pedido em si).
   SHIPPING_LABEL = 'SHIPPING_LABEL',
+  // Conciliação por canal (13/10/2026, a pedido do Gui — ver
+  // PaymentReconciliationCapableProvider abaixo). Busca pagamentos já
+  // LIQUIDADOS no canal, para confirmar automaticamente um ReceivableRecord
+  // que hoje só é marcado PAID por upload manual de arquivo (ver
+  // ReceivableReconciliationService, financial-intelligence).
+  PAYMENT_RECONCILIATION = 'PAYMENT_RECONCILIATION',
 }
 
 export interface RawRuleCandidate {
@@ -415,4 +423,26 @@ export interface ShippingLabelCapableProvider extends MarketplaceProvider {
 
 export function isShippingLabelCapable(p: MarketplaceProvider): p is ShippingLabelCapableProvider {
   return p.capabilities.includes(ProviderCapability.SHIPPING_LABEL);
+}
+
+// --- Conciliação de pagamento por canal (13/10/2026, a pedido do Gui —
+// "módulo de conciliação por canal"). Reaproveita RawSettlementEntry
+// (shared/contracts/settlement-report-parser.contract.ts) — o MESMO
+// contrato que SettlementReportParser já produz a partir de um arquivo
+// manual — porque o destino é idêntico (ReceivableReconciliationService):
+// o serviço de reconciliação nunca precisa saber se a linha veio de um
+// upload de CSV/JSON ou de uma chamada de API autenticada por trás de um
+// webhook. Só a ORIGEM do dado muda; o formato de saída, não.
+//
+// listTenantIdsToSync é herdado de MarketplaceProvider (opcional ali, mas
+// OBRIGATÓRIO na prática aqui): pagamento é sempre por vendedor, nunca
+// global — mesmo racional de OrderCapableProvider (ver
+// ChannelPaymentReconciliationOrchestrator, financial-intelligence, que
+// pula o provider com warning se listTenantIdsToSync não existir).
+export interface PaymentReconciliationCapableProvider extends MarketplaceProvider {
+  fetchSettledPayments(ctx: FetchContext): Promise<RawSettlementEntry[]>;
+}
+
+export function isPaymentReconciliationCapable(p: MarketplaceProvider): p is PaymentReconciliationCapableProvider {
+  return p.capabilities.includes(ProviderCapability.PAYMENT_RECONCILIATION);
 }
