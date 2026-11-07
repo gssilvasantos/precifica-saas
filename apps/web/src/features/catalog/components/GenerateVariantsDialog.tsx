@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   generateVariantCombinations,
@@ -28,13 +28,8 @@ export default function GenerateVariantsDialog({ parent, onClose, onCreated }: P
   const [linhas, setLinhas] = useState<Linha[]>([{ name: 'Cor', options: '' }]);
   const [erro, setErro] = useState<string | null>(null);
 
-  useEffect(() => {
-    const aoTeclar = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', aoTeclar);
-    return () => window.removeEventListener('keydown', aoTeclar);
-  }, [onClose]);
+  // Esc e foco preso agora são tratados uma única vez em ModalShell
+  // (20/10/2026, achado de auditoria de acessibilidade) — não duplicar aqui.
 
   const atributos: VariantAttributeInput[] = useMemo(
     () => linhas.map((l) => ({ name: l.name.trim(), options: parseOptions(l.options) })),

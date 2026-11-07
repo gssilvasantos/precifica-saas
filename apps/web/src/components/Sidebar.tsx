@@ -137,6 +137,11 @@ interface Props {
   onClose: () => void;
 }
 
+// Seletor dos elementos que o foco pode alcançar — mesma lista usada em
+// ModalShell (`components/motion/ModalShell.tsx`).
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 // Sidebar persistente no desktop (md+); no mobile vira um painel deslizante
 // com backdrop, controlado pelo AppLayout via isOpen/onClose. Tokens
 // semânticos (bg-card/border-border/bg-primary) em vez dos nomeados
@@ -144,6 +149,54 @@ interface Props {
 export default function Sidebar({ isOpen, onClose }: Props) {
   const { user } = useAuth();
   const { pathname } = useLocation();
+  const asideRef = useRef<HTMLElement>(null);
+
+  // Esc fecha + foco preso + foco volta ao gatilho (20/10/2026 — achado da
+  // auditoria de acessibilidade, skill `accessibility`: o drawer mobile não
+  // tinha nenhum dos três, apesar de `.claude/rules/frontend.md` listar como
+  // obrigatório para modal/drawer). `isOpen` só fica `true` via o botão de
+  // menu que é `md:hidden` (AppLayout.tsx) — no desktop a sidebar é sempre
+  // visível por CSS (`md:static`), então esta lógica nunca roda lá.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const triggerElement = document.activeElement as HTMLElement | null;
+    const focusables = asideRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+    (focusables?.[0] ?? asideRef.current)?.focus();
+
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+
+      if (e.key !== 'Tab' || !asideRef.current) return;
+
+      const elements = Array.from(asideRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (elements.length === 0) {
+        e.preventDefault();
+        return;
+      }
+
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', aoTeclar);
+    return () => {
+      document.removeEventListener('keydown', aoTeclar);
+      triggerElement?.focus();
+    };
+  }, [isOpen, onClose]);
 
   // ADMIN (papel de tenant) sempre vê tudo, mesmo racional do backend
   // (ModuleAccessGuard libera ADMIN sem checar moduleAccess) — evita que o
@@ -244,8 +297,16 @@ export default function Sidebar({ isOpen, onClose }: Props) {
       )}
 
       <aside
+        ref={asideRef}
+        // role/aria-modal só fazem sentido como diálogo quando está agindo
+        // como o drawer sobreposto do mobile — no desktop é navegação
+        // persistente comum, então essas props ficam condicionadas a isOpen.
+        role={isOpen ? 'dialog' : undefined}
+        aria-modal={isOpen ? true : undefined}
+        aria-label="Menu de navegação"
+        tabIndex={-1}
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex shrink-0 flex-col border-r border-border bg-card transition-[transform,width] duration-200',
+          'fixed inset-y-0 left-0 z-40 flex shrink-0 flex-col border-r border-border bg-card outline-none transition-[transform,width] duration-200',
           recolhida ? 'md:w-[76px]' : 'md:w-64',
           'w-64 md:static md:translate-x-0',
           isOpen ? 'translate-x-0' : '-translate-x-full',
