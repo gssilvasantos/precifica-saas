@@ -949,7 +949,18 @@ model MarketplaceRule {
   createdAt DateTime @default(now())
 
   @@unique([marketplaceId, ruleType, scopeKey, version, tenantId])
-  @@index([marketplaceId, ruleType, scopeKey, status])
+  // Substituído por um índice que inclui tenantId (20/10/2026, achado de
+  // auditoria — skill supabase-postgres-best-practices): os dois caminhos
+  // de leitura mais frequentes (PrismaMarketplaceRuleRepository.findActive/
+  // findLatestVersion, chamados por tenant a cada resolução de regra) já
+  // filtram por tenantId junto com marketplaceId/ruleType/scopeKey — o
+  // índice antigo não tinha essa coluna, então o Postgres achava o grupo de
+  // linhas certo (marketplace+tipo+escopo+status) e ainda precisava
+  // verificar tenantId linha a linha dentro dele, incluindo as linhas
+  // globais (tenantId NULL) e as de outros tenants. tenantId entra ANTES de
+  // status porque findLatestVersion (sem filtro de status) também precisa
+  // do prefixo útil.
+  @@index([marketplaceId, ruleType, scopeKey, tenantId, status])
   @@map("marketplace_rules")
   @@schema("marketplace_intelligence")
 }
