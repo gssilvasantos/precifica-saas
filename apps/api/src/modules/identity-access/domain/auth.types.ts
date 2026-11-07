@@ -8,8 +8,14 @@ export interface JwtPayload {
   sub: string; // userId
   tenantId: string;
   role: UserRole;
-  // Baked no token, mesmo racional de `role` — revogar exige novo login (ver
-  // ModuleAccessGuard). ADMIN ignora este campo (sempre acesso total).
+  // Baked no token na hora do login, mas NÃO é mais a fonte de verdade em
+  // tempo de requisição: JwtStrategy.validate() (20/10/2026, mitigação de
+  // revogação — ver docs/decisions/0007-jwt-live-check.md) relê role e
+  // moduleAccess do banco a cada request e ignora o que está aqui. O campo
+  // continua no payload só porque ainda é lido no momento da emissão
+  // (auth.service.ts) e em logs/depuração — tratar como informativo, não
+  // autoritativo. ADMIN ignora moduleAccess de qualquer forma (sempre
+  // acesso total, ver ModuleAccessGuard).
   moduleAccess: string[];
 }
 

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 
 // Criptografia simétrica (AES-256-GCM) para credenciais de integração em
@@ -12,20 +12,30 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:
 // README que essa variável precisa existir em produção com um valor forte
 // e nunca commitado — trocar por AWS KMS/GCP KMS/Vault é um adapter, não uma
 // reescrita, se/quando isso for necessário.
+//
+// Falha alta na inicialização se a env var faltar (achado de auditoria de
+// segurança, 20/10/2026, mesma categoria do fallback de JWT_SECRET corrigido
+// no mesmo lote): antes disto, a ausência da variável só gerava um
+// `logger.warn` e o serviço seguia criptografando credenciais de terceiro
+// (Olist, Nuvemshop, Mercado Livre) com a chave fixa 'dev-only-insecure-key'
+// — sem travar a inicialização. Isso contraria .claude/rules/security.md
+// ("Falhe alto na inicialização quando faltar variável obrigatória.
+// Fallback silencioso para chave de desenvolvimento em produção é
+// incidente, não conveniência") e o próprio comentário deste arquivo, que já
+// dizia "NUNCA aceitável em produção" mas não impedia.
 @Injectable()
 export class CredentialEncryptionService implements OnModuleInit {
-  private readonly logger = new Logger(CredentialEncryptionService.name);
   private key!: Buffer;
 
   onModuleInit() {
     const secret = process.env.ERP_CREDENTIALS_ENCRYPTION_KEY;
     if (!secret) {
-      this.logger.warn(
-        'ERP_CREDENTIALS_ENCRYPTION_KEY não definida — usando uma chave de desenvolvimento fixa. ' +
-          'NÃO use isso em produção; defina a variável de ambiente com um segredo forte.',
+      throw new Error(
+        'ERP_CREDENTIALS_ENCRYPTION_KEY não está definida. Configure essa variável de ambiente antes de ' +
+          'iniciar a aplicação — nunca existe um valor padrão de desenvolvimento aqui (ver .env.example).',
       );
     }
-    this.key = scryptSync(secret ?? 'dev-only-insecure-key', 'precifica-erp-integration', 32);
+    this.key = scryptSync(secret, 'precifica-erp-integration', 32);
   }
 
   encrypt(plainText: string): string {

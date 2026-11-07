@@ -47,6 +47,13 @@ export class UsersService {
     return this.users.findById(id);
   }
 
+  // Usado só por JwtStrategy.validate() — ver comentário em
+  // ports/user-repository.port.ts. Checagem em tempo real de usuário/tenant
+  // a cada requisição autenticada, não só no login.
+  findByIdWithTenantStatus(id: string) {
+    return this.users.findByIdWithTenantStatus(id);
+  }
+
   findAllByTenant(tenantId: string) {
     return this.users.findAllByTenant(tenantId);
   }

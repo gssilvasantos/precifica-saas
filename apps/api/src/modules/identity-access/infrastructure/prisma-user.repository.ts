@@ -23,6 +23,13 @@ export class PrismaUserRepository implements UserRepository {
     return this.prisma.user.findUnique({ where: { id } });
   }
 
+  findByIdWithTenantStatus(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      include: { tenant: { select: { isActive: true } } },
+    });
+  }
+
   findAllByTenant(tenantId: string) {
     return this.prisma.user.findMany({ where: { tenantId }, orderBy: { createdAt: 'asc' } });
   }

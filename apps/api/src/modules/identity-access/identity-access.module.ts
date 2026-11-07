@@ -21,13 +21,25 @@ import { USER_REPOSITORY } from './application/ports/user-repository.port';
 @Module({
   imports: [
     PassportModule,
+    // Falha alta na inicialização se JWT_SECRET faltar — ver comentário
+    // equivalente em infrastructure/jwt.strategy.ts (mesmo achado, 20/10/2026,
+    // precisa ser corrigido nos dois lugares juntos).
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET') ?? 'dev-secret-nao-usar-em-producao',
-        signOptions: { expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '8h' },
-      }),
+      useFactory: (config: ConfigService) => {
+        const secret = config.get<string>('JWT_SECRET');
+        if (!secret) {
+          throw new Error(
+            'JWT_SECRET não está definida. Configure essa variável de ambiente antes de iniciar a aplicação — ' +
+              'nunca existe um valor padrão de desenvolvimento aqui (ver .env.example).',
+          );
+        }
+        return {
+          secret,
+          signOptions: { expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '8h' },
+        };
+      },
     }),
   ],
   controllers: [AuthController, PlatformAdminController, TeamController],

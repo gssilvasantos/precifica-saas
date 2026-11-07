@@ -4,6 +4,11 @@ import { MercadoLivreConnectionRepository, MercadoLivreConnectionRecord } from '
 import { CredentialEncryptionService } from '../../../shared/security/credential-encryption.service';
 import { MercadoLivreApiClient, MlOAuthTokenResponse } from '../infrastructure/providers/mercado-livre/mercado-livre-api.client';
 
+// CredentialEncryptionService.onModuleInit agora falha alto sem a env var
+// (20/10/2026, correção de segurança — nunca mais um fallback de chave de
+// dev silencioso). Mesmo padrão já usado em olist-v3-connection.service.spec.ts.
+process.env.ERP_CREDENTIALS_ENCRYPTION_KEY = 'chave-de-teste-nao-usar-em-producao';
+
 function buildRecord(overrides: Partial<MercadoLivreConnectionRecord> = {}): MercadoLivreConnectionRecord {
   return {
     tenantId: 'tenant-1',
