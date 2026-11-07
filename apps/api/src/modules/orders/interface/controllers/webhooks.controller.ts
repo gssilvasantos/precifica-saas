@@ -1,8 +1,10 @@
-import { Body, Controller, Logger, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Logger, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Throttle } from '@nestjs/throttler';
 import { OrderProviderRegistry } from '../../application/order-provider-registry.service';
 import { OrderSyncOrchestrator } from '../../application/order-sync-orchestrator.service';
 import { WEBHOOK_EVENTS } from '../../domain/webhook-events';
+import { WebhookSecretGuard } from '../../../../shared/security/webhook-secret.guard';
 
 // Sprint 21 (Senior Integration Engineer) — endpoint público de webhook por
 // CANAL: `POST /webhooks/:channel`, ex. `/webhooks/nuvemshop`,
@@ -47,8 +49,17 @@ export class WebhooksController {
     private readonly events: EventEmitter2,
   ) {}
 
-  // Sem guard de propósito — o marketplace não tem como enviar um JWT
-  // nosso (mesma justificativa do webhook por providerCode).
+  // Sem JwtAuthGuard de propósito — o marketplace não tem como enviar um
+  // JWT nosso (mesma justificativa de sempre). Mas a partir de 20/10/2026
+  // (achado de auditoria de segurança) exige `?secret=...` na query string
+  // (WebhookSecretGuard — ver docs/decisions/0006-webhook-shared-secret.md):
+  // sem isso, qualquer um que descobrisse o nome do canal conseguia disparar
+  // `orchestrator.syncProvider()` de verdade. Throttle extra aqui (mais
+  // restrito que o global de app.module.ts) porque este endpoint dispara
+  // trabalho real contra APIs de terceiro a cada chamada — mesmo com o
+  // segredo, limita o estrago de um segredo vazado.
+  @UseGuards(WebhookSecretGuard)
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
   @Post(':channel')
   async receive(@Param('channel') channel: string, @Body() payload: unknown) {
     const providers = this.registry.findByMarketplaceCode(channel);

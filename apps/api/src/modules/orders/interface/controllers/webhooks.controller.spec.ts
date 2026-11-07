@@ -1,10 +1,12 @@
 import { NotFoundException } from '@nestjs/common';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WebhooksController } from './webhooks.controller';
 import { OrderProviderRegistry } from '../../application/order-provider-registry.service';
 import { OrderSyncOrchestrator } from '../../application/order-sync-orchestrator.service';
 import { OrderCapableProvider } from '../../../../shared/contracts/marketplace-provider.contract';
 import { WEBHOOK_EVENTS } from '../../domain/webhook-events';
+import { WebhookSecretGuard } from '../../../../shared/security/webhook-secret.guard';
 
 function buildProvider(overrides: Partial<OrderCapableProvider> = {}): OrderCapableProvider {
   return {
@@ -92,5 +94,14 @@ describe('WebhooksController', () => {
     await controller.receive('NUVEMSHOP', { topic: 'messages' });
 
     expect(orchestrator.syncProvider).toHaveBeenCalledWith(provider.code);
+  });
+
+  // Regressão (20/10/2026): o guard protege a rota via metadata do Nest, não
+  // algo que uma chamada direta ao método (como os testes acima fazem)
+  // exercita — sem este teste, alguém poderia remover o @UseGuards por
+  // engano e toda a suíte continuaria verde.
+  it('a rota receive() está protegida por WebhookSecretGuard', () => {
+    const guards = Reflect.getMetadata(GUARDS_METADATA, WebhooksController.prototype.receive);
+    expect(guards).toContain(WebhookSecretGuard);
   });
 });
