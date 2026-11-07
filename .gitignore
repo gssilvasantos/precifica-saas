@@ -1,5 +1,23 @@
 tsc_out.log
 
+# Cache local de skills instaladas via `npx skills add` (vercel-labs/skills
+# find-skills, 20/10/2026) — não são parte do produto, cada máquina/sessão
+# instala as que precisar. Skills PRÓPRIAS do projeto (ex.:
+# product-engineering-studio) continuam versionadas normalmente; esta regra
+# só lista as instaladas de fora, uma por uma, pra nunca ignorar por engano
+# uma skill nova que o time decida versionar depois.
+.agents/skills/accessibility/
+.agents/skills/api-security-review/
+.agents/skills/jwt-security-review/
+.agents/skills/playwright-best-practices/
+.agents/skills/supabase-postgres-best-practices/
+.claude/skills/accessibility
+.claude/skills/api-security-review
+.claude/skills/jwt-security-review
+.claude/skills/playwright-best-practices
+.claude/skills/supabase-postgres-best-practices
+skills-lock.json
+
 # Configuração PESSOAL do Claude Code — permissões e atalhos específicos da
 # máquina de cada pessoa. Nunca versionar. O que vale para o time inteiro fica
 # em .claude/settings.json (versionado). Modelo em .claude/settings.local.json.example
