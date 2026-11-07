@@ -14,6 +14,17 @@ import { PrismaService } from './shared/prisma/prisma.service';
 // Não toca no banco: PrismaService é substituído por um stub, porque o que
 // está sob teste é o GRAFO de dependências, não a conexão.
 describe('AppModule (fiação do container)', () => {
+  // 20/10/2026: desde a correção de falha-alta em JWT_SECRET/
+  // ERP_CREDENTIALS_ENCRYPTION_KEY/WEBHOOK_SHARED_SECRET (auditoria de
+  // segurança), compilar o container inteiro exige essas variáveis — do
+  // contrário o próprio comportamento correto (falhar alto) derruba este
+  // teste de fiação, que não deveria depender de segredo real nenhum.
+  beforeAll(() => {
+    process.env.JWT_SECRET ??= 'segredo-de-teste-com-32-bytes-ou-mais';
+    process.env.ERP_CREDENTIALS_ENCRYPTION_KEY ??= 'chave-de-teste-nao-usar-em-producao';
+    process.env.WEBHOOK_SHARED_SECRET ??= 'segredo-de-teste-nao-usar-em-producao';
+  });
+
   it('compila com todos os módulos registrados', async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService)
