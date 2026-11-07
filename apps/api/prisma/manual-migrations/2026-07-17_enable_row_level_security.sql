@@ -969,12 +969,82 @@ WITH CHECK (
   OR "tenantId" = current_setting('app.current_tenant_id', true)
 );
 
+-- ============================================================================
+-- Correção de drift (20/10/2026, achada por auditoria com a skill
+-- supabase-postgres-best-practices): 5 tabelas com tenantId que ficaram de
+-- fora de todas as rodadas anteriores, 3 delas (tax_intelligence) com GRANT
+-- mas SEM NENHUMA RLS em produção até este bloco. Ver também os arquivos
+-- pontuais equivalentes (fonte de verdade pra reaplicar sem este mestre
+-- inteiro): 2026-10-20_apply_tax_intelligence_rls_only.sql e
+-- 2026-10-20_apply_shopee_and_ads_item_metrics_rls_only.sql.
+-- ============================================================================
+
+ALTER TABLE "tax_intelligence"."tenant_tax_profiles" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tax_intelligence"."tenant_tax_profiles" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "tax_intelligence"."tenant_tax_profiles"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "tax_intelligence"."product_tax_profiles" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tax_intelligence"."product_tax_profiles" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "tax_intelligence"."product_tax_profiles"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "tax_intelligence"."tenant_prior_revenues" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tax_intelligence"."tenant_prior_revenues" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "tax_intelligence"."tenant_prior_revenues"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "marketplace_intelligence"."shopee_connections" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "marketplace_intelligence"."shopee_connections" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "marketplace_intelligence"."shopee_connections"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
+ALTER TABLE "marketplace_ads"."ads_item_metric_snapshots" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "marketplace_ads"."ads_item_metric_snapshots" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "marketplace_ads"."ads_item_metric_snapshots"
+USING (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+)
+WITH CHECK (
+  current_setting('app.bypass_rls', true) = 'on'
+  OR "tenantId" = current_setting('app.current_tenant_id', true)
+);
+
 COMMIT;
 
 -- ============================================================================
--- Fim. 34 tabelas com RLS ativa (32 por coluna direta + marketplace_rules
--- customizada + 2 via subquery de FK) — contagem aproximada, acumulada fase a
--- fase (ver blocos acima). 6 tabelas deliberadamente sem RLS
+-- Fim. 39 tabelas com RLS ativa (34 da linha original + 5 da correção de
+-- drift de 20/10/2026) — contagem aproximada, acumulada fase a fase (ver
+-- blocos acima). 6 tabelas deliberadamente sem RLS
 -- (tenants, marketplaces, marketplace_change_events, provider_sync_schedules,
 -- provider_sync_logs, provider_health) por serem dado global/infraestrutura,
 -- não dado de cliente — ver seção 4 de docs/row-level-security-architecture.md.

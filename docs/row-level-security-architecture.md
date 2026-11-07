@@ -253,6 +253,17 @@ USING (
 
 `marketplace_rules` é o único caso ambíguo do schema inteiro — merece uma policy dedicada (`tenantId IS NULL OR tenantId = current_setting(...)`) em vez do padrão copiado das outras 30 tabelas.
 
+**Honestidade sobre esta seção:** a lista acima é da safra original (17/07/2026) e não foi atualizada a cada módulo novo desde então — módulos como `fiscal`, `sellers`, `production`, `procurement`, `marketplace_publishing`, `price_lists`, `accounts_payable`, `carrier_catalog`, `naturezas_operacao`, `channel_seller_profiles` e `tax_intelligence` têm RLS própria (ver `apps/api/prisma/manual-migrations/`) mas não foram incorporados aqui. Não foi feito um levantamento retroativo completo para reescrever esta seção — a fonte de verdade de "o que tem RLS hoje" são os arquivos `apply_*_rls_only.sql` em conjunto com o arquivo mestre, não esta lista.
+
+### 4.1 Drift corrigido (20/10/2026)
+
+Auditoria feita com a skill `supabase-postgres-best-practices` cruzando `schema.prisma` contra todas as `manual-migrations/*.sql` encontrou 5 tabelas com `tenantId` que nunca receberam RLS, apesar de já estarem com GRANT concedido ao `app_runtime`:
+
+- `tax_intelligence.tenant_tax_profiles`, `tax_intelligence.product_tax_profiles`, `tax_intelligence.tenant_prior_revenues` — o schema inteiro (criado 02/08/2026) só recebeu GRANT em 18/09/2026 e nunca recebeu a RLS correspondente. Até a correção abaixo, qualquer conexão via `app_runtime` lia/gravava essas 3 tabelas **sem isolamento entre tenants** — o `FORCE ROW LEVEL SECURITY` nunca tinha sido aplicado, então não havia policy em vigor.
+- `marketplace_intelligence.shopee_connections` (credenciais OAuth da Shopee) e `marketplace_ads.ads_item_metric_snapshots` — ficaram de fora das rodadas que cobriram as tabelas-irmãs dos mesmos schemas.
+
+Corrigido em `2026-10-20_apply_tax_intelligence_rls_only.sql`, `2026-10-20_apply_shopee_and_ads_item_metrics_rls_only.sql`, e replicado no arquivo mestre (`2026-07-17_enable_row_level_security.sql`). **Pendente**: aplicar esses 2 arquivos novos contra o Supabase de produção (não executado por este agente — exige acesso real ao `DIRECT_URL`, que este ambiente não tem) e rodar `test-rls.ts` (ou equivalente) contra as 5 tabelas pra confirmar o bloqueio cruzado, do mesmo jeito que foi feito para `identity.users` na seção 6, passo 6.
+
 ## 5. Custo real, não hipotético
 
 Cada operação Prisma passa a ser executada como um array-transaction de 2 statements (`set_config` + a query em si) em vez de 1 statement solto. Isso é uma viagem extra de ida-e-volta ao banco por query — não é grátis. Para os endpoints de leitura simples (a maioria do sistema) o custo é pequeno e aceitável dado o ganho de segurança; para os pontos de maior volume (sync de pedidos, DRE agregando muitas linhas) vale medir antes/depois em staging, não assumir que "é desprezível". Isso deveria ser o critério de aceite antes de ir para produção, não uma nota de rodapé.
