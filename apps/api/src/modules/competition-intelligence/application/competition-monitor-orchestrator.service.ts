@@ -36,6 +36,19 @@ import { COMPETITION_EVENTS } from '../domain/events/competition-events';
 
 export const PROVIDER_CODE = 'COMPETITION_RADAR_MONITOR';
 
+// Disjuntor (25/11/2026, segunda parte do mesmo incidente documentado abaixo
+// em `isRunning`): a trava de execução única impede ciclos de se empilharem,
+// mas um ÚNICO ciclo ainda percorre as ~1748 listagens ativas uma a uma — e
+// se o Mercado Livre já está bloqueando (403 em 100% das chamadas, como
+// confirmado em produção), esse ciclo sozinho gera ~1748 requisições inúteis
+// a 1 req/s (~30min só de espera do rate limit) toda vez que roda, o que por
+// si só pode ser volume suficiente para o bloqueio nunca ter uma janela livre
+// para expirar. Corta o ciclo cedo quando vê falhas consecutivas acima deste
+// limite — não espera processar todas as listagens pra só então reportar
+// FAILED. Falha intercalada com sucesso (listagem por listagem com problema
+// pontual) NÃO aciona o disjuntor, só uma sequência longa e ininterrupta.
+const MAX_CONSECUTIVE_FAILURES = 10;
+
 // Pipeline (docs/competition-intelligence-architecture.md, seção 3): para
 // cada MonitoredCompetitorListing ativo -> radar.fetchOffers() -> grava
 // histórico (CompetitorOfferSnapshot, append) -> calcula oportunidade
@@ -115,6 +128,8 @@ export class CompetitionMonitorOrchestrator {
     let applied = 0;
     let failed = 0;
     let lastError: Error | null = null;
+    let consecutiveFailures = 0;
+    let circuitBroken = false;
 
     try {
       for (const listing of active) {
@@ -122,12 +137,23 @@ export class CompetitionMonitorOrchestrator {
           found++;
           const changed = await this.processListing(listing);
           if (changed) applied++;
+          consecutiveFailures = 0;
         } catch (error) {
           failed++;
+          consecutiveFailures++;
           lastError = error as Error;
           this.logger.error(
             `Falha ao processar monitoramento ${listing.id} (SKU ${listing.skuCode}, tenant ${listing.tenantId}): ${(error as Error).message}`,
           );
+
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            circuitBroken = true;
+            this.logger.error(
+              `Disjuntor acionado: ${consecutiveFailures} falhas consecutivas (de ${active.length} listagens ativas). ` +
+                `Interrompendo o ciclo agora em vez de continuar tentando — ver comentário de MAX_CONSECUTIVE_FAILURES.`,
+            );
+            break;
+          }
         }
       }
 
@@ -139,6 +165,13 @@ export class CompetitionMonitorOrchestrator {
       // sem gerar nenhum alerta). `found > 0 && failed === found` = todas as
       // listagens ativas desta execução falharam — trata como falha real do
       // provider, não como sucesso vazio.
+      if (circuitBroken) {
+        throw new Error(
+          `Disjuntor acionado após ${consecutiveFailures} falhas consecutivas — ciclo interrompido antes de terminar ` +
+            `(último erro: ${lastError?.message ?? 'desconhecido'}).`,
+        );
+      }
+
       if (found > 0 && failed === found) {
         throw lastError ?? new Error('Todas as listagens monitoradas falharam nesta execução.');
       }

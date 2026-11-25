@@ -124,4 +124,42 @@ describe('CompetitionMonitorOrchestrator', () => {
       expect.objectContaining({ status: 'SUCCESS', candidatesFound: 2, candidatesApplied: 1 }),
     );
   });
+
+  // Disjuntor (25/11/2026, segunda parte do mesmo incidente): depois do fix
+  // acima (guarda contra empilhamento), o deploy em produção confirmou que a
+  // trava funcionou (log "runAll() ignorado..."), mas os 403 do Mercado Livre
+  // continuavam ocorrendo ininterruptamente DENTRO de um único ciclo — um
+  // ciclo sozinho ainda percorre todas as listagens ativas a 1 req/s mesmo
+  // sabendo, depois de poucas tentativas, que o provider está fora do ar.
+  it('interrompe o ciclo após MAX_CONSECUTIVE_FAILURES falhas seguidas, em vez de tentar todas as listagens', async () => {
+    const { orchestrator, radar, listings, syncLogs, health } = buildOrchestrator();
+    const manyListings = Array.from({ length: 15 }, (_, i) => fakeListing({ id: `listing-${i}`, skuCode: `SKU-${i}` }));
+    listings.findAllActive.mockResolvedValue(manyListings);
+    radar.fetchOffers.mockRejectedValue(new Error('Mercado Livre products/items API retornou 403 para MLB123'));
+
+    await expect(orchestrator.runAll()).rejects.toThrow(/[Dd]isjuntor/);
+
+    // Só as primeiras 10 (MAX_CONSECUTIVE_FAILURES) devem ter sido tentadas —
+    // não as 15 listagens ativas.
+    expect(radar.fetchOffers).toHaveBeenCalledTimes(10);
+    expect(health.recordFailure).toHaveBeenCalledWith('COMPETITION_RADAR_MONITOR', expect.stringContaining('isjuntor'));
+    expect(syncLogs.finish).toHaveBeenCalledWith('log-1', expect.objectContaining({ status: 'FAILED', candidatesFound: 10 }));
+  });
+
+  it('não aciona o disjuntor quando falhas e sucessos se intercalam (sem sequência longa de falhas)', async () => {
+    const { orchestrator, radar, listings, syncLogs, health } = buildOrchestrator();
+    const manyListings = Array.from({ length: 12 }, (_, i) => fakeListing({ id: `listing-${i}`, skuCode: `SKU-${i}` }));
+    listings.findAllActive.mockResolvedValue(manyListings);
+    radar.fetchOffers.mockImplementation((ctx: { skuCode: string }) =>
+      Number(ctx.skuCode.replace('SKU-', '')) % 2 === 0
+        ? Promise.reject(new Error('Mercado Livre products/items API retornou 403 para MLB123'))
+        : Promise.resolve([{ competitorLabel: 'Vendedor 9', price: 50, isBuyBoxWinner: false, collectedAt: new Date() }]),
+    );
+
+    await orchestrator.runAll();
+
+    expect(radar.fetchOffers).toHaveBeenCalledTimes(12);
+    expect(health.recordSuccess).toHaveBeenCalledWith('COMPETITION_RADAR_MONITOR');
+    expect(syncLogs.finish).toHaveBeenCalledWith('log-1', expect.objectContaining({ status: 'SUCCESS', candidatesFound: 12 }));
+  });
 });
