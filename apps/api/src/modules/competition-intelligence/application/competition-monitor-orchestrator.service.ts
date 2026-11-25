@@ -52,6 +52,32 @@ export const PROVIDER_CODE = 'COMPETITION_RADAR_MONITOR';
 export class CompetitionMonitorOrchestrator {
   private readonly logger = new Logger(CompetitionMonitorOrchestrator.name);
 
+  // Bug de produção (25/11/2026, achado pelo Gui — "Oportunidades sempre com
+  // os mesmos 21 SKU" + Anúncios travado em "Calculando..."): este método é
+  // chamado tanto pelo cron (@Cron(EVERY_10_MINUTES), ver
+  // competition-monitor-scheduler.job.ts) quanto pelo botão ATUALIZAR do
+  // usuário (competitive-opportunities.controller.ts) — e NÃO existia
+  // nenhuma trava contra execuções sobrepostas. Com 1748 listagens ativas e
+  // até 4 chamadas HTTP por listagem ao rate limit de 1 req/s compartilhado
+  // do Mercado Livre (DEFAULT_RATE_LIMIT, ver marketplace-rate-limits.ts),
+  // UM ciclo completo leva ~1-2h — mais que os 10min do cron. Resultado:
+  // ciclos se empilhavam indefinidamente (cada novo cron, mais cada clique
+  // em ATUALIZAR, somava à mesma fila do rate limiter), gerando volume
+  // contínuo e crescente de chamadas a `/products/{id}/items` do Mercado
+  // Livre — o padrão exato que a proteção antiscraping deles bloqueia (ver
+  // aviso em mercado-livre-api.client.ts sobre esse endpoint já ter passado
+  // a exigir token). Confirmado em produção: 100% das tentativas retornando
+  // HTTP 403 initerruptamente desde 23/11 14:22 (horário local), SEM nenhum
+  // snapshot novo de concorrente coletado desde então — exatamente por isso
+  // a tela de Oportunidades nunca via dado novo para recalcular.
+  //
+  // Fix: trava simples de execução única — uma segunda chamada enquanto a
+  // primeira ainda está rodando é ignorada (loga e retorna), em vez de
+  // empilhar. Não resolve sozinho um bloqueio que o Mercado Livre já tenha
+  // aplicado do lado deles, mas elimina a causa que o provocou e evita
+  // piorá-lo enquanto ele persistir.
+  private isRunning = false;
+
   constructor(
     private readonly radars: CompetitionRadarRegistry,
     @Inject(MONITORED_LISTING_REPOSITORY) private readonly listings: MonitoredListingRepository,
@@ -65,11 +91,30 @@ export class CompetitionMonitorOrchestrator {
   ) {}
 
   async runAll(): Promise<void> {
+    if (this.isRunning) {
+      // Nunca empilha: ver aviso de produção acima sobre `isRunning`. Não é
+      // erro (por isso não mexe em syncLogs/health) — só o cron ou o clique
+      // em ATUALIZAR chegando enquanto o ciclo anterior ainda não acabou.
+      this.logger.warn('runAll() ignorado: um ciclo de monitoramento de concorrência já está em andamento.');
+      return;
+    }
+
+    this.isRunning = true;
+    try {
+      await this.runAllInternal();
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  private async runAllInternal(): Promise<void> {
     const correlationId = randomUUID();
     const logId = await this.syncLogs.start(PROVIDER_CODE, correlationId);
     const active = await this.listings.findAllActive();
     let found = 0;
     let applied = 0;
+    let failed = 0;
+    let lastError: Error | null = null;
 
     try {
       for (const listing of active) {
@@ -78,11 +123,26 @@ export class CompetitionMonitorOrchestrator {
           const changed = await this.processListing(listing);
           if (changed) applied++;
         } catch (error) {
+          failed++;
+          lastError = error as Error;
           this.logger.error(
             `Falha ao processar monitoramento ${listing.id} (SKU ${listing.skuCode}, tenant ${listing.tenantId}): ${(error as Error).message}`,
           );
         }
       }
+
+      // Bug de produção (25/11/2026, mesmo achado documentado acima no
+      // isRunning): falha por listagem individual era só logada — nunca
+      // chegava a este nível, então runAll() sempre reportava SUCCESS pra
+      // ProviderHealth/ProviderSyncLog mesmo com 100% das listagens
+      // falhando (foi assim que o bloqueio do Mercado Livre ficou 2 dias
+      // sem gerar nenhum alerta). `found > 0 && failed === found` = todas as
+      // listagens ativas desta execução falharam — trata como falha real do
+      // provider, não como sucesso vazio.
+      if (found > 0 && failed === found) {
+        throw lastError ?? new Error('Todas as listagens monitoradas falharam nesta execução.');
+      }
+
       await this.health.recordSuccess(PROVIDER_CODE);
       await this.syncLogs.finish(logId, { status: 'SUCCESS', candidatesFound: found, candidatesApplied: applied });
     } catch (error) {
