@@ -157,7 +157,15 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
         // price_to_win foi tentado e por que não serviu.
         this.logger.warn(
           `SKU ${ctx.skuCode}: price_to_win respondeu para o anúncio ${itemId} mas sem preço utilizável (status=${result.status ?? 'null'}, ` +
-            `priceToWin=${result.priceToWin ?? 'null'}, winnerPrice=${result.winnerPrice ?? 'null'}) — caindo para o caminho antigo.`,
+            `priceToWin=${result.priceToWin ?? 'null'}, winnerPrice=${result.winnerPrice ?? 'null'}, ` +
+            `reasons=${result.reasons?.length ? result.reasons.join(',') : 'null'}) — caindo para o caminho antigo. ` +
+            // 25/11/2026: `status: "not_listed"` não é documentado pela API — na prática
+            // visto em anúncios com `reasons` incluindo "item_paused"/sem reasons e
+            // estoque zerado (RM0005, saldo=0) ou zerado especificamente no depósito
+            // "Full Mercado Livre" mesmo com saldo geral positivo (RM0043, saldo
+            // geral=12 mas Full=0) — anúncio Full sem estoque no Full também sai do ar.
+            // Ver docs/decisions/ (a criar) se isso virar um ADR formal.
+            'Hipótese confirmada empiricamente: anúncio sem estoque disponível para o Mercado Livre (zero geral, ou zero no depósito Full quando o anúncio é fulfillment).',
         );
         return null;
       }
