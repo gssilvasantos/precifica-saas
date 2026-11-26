@@ -43,10 +43,25 @@ export const PROVIDER_CODE = 'COMPETITION_RADAR_MONITOR';
 // confirmado em produção), esse ciclo sozinho gera ~1748 requisições inúteis
 // a 1 req/s (~30min só de espera do rate limit) toda vez que roda, o que por
 // si só pode ser volume suficiente para o bloqueio nunca ter uma janela livre
-// para expirar. Corta o ciclo cedo quando vê falhas consecutivas acima deste
-// limite — não espera processar todas as listagens pra só então reportar
-// FAILED. Falha intercalada com sucesso (listagem por listagem com problema
-// pontual) NÃO aciona o disjuntor, só uma sequência longa e ininterrupta.
+// para expirar. Corta cedo quando vê falhas consecutivas acima deste limite —
+// não espera processar todas as listagens pra só então reportar FAILED.
+// Falha intercalada com sucesso (listagem por listagem com problema pontual)
+// NÃO aciona o disjuntor, só uma sequência longa e ininterrupta.
+//
+// Por tenant, não global (25/11/2026, achado pelo Gui monitorando a
+// reativação manual do RM0043): com um disjuntor ÚNICO e global, um tenant
+// de demonstração com dados quebrados (ex.: MLBs inexistentes, token
+// inválido) gerando 403 em sequência bastava pra interromper o ciclo
+// INTEIRO antes de alcançar as listagens de qualquer tenant real posicionado
+// depois dele na fila — confirmado em produção: dois ciclos seguidos
+// (iniciados 01:40 e 02:00 UTC) cortados aos ~13-14min, sempre pelo mesmo
+// tenant demo, sem nenhuma listagem real sequer tentada depois do corte.
+// Cada tenant agora tem seu próprio contador de falhas consecutivas: quando
+// o de um tenant estoura o limite, só as listagens RESTANTES DAQUELE TENANT
+// são puladas neste ciclo (sem tentativa) — listagens de outros tenants
+// continuam sendo processadas normalmente, e o ciclo só é reportado como
+// FAILED se TODAS as listagens efetivamente tentadas (de qualquer tenant)
+// tiverem falhado.
 const MAX_CONSECUTIVE_FAILURES = 10;
 
 // Pipeline (docs/competition-intelligence-architecture.md, seção 3): para
@@ -127,34 +142,51 @@ export class CompetitionMonitorOrchestrator {
     let found = 0;
     let applied = 0;
     let failed = 0;
+    let skipped = 0;
     let lastError: Error | null = null;
-    let consecutiveFailures = 0;
-    let circuitBroken = false;
+    const consecutiveFailuresByTenant = new Map<string, number>();
+    const brokenTenants = new Set<string>();
 
     try {
       for (const listing of active) {
+        if (brokenTenants.has(listing.tenantId)) {
+          // Disjuntor deste tenant já acionado neste ciclo — pula sem
+          // tentar (ver comentário de MAX_CONSECUTIVE_FAILURES). Não conta
+          // como `failed`: nunca foi de fato tentada.
+          skipped++;
+          continue;
+        }
+
         try {
           found++;
           const changed = await this.processListing(listing);
           if (changed) applied++;
-          consecutiveFailures = 0;
+          consecutiveFailuresByTenant.set(listing.tenantId, 0);
         } catch (error) {
           failed++;
-          consecutiveFailures++;
           lastError = error as Error;
+          const tenantFailures = (consecutiveFailuresByTenant.get(listing.tenantId) ?? 0) + 1;
+          consecutiveFailuresByTenant.set(listing.tenantId, tenantFailures);
           this.logger.error(
             `Falha ao processar monitoramento ${listing.id} (SKU ${listing.skuCode}, tenant ${listing.tenantId}): ${(error as Error).message}`,
           );
 
-          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-            circuitBroken = true;
+          if (tenantFailures >= MAX_CONSECUTIVE_FAILURES) {
+            brokenTenants.add(listing.tenantId);
             this.logger.error(
-              `Disjuntor acionado: ${consecutiveFailures} falhas consecutivas (de ${active.length} listagens ativas). ` +
-                `Interrompendo o ciclo agora em vez de continuar tentando — ver comentário de MAX_CONSECUTIVE_FAILURES.`,
+              `Disjuntor acionado para o tenant ${listing.tenantId}: ${tenantFailures} falhas consecutivas. ` +
+                `Pulando as listagens restantes deste tenant neste ciclo — outros tenants continuam sendo ` +
+                `processados normalmente (ver comentário de MAX_CONSECUTIVE_FAILURES).`,
             );
-            break;
           }
         }
+      }
+
+      if (brokenTenants.size > 0) {
+        this.logger.warn(
+          `Ciclo com disjuntor acionado para ${brokenTenants.size} tenant(s) (${[...brokenTenants].join(', ')}): ` +
+            `${skipped} listagem(ns) pulada(s) sem tentativa neste ciclo.`,
+        );
       }
 
       // Bug de produção (25/11/2026, mesmo achado documentado acima no
@@ -163,17 +195,18 @@ export class CompetitionMonitorOrchestrator {
       // ProviderHealth/ProviderSyncLog mesmo com 100% das listagens
       // falhando (foi assim que o bloqueio do Mercado Livre ficou 2 dias
       // sem gerar nenhum alerta). `found > 0 && failed === found` = todas as
-      // listagens ativas desta execução falharam — trata como falha real do
-      // provider, não como sucesso vazio.
-      if (circuitBroken) {
-        throw new Error(
-          `Disjuntor acionado após ${consecutiveFailures} falhas consecutivas — ciclo interrompido antes de terminar ` +
-            `(último erro: ${lastError?.message ?? 'desconhecido'}).`,
-        );
-      }
-
+      // listagens efetivamente TENTADAS nesta execução falharam (listagens
+      // puladas por disjuntor de outro tenant não contam para `found`) —
+      // trata como falha real do provider, não como sucesso vazio. Com o
+      // disjuntor por tenant, um tenant quebrado isolado não derruba essa
+      // condição sozinho enquanto outro tenant tiver sucesso.
       if (found > 0 && failed === found) {
-        throw lastError ?? new Error('Todas as listagens monitoradas falharam nesta execução.');
+        throw brokenTenants.size > 0
+          ? new Error(
+              `Disjuntor acionado para ${brokenTenants.size} tenant(s) (${[...brokenTenants].join(', ')}) — ` +
+                `todas as ${found} listagens tentadas neste ciclo falharam (último erro: ${lastError?.message ?? 'desconhecido'}).`,
+            )
+          : lastError ?? new Error('Todas as listagens monitoradas falharam nesta execução.');
       }
 
       await this.health.recordSuccess(PROVIDER_CODE);

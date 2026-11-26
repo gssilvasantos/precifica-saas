@@ -146,6 +146,47 @@ describe('CompetitionMonitorOrchestrator', () => {
     expect(syncLogs.finish).toHaveBeenCalledWith('log-1', expect.objectContaining({ status: 'FAILED', candidatesFound: 10 }));
   });
 
+  // Disjuntor por tenant (25/11/2026): achado monitorando a reativação do
+  // RM0043 em produção — um tenant de demonstração com dados quebrados
+  // gerando 403 em sequência interrompia o ciclo INTEIRO antes de alcançar
+  // listagens de qualquer tenant real posicionado depois dele na fila. Com
+  // o disjuntor por tenant, só as listagens restantes DO TENANT QUEBRADO são
+  // puladas — outros tenants continuam sendo processados e o ciclo como um
+  // todo reporta SUCCESS se eles tiverem sucesso.
+  it('isola o disjuntor por tenant: pula só as listagens restantes do tenant quebrado, processa os demais tenants normalmente', async () => {
+    const { orchestrator, radar, listings, syncLogs, health } = buildOrchestrator();
+    const brokenTenantListings = Array.from({ length: 15 }, (_, i) =>
+      fakeListing({ id: `demo-${i}`, tenantId: 'tenant-demo', skuCode: `SKU-DEMO-${i}` }),
+    );
+    const realTenantListing = fakeListing({ id: 'real-1', tenantId: 'tenant-real', skuCode: 'RM0043', targetRef: 'MLB6112206942' });
+    // O tenant quebrado vem ANTES do tenant real na fila — é exatamente o
+    // cenário observado em produção (demo tenant cortando o ciclo antes de
+    // alcançar o RM0043 do tenant real).
+    listings.findAllActive.mockResolvedValue([...brokenTenantListings, realTenantListing]);
+    radar.fetchOffers.mockImplementation((ctx: { skuCode: string }) =>
+      ctx.skuCode === realTenantListing.skuCode
+        ? Promise.resolve([{ competitorLabel: 'Vendedor 9', price: 50, isBuyBoxWinner: false, collectedAt: new Date() }])
+        : Promise.reject(new Error('Mercado Livre products/items API retornou 403 para MLB123')),
+    );
+
+    await orchestrator.runAll();
+
+    // Só as primeiras 10 (MAX_CONSECUTIVE_FAILURES) do tenant quebrado foram
+    // tentadas, mais a 1 do tenant real — as outras 5 do tenant quebrado
+    // foram puladas sem tentativa.
+    expect(radar.fetchOffers).toHaveBeenCalledTimes(11);
+    // O tenant real foi alcançado e processado com sucesso mesmo com o
+    // disjuntor do tenant demo acionado antes dele na fila.
+    expect(radar.fetchOffers).toHaveBeenCalledWith(expect.objectContaining({ skuCode: realTenantListing.skuCode }));
+    // Ciclo como um todo é SUCCESS — um tenant quebrado isolado não derruba
+    // o resultado geral enquanto outro tenant tiver sucesso.
+    expect(health.recordSuccess).toHaveBeenCalledWith('COMPETITION_RADAR_MONITOR');
+    expect(syncLogs.finish).toHaveBeenCalledWith(
+      'log-1',
+      expect.objectContaining({ status: 'SUCCESS', candidatesFound: 11, candidatesApplied: 1 }),
+    );
+  });
+
   it('não aciona o disjuntor quando falhas e sucessos se intercalam (sem sequência longa de falhas)', async () => {
     const { orchestrator, radar, listings, syncLogs, health } = buildOrchestrator();
     const manyListings = Array.from({ length: 12 }, (_, i) => fakeListing({ id: `listing-${i}`, skuCode: `SKU-${i}` }));
