@@ -149,6 +149,16 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
       if (competitorPrice == null || competitorPrice <= 0) {
         // Resposta sem preço utilizável (ex.: anúncio fora do catálogo,
         // `status` null) — não é erro, só não dá para montar uma oferta.
+        // Bug de observabilidade (26/11/2026, achado investigando por que
+        // uma fração dos SKUs do tenant real continuava caindo no caminho
+        // antigo mesmo com price_to_win respondendo 200): este branch
+        // devolvia null em silêncio total, indistinguível de "sem canal
+        // vinculado" nos logs — impossível saber, sem isto, SE o
+        // price_to_win foi tentado e por que não serviu.
+        this.logger.warn(
+          `SKU ${ctx.skuCode}: price_to_win respondeu para o anúncio ${itemId} mas sem preço utilizável (status=${result.status ?? 'null'}, ` +
+            `priceToWin=${result.priceToWin ?? 'null'}, winnerPrice=${result.winnerPrice ?? 'null'}) — caindo para o caminho antigo.`,
+        );
         return null;
       }
 
