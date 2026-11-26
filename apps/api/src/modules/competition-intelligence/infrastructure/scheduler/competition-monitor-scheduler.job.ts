@@ -32,6 +32,19 @@ export class CompetitionMonitorSchedulerJob {
   }
 
   private async runInner() {
+    // Pausa de emergência (25/11/2026, bloqueio PolicyAgent do Mercado Livre
+    // — ver comentário em competition-monitor-orchestrator.service.ts): dá
+    // pra zerar de vez o tráfego pra esse radar sem mexer em banco nem fazer
+    // novo deploy — só setar COMPETITION_MONITOR_DISABLED=true no ambiente
+    // do serviço. Usado pra medir se um período de silêncio total (ao
+    // contrário do disjuntor, que ainda deixa ~10 chamadas por ciclo) faz
+    // o bloqueio ceder. Reversível: apagar a variável volta ao normal no
+    // próximo ciclo, sem redeploy.
+    if (process.env.COMPETITION_MONITOR_DISABLED === 'true') {
+      this.logger.warn('Ciclo de monitoramento de concorrência pulado: COMPETITION_MONITOR_DISABLED=true.');
+      return;
+    }
+
     const schedule = await this.schedules.findByProviderCode(PROVIDER_CODE);
     if (schedule && !schedule.isEnabled) return;
 

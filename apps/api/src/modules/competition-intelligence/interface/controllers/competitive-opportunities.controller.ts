@@ -64,9 +64,16 @@ export class CompetitiveOpportunitiesController {
   // Dispara um ciclo de monitoramento imediato (todos os tenants, mesma
   // limitação simples do sync-now do ERP Integration) — útil para testar
   // sem esperar o cron.
+  // Respeita a mesma pausa de emergência do scheduler (ver
+  // competition-monitor-scheduler.job.ts) — sem isso, o botão ATUALIZAR
+  // continuaria gerando tráfego pro Mercado Livre durante o teste de
+  // silêncio total, invalidando a medição.
   @Roles(UserRole.ADMIN)
   @Post('run-now')
   async runNow() {
+    if (process.env.COMPETITION_MONITOR_DISABLED === 'true') {
+      return { triggered: false, reason: 'COMPETITION_MONITOR_DISABLED=true — monitoramento pausado temporariamente.' };
+    }
     await this.orchestrator.runAll();
     return { triggered: true };
   }

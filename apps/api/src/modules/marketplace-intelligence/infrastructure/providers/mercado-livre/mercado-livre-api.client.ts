@@ -341,11 +341,31 @@ export class MercadoLivreApiClient {
     );
   }
 
+  // Cabeçalhos padrão (25/11/2026, incidente do bloqueio PolicyAgent — ver
+  // comentário de MAX_CONSECUTIVE_FAILURES em competition-monitor-orchestrator.service.ts):
+  // o `fetch` nativo do Node não envia User-Agent nenhum por padrão —
+  // ausência de User-Agent é um dos sinais clássicos que sistemas
+  // anti-scraping usam pra identificar tráfego de script, somado a volume.
+  // Não resolve sozinho um bloqueio já aplicado (o 403 confirmado em
+  // produção veio de `PolicyAgent`/`PA_UNAUTHORIZED_RESULT_FROM_POLICIES`,
+  // uma decisão tomada antes de qualquer checagem de token), mas é grátis,
+  // sem risco, e remove um sinal real de "isso aqui é script" do nosso
+  // tráfego daqui pra frente. `...init?.headers` por último: o chamador
+  // pode sobrescrever (nunca sobrescreve Authorization, que vem de init).
+  private static readonly DEFAULT_HEADERS: Record<string, string> = {
+    'User-Agent': 'KynetiPricingBot/1.0 (+https://kyneti.com.br; contato: suporte@kyneti.com.br)',
+    'Accept-Language': 'pt-BR,pt;q=0.9',
+  };
+
   private async fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), MercadoLivreApiClient.REQUEST_TIMEOUT_MS);
     try {
-      return await fetch(url, { ...init, signal: controller.signal });
+      return await fetch(url, {
+        ...init,
+        headers: { ...MercadoLivreApiClient.DEFAULT_HEADERS, ...(init?.headers as Record<string, string> | undefined) },
+        signal: controller.signal,
+      });
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         throw new Error(`Mercado Livre não respondeu em ${MercadoLivreApiClient.REQUEST_TIMEOUT_MS}ms (timeout) para ${url}`);
