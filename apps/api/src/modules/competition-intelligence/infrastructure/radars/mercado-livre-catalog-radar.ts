@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   CompetitionFetchContext,
   CompetitionRadar,
@@ -7,8 +7,6 @@ import {
 } from '../../../../shared/contracts/competition-radar.contract';
 import { MercadoLivreApiClient } from '../../../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-api.client';
 import { MercadoLivreConnectionService } from '../../../marketplace-intelligence/application/mercado-livre-connection.service';
-import { CHANNEL_LISTING_READER } from '../../../../shared/contracts/tokens';
-import { ChannelListingReader } from '../../../../shared/contracts/channel-listing-reader.port';
 
 // Radar de concorrência REAL do Mercado Livre (01/08/2026, ver
 // docs/revisao-geral-2026-08.md, §4).
@@ -57,7 +55,6 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
   constructor(
     private readonly client: MercadoLivreApiClient,
     private readonly connections: MercadoLivreConnectionService,
-    @Inject(CHANNEL_LISTING_READER) private readonly channelListings: ChannelListingReader,
   ) {}
 
   async fetchOffers(ctx: CompetitionFetchContext): Promise<RawCompetitorOffer[]> {
@@ -87,14 +84,23 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
     // /items/{id}/price_to_win é escopado a UM anúncio nosso — não enumera
     // concorrentes, só devolve se estamos ganhando/perdendo e o preço-alvo —
     // por isso é o caminho PRIMÁRIO agora, sempre que o listing tem canal
-    // vinculado (dá pra resolver o id do nosso próprio anúncio via
-    // ChannelListingReader). Preserva o caminho antigo como fallback (listing
-    // sem canal vinculado, ou falha pontual do price_to_win) — não foi
-    // removido porque ainda alimenta a lista completa de concorrentes sob
-    // demanda (ver endpoint dedicado, fora do ciclo automático).
+    // vinculado, usando `targetRef` (o próprio anúncio monitorado, não um
+    // anúncio "representante" do SKU — ver bug corrigido em
+    // tryFetchViaPriceToWin) como item id. Preserva o caminho antigo só como
+    // fallback de chamada INCONCLUSIVA do price_to_win (erro de rede, auth,
+    // 5xx) — não é mais tentado quando o price_to_win responde normalmente
+    // sem preço utilizável, porque nesse caso a resposta já é definitiva e o
+    // caminho antigo está bloqueado (403 garantido, ver
+    // tryFetchViaPriceToWin). Não foi removido porque ainda alimenta a lista
+    // completa de concorrentes sob demanda (ver endpoint dedicado, fora do
+    // ciclo automático).
     if (ctx.channelCode && accessToken) {
-      const viaPriceToWin = await this.tryFetchViaPriceToWin(ctx, accessToken);
-      if (viaPriceToWin) return viaPriceToWin;
+      const viaPriceToWin = await this.tryFetchViaPriceToWin(ctx, targetRef, accessToken);
+      // `null` = inconclusivo (price_to_win não pôde ser tentado ou falhou
+      // na chamada) — cai para o caminho antigo abaixo. Um array (mesmo
+      // vazio) = resposta DEFINITIVA do price_to_win — não cai, ver
+      // comentário em tryFetchViaPriceToWin.
+      if (viaPriceToWin !== null) return viaPriceToWin;
     }
 
     const productId = await this.resolveCatalogProductId(targetRef, ctx.skuCode, accessToken);
@@ -128,46 +134,61 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
   }
 
   // Caminho primário (25/11/2026, ver comentário acima em fetchOffers).
-  // Resolve o ANÚNCIO NOSSO vinculado a este SKU/canal (ChannelListingReader
-  // — o mesmo port que o orchestrator usa para saber "nosso preço") e
-  // consulta GET /items/{id}/price_to_win para ele. Devolve null (nunca
-  // lança) sempre que não for possível seguir por aqui — sem listing
-  // vinculado, sem preço utilizável na resposta, ou qualquer erro de rede —
-  // para o chamador cair no caminho antigo sem tratar isso como falha do
-  // ciclo inteiro.
-  private async tryFetchViaPriceToWin(ctx: CompetitionFetchContext, accessToken: string): Promise<RawCompetitorOffer[] | null> {
-    const ourListing = await this.channelListings.findBySku(ctx.tenantId, ctx.channelCode as string, ctx.skuCode).catch((error) => {
-      this.logger.warn(`SKU ${ctx.skuCode}: falha ao resolver ChannelListing para price_to_win: ${(error as Error).message}`);
-      return null;
-    });
-    const itemId = ourListing?.externalId;
-    if (!itemId) return null; // sem anúncio vinculado neste canal — nada a consultar
-
+  //
+  // Bug corrigido (26/11/2026, achado investigando por que o disjuntor por
+  // tenant — ver competition-monitor-orchestrator.service.ts — continuava
+  // sendo acionado para o TENANT REAL mesmo depois de isolado por tenant):
+  // esta função resolvia "nosso anúncio" com
+  // `channelListings.findBySku(tenantId, channelCode, skuCode)` — por SKU,
+  // não pelo `targetRef` desta listagem monitorada específica. Para SKU com
+  // UM anúncio só isso é inofensivo (coincide), mas vários SKUs reais têm
+  // MÚLTIPLOS anúncios próprios no Mercado Livre para o mesmo produto
+  // (ex.: RM0021 tem 8 anúncios ML distintos monitorados) — e
+  // `findBySku` sempre devolve o MESMO (um) anúncio "representante" do SKU.
+  // Resultado: toda vez que o orchestrator chamava `fetchOffers` para
+  // qualquer um dos OUTROS 7 anúncios de RM0021, o price_to_win era
+  // consultado para o anúncio errado (sempre o mesmo), e os outros 7
+  // caíam, um por um, no caminho antigo — que está bloqueado (403) desde o
+  // incidente PolicyAgent. É exatamente isso que fazia o disjuntor do
+  // tenant real estourar quase todo ciclo: não era falha genuína do
+  // price_to_win, era ele nunca sendo tentado para o anúncio certo.
+  //
+  // Fix: usa `targetRef` (o próprio anúncio desta listagem monitorada, já
+  // resolvido por quem chama) diretamente como item id — sem round-trip
+  // nenhum pelo SKU. Cada anúncio monitorado agora consulta price_to_win
+  // para SI MESMO.
+  private async tryFetchViaPriceToWin(ctx: CompetitionFetchContext, itemId: string, accessToken: string): Promise<RawCompetitorOffer[] | null> {
     try {
       const result = await this.client.fetchPriceToWin(itemId, accessToken);
       const competitorPrice = result.priceToWin ?? result.winnerPrice;
       if (competitorPrice == null || competitorPrice <= 0) {
         // Resposta sem preço utilizável (ex.: anúncio fora do catálogo,
-        // `status` null) — não é erro, só não dá para montar uma oferta.
-        // Bug de observabilidade (26/11/2026, achado investigando por que
-        // uma fração dos SKUs do tenant real continuava caindo no caminho
-        // antigo mesmo com price_to_win respondendo 200): este branch
-        // devolvia null em silêncio total, indistinguível de "sem canal
-        // vinculado" nos logs — impossível saber, sem isto, SE o
-        // price_to_win foi tentado e por que não serviu.
+        // `status` null) — não é erro, é uma resposta DEFINITIVA do
+        // price_to_win (endpoint seguro, nunca bloqueado pelo PolicyAgent):
+        // este anúncio não está disputando Buy Box agora.
         this.logger.warn(
           `SKU ${ctx.skuCode}: price_to_win respondeu para o anúncio ${itemId} mas sem preço utilizável (status=${result.status ?? 'null'}, ` +
             `priceToWin=${result.priceToWin ?? 'null'}, winnerPrice=${result.winnerPrice ?? 'null'}, ` +
-            `reasons=${result.reasons?.length ? result.reasons.join(',') : 'null'}) — caindo para o caminho antigo. ` +
-            // 25/11/2026: `status: "not_listed"` não é documentado pela API — na prática
-            // visto em anúncios com `reasons` incluindo "item_paused"/sem reasons e
-            // estoque zerado (RM0005, saldo=0) ou zerado especificamente no depósito
-            // "Full Mercado Livre" mesmo com saldo geral positivo (RM0043, saldo
-            // geral=12 mas Full=0) — anúncio Full sem estoque no Full também sai do ar.
-            // Ver docs/decisions/ (a criar) se isso virar um ADR formal.
-            'Hipótese confirmada empiricamente: anúncio sem estoque disponível para o Mercado Livre (zero geral, ou zero no depósito Full quando o anúncio é fulfillment).',
+            `reasons=${result.reasons?.length ? result.reasons.join(',') : 'null'}) — sem oferta a registrar (não cai mais para o caminho antigo, ver abaixo). ` +
+            // 25/11/2026-26/11/2026: `status: "not_listed"` não é documentado
+            // pela API. Em produção já vimos DUAS causas distintas por trás
+            // dele, não uma só — a nota anterior deste comentário ("sempre é
+            // estoque") estava incompleta: (1) estoque zerado geral (RM0005)
+            // ou zerado no depósito "Full Mercado Livre" com saldo geral
+            // positivo (RM0043, confirmado reativando o anúncio em
+            // produção); (2) `reasons: ["item_not_opted_in"]` — anúncio que
+            // simplesmente não está inscrito na competição de catálogo
+            // daquele produto, sem relação com estoque (visto em RM0021 e
+            // outros SKUs com múltiplos anúncios ML). Não assumir estoque
+            // sem olhar `reasons` primeiro.
+            'Ver reasons acima para a causa específica deste anúncio.',
         );
-        return null;
+        // Não cai para o caminho antigo aqui (26/11/2026): `/products/:id/items`
+        // está bloqueado (403) pelo PolicyAgent desde o incidente original e
+        // NUNCA teria sucesso — cair nele só queima o orçamento do disjuntor
+        // por tenant (MAX_CONSECUTIVE_FAILURES) sem chance nenhuma de dar
+        // certo. O price_to_win já deu uma resposta definitiva: sem oferta.
+        return [];
       }
 
       const isWinning = result.status === 'winning' || result.status === 'sharing_first_place';
@@ -188,6 +209,10 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
         },
       ];
     } catch (error) {
+      // Erro de fato na chamada (rede, auth, 5xx, rate limit) — inconclusivo,
+      // diferente do caso acima. Aqui sim vale cair para o caminho antigo:
+      // pode ser falha transitória do price_to_win, não uma resposta
+      // definitiva de que não há concorrência.
       this.logger.warn(`SKU ${ctx.skuCode}: price_to_win falhou para o anúncio ${itemId}, caindo para o caminho antigo: ${(error as Error).message}`);
       return null;
     }

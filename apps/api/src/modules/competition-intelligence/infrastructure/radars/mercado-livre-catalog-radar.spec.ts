@@ -1,7 +1,6 @@
 import { MercadoLivreCatalogRadar } from './mercado-livre-catalog-radar';
 import { MercadoLivreApiClient } from '../../../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-api.client';
 import { MercadoLivreConnectionService } from '../../../marketplace-intelligence/application/mercado-livre-connection.service';
-import { ChannelListingReader } from '../../../../shared/contracts/channel-listing-reader.port';
 
 // Radar REAL de concorrência (01/08/2026, docs/revisao-geral-2026-08.md §4)
 // — antes dele, todo o loop de repricing dependia de planilha manual.
@@ -27,19 +26,6 @@ describe('MercadoLivreCatalogRadar', () => {
     } as unknown as MercadoLivreConnectionService;
   }
 
-  // Incidente PolicyAgent (25/11/2026) — por padrão sem canal vinculado
-  // (findBySku resolve null), então os testes existentes continuam
-  // exercitando o caminho antigo (/products/:id/items) sem mudança de
-  // comportamento. Os testes do caminho novo (price_to_win) sobrescrevem
-  // findBySku e passam channelCode no ctx.
-  function buildChannelListings(overrides: Partial<jest.Mocked<ChannelListingReader>> = {}) {
-    return {
-      findBySku: jest.fn().mockResolvedValue(null),
-      findSkusByExternalIds: jest.fn(),
-      ...overrides,
-    } as unknown as jest.Mocked<ChannelListingReader>;
-  }
-
   const ctx = { tenantId: 'tenant-1', skuCode: 'SKU-001', targetRef: 'MLB19151277' };
 
   it('coleta as ofertas concorrentes de um produto de catálogo', async () => {
@@ -54,7 +40,7 @@ describe('MercadoLivreCatalogRadar', () => {
       ]),
     });
 
-    const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), buildChannelListings()).fetchOffers(ctx);
+    const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx);
 
     expect(offers).toHaveLength(2);
     expect(offers[0].price).toBe(89.9);
@@ -70,7 +56,7 @@ describe('MercadoLivreCatalogRadar', () => {
         .mockResolvedValue([{ item_id: 'MLB222', seller_id: 222, price: 95.5, winner: true }]),
     });
 
-    const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), buildChannelListings()).fetchOffers(ctx);
+    const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx);
 
     expect(offers[0].isBuyBoxWinner).toBe(true);
   });
@@ -88,23 +74,28 @@ describe('MercadoLivreCatalogRadar', () => {
       ]),
     });
 
-    const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), buildChannelListings()).fetchOffers(ctx);
+    const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx);
 
     expect(offers).toHaveLength(1);
     expect(offers[0].price).toBe(50);
   });
 
   // Incidente PolicyAgent (25/11/2026) — caminho primário quando o listing
-  // tem canal vinculado: resolve o anúncio NOSSO via ChannelListingReader e
-  // usa GET /items/{id}/price_to_win em vez de /products/:id/items (que foi
-  // bloqueado em massa). Ver comentário de topo deste arquivo.
+  // tem canal vinculado: usa GET /items/{id}/price_to_win em vez de
+  // /products/:id/items (que foi bloqueado em massa). Ver comentário de
+  // topo deste arquivo.
+  //
+  // Bug corrigido (26/11/2026): o item id usado é `targetRef` (o próprio
+  // anúncio desta listagem monitorada) — NÃO mais resolvido por
+  // ChannelListingReader.findBySku(tenantId, channelCode, skuCode), que
+  // devolvia sempre o MESMO anúncio "representante" do SKU mesmo quando o
+  // SKU tinha vários anúncios monitorados separadamente (ex.: RM0021 com 8
+  // anúncios ML distintos) — fazendo os outros caírem, incorretamente, no
+  // caminho antigo bloqueado.
   describe('price_to_win (caminho primário, listing com canal vinculado)', () => {
     const ctxComCanal = { ...ctx, channelCode: 'MERCADO_LIVRE' };
 
-    it('usa price_to_win quando o listing tem canal vinculado e devolve o anúncio-vencedor como oferta', async () => {
-      const channelListings = buildChannelListings({
-        findBySku: jest.fn().mockResolvedValue({ channelCode: 'MERCADO_LIVRE', externalId: 'MLB999', currentPrice: 100, url: null }),
-      });
+    it('usa price_to_win com o targetRef da própria listagem monitorada e devolve o anúncio-vencedor como oferta', async () => {
       const client = buildClient({
         fetchPriceToWin: jest.fn().mockResolvedValue({
           status: 'competing',
@@ -117,9 +108,11 @@ describe('MercadoLivreCatalogRadar', () => {
         }),
       });
 
-      const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), channelListings).fetchOffers(ctxComCanal);
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctxComCanal);
 
-      expect(client.fetchPriceToWin).toHaveBeenCalledWith('MLB999', MOCK_ACCESS_TOKEN);
+      // targetRef do ctx (MLB19151277) é usado diretamente — sem nenhum
+      // round-trip por SKU.
+      expect(client.fetchPriceToWin).toHaveBeenCalledWith('MLB19151277', MOCK_ACCESS_TOKEN);
       expect(client.fetchCatalogProductItems).not.toHaveBeenCalled(); // não cai no caminho antigo
       expect(offers).toEqual([
         expect.objectContaining({ price: 95, isBuyBoxWinner: true, competitorLabel: 'Concorrente (anúncio MLB222)' }),
@@ -127,9 +120,6 @@ describe('MercadoLivreCatalogRadar', () => {
     });
 
     it('status winning gera oferta com isBuyBoxWinner=false (nós somos o vencedor, não o concorrente sintetizado)', async () => {
-      const channelListings = buildChannelListings({
-        findBySku: jest.fn().mockResolvedValue({ channelCode: 'MERCADO_LIVRE', externalId: 'MLB999', currentPrice: 100, url: null }),
-      });
       const client = buildClient({
         fetchPriceToWin: jest.fn().mockResolvedValue({
           status: 'winning',
@@ -137,57 +127,59 @@ describe('MercadoLivreCatalogRadar', () => {
           currentPrice: 100,
           catalogProductId: 'MLB1',
           reasons: [],
-          winnerItemId: 'MLB999',
+          winnerItemId: 'MLB19151277',
           winnerPrice: 100,
         }),
       });
 
-      const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), channelListings).fetchOffers(ctxComCanal);
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctxComCanal);
 
       expect(offers).toEqual([expect.objectContaining({ price: 100, isBuyBoxWinner: false })]);
     });
 
-    it('sem canal vinculado (findBySku null) cai no caminho antigo', async () => {
-      const channelListings = buildChannelListings(); // findBySku -> null por padrão
+    it('sem channelCode no listing cai direto no caminho antigo (price_to_win nunca tentado)', async () => {
       const client = buildClient({
         fetchCatalogProduct: jest.fn().mockResolvedValue({ id: 'MLB19151277', buy_box_winner: null }),
         fetchCatalogProductItems: jest.fn().mockResolvedValue([{ item_id: 'MLB1', seller_id: 1, price: 10 }]),
       });
 
-      const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), channelListings).fetchOffers(ctxComCanal);
+      // ctx sem channelCode (o `ctx` base, não o `ctxComCanal`).
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx);
 
       expect(client.fetchPriceToWin).not.toHaveBeenCalled();
       expect(client.fetchCatalogProductItems).toHaveBeenCalled();
       expect(offers).toHaveLength(1);
     });
 
-    it('price_to_win falhando (erro de rede) cai no caminho antigo em vez de propagar o erro', async () => {
-      const channelListings = buildChannelListings({
-        findBySku: jest.fn().mockResolvedValue({ channelCode: 'MERCADO_LIVRE', externalId: 'MLB999', currentPrice: 100, url: null }),
-      });
+    it('price_to_win falhando (erro de rede, inconclusivo) cai no caminho antigo em vez de propagar o erro', async () => {
       const client = buildClient({
-        fetchPriceToWin: jest.fn().mockRejectedValue(new Error('Mercado Livre GET /items/MLB999/price_to_win retornou HTTP 403')),
+        fetchPriceToWin: jest.fn().mockRejectedValue(new Error('Mercado Livre GET /items/MLB19151277/price_to_win retornou HTTP 403')),
         fetchCatalogProduct: jest.fn().mockResolvedValue({ id: 'MLB19151277', buy_box_winner: null }),
         fetchCatalogProductItems: jest.fn().mockResolvedValue([{ item_id: 'MLB1', seller_id: 1, price: 10 }]),
       });
 
-      const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), channelListings).fetchOffers(ctxComCanal);
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctxComCanal);
 
       expect(client.fetchCatalogProductItems).toHaveBeenCalled();
       expect(offers).toHaveLength(1);
     });
 
-    it('resposta sem preço utilizável (priceToWin e winnerPrice nulos) cai no caminho antigo', async () => {
-      const channelListings = buildChannelListings({
-        findBySku: jest.fn().mockResolvedValue({ channelCode: 'MERCADO_LIVRE', externalId: 'MLB999', currentPrice: 100, url: null }),
-      });
+    // Bug corrigido (26/11/2026, achado monitorando o disjuntor por tenant
+    // estourar quase todo ciclo para o tenant real): uma resposta NORMAL do
+    // price_to_win sem preço utilizável (ex.: status "not_listed",
+    // reasons=["item_not_opted_in"]) é uma resposta DEFINITIVA — o anúncio
+    // não está disputando Buy Box agora. Cair no caminho antigo depois
+    // disso é inútil: ele está bloqueado (403) pelo PolicyAgent e nunca
+    // teria sucesso, só queima o orçamento do disjuntor por tenant
+    // (MAX_CONSECUTIVE_FAILURES) sem chance nenhuma de dar certo.
+    it('resposta sem preço utilizável (priceToWin e winnerPrice nulos) NÃO cai mais no caminho antigo — devolve vazio', async () => {
       const client = buildClient({
         fetchPriceToWin: jest.fn().mockResolvedValue({
-          status: null,
+          status: 'not_listed',
           priceToWin: null,
           currentPrice: null,
           catalogProductId: null,
-          reasons: [],
+          reasons: ['item_not_opted_in'],
           winnerItemId: null,
           winnerPrice: null,
         }),
@@ -195,9 +187,10 @@ describe('MercadoLivreCatalogRadar', () => {
         fetchCatalogProductItems: jest.fn().mockResolvedValue([{ item_id: 'MLB1', seller_id: 1, price: 10 }]),
       });
 
-      const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), channelListings).fetchOffers(ctxComCanal);
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctxComCanal);
 
-      expect(offers).toHaveLength(1); // veio do caminho antigo
+      expect(client.fetchCatalogProductItems).not.toHaveBeenCalled(); // caminho antigo bloqueado, nem tenta
+      expect(offers).toEqual([]);
     });
   });
 
@@ -213,7 +206,7 @@ describe('MercadoLivreCatalogRadar', () => {
         fetchCatalogProductItems: jest.fn().mockResolvedValue([{ item_id: 'MLB1', seller_id: 1, price: 10 }]),
       });
 
-      const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), buildChannelListings()).fetchOffers({
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers({
         ...ctx,
         targetRef: 'MLB3456789012',
       });
@@ -229,7 +222,7 @@ describe('MercadoLivreCatalogRadar', () => {
         fetchItem: jest.fn().mockResolvedValue({ id: 'MLB123', catalog_product_id: null }),
       });
 
-      const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), buildChannelListings()).fetchOffers(ctx);
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx);
 
       expect(offers).toEqual([]);
       expect(client.fetchCatalogProductItems).not.toHaveBeenCalled();
@@ -241,13 +234,13 @@ describe('MercadoLivreCatalogRadar', () => {
         fetchItem: jest.fn().mockRejectedValue(new Error('500')),
       });
 
-      await expect(new MercadoLivreCatalogRadar(client, buildConnections(), buildChannelListings()).fetchOffers(ctx)).resolves.toEqual([]);
+      await expect(new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers(ctx)).resolves.toEqual([]);
     });
 
     it('targetRef vazio não chama a API', async () => {
       const client = buildClient();
 
-      const offers = await new MercadoLivreCatalogRadar(client, buildConnections(), buildChannelListings()).fetchOffers({ ...ctx, targetRef: '  ' });
+      const offers = await new MercadoLivreCatalogRadar(client, buildConnections()).fetchOffers({ ...ctx, targetRef: '  ' });
 
       expect(offers).toEqual([]);
       expect(client.fetchCatalogProduct).not.toHaveBeenCalled();
@@ -256,7 +249,7 @@ describe('MercadoLivreCatalogRadar', () => {
 
   describe('healthCheck', () => {
     it('UP quando a API pública responde', async () => {
-      const radar = new MercadoLivreCatalogRadar(buildClient(), buildConnections(), buildChannelListings());
+      const radar = new MercadoLivreCatalogRadar(buildClient(), buildConnections());
       await expect(radar.healthCheck()).resolves.toEqual({ status: 'UP' });
     });
 
@@ -265,7 +258,7 @@ describe('MercadoLivreCatalogRadar', () => {
         fetchTopLevelCategories: jest.fn().mockRejectedValue(new Error('timeout')),
       });
 
-      await expect(new MercadoLivreCatalogRadar(client, buildConnections(), buildChannelListings()).healthCheck()).resolves.toEqual({
+      await expect(new MercadoLivreCatalogRadar(client, buildConnections()).healthCheck()).resolves.toEqual({
         status: 'DOWN',
         message: 'timeout',
       });
