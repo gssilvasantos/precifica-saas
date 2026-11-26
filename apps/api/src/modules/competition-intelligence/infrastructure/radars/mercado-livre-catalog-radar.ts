@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   CompetitionFetchContext,
   CompetitionRadar,
@@ -7,6 +7,8 @@ import {
 } from '../../../../shared/contracts/competition-radar.contract';
 import { MercadoLivreApiClient } from '../../../marketplace-intelligence/infrastructure/providers/mercado-livre/mercado-livre-api.client';
 import { MercadoLivreConnectionService } from '../../../marketplace-intelligence/application/mercado-livre-connection.service';
+import { CHANNEL_LISTING_READER } from '../../../../shared/contracts/tokens';
+import { ChannelListingReader } from '../../../../shared/contracts/channel-listing-reader.port';
 
 // Radar de concorrência REAL do Mercado Livre (01/08/2026, ver
 // docs/revisao-geral-2026-08.md, §4).
@@ -32,6 +34,19 @@ import { MercadoLivreConnectionService } from '../../../marketplace-intelligence
 //   - id de PRODUTO de catálogo (ex.: MLB19151277) — caminho direto;
 //   - id de ANÚNCIO (ex.: MLB3456789012) — o radar descobre a qual produto
 //     pertence e então lista os concorrentes.
+//
+// Incidente PolicyAgent (25/11/2026) e limitação conhecida: desde então o
+// caminho PRIMÁRIO (quando o listing tem canal vinculado) é
+// GET /items/{id}/price_to_win — decisão do Gui (ver conversa do incidente)
+// de priorizar destravar a funcionalidade principal (ganhando/perdendo +
+// preço-alvo) sem custo e sem pausar o radar. Essa troca tem um trade-off
+// conhecido e aceito: price_to_win NÃO lista todos os concorrentes de um
+// produto (só o vencedor atual), diferente do /products/:id/items antigo —
+// por isso o caminho antigo continua no código (resolveCatalogProductId +
+// fetchCatalogProduct/fetchCatalogProductItems) como fallback e como base
+// do endpoint sob demanda de "ver todos os concorrentes" (fora do ciclo
+// automático — é o volume do ciclo automático, não o endpoint em si, que
+// disparou o bloqueio).
 @Injectable()
 export class MercadoLivreCatalogRadar implements CompetitionRadar {
   readonly code = 'MERCADO_LIVRE_CATALOG_V1';
@@ -42,6 +57,7 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
   constructor(
     private readonly client: MercadoLivreApiClient,
     private readonly connections: MercadoLivreConnectionService,
+    @Inject(CHANNEL_LISTING_READER) private readonly channelListings: ChannelListingReader,
   ) {}
 
   async fetchOffers(ctx: CompetitionFetchContext): Promise<RawCompetitorOffer[]> {
@@ -61,6 +77,25 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
       );
       return undefined;
     });
+
+    // Incidente PolicyAgent (25/11/2026, ver comentário de
+    // MAX_CONSECUTIVE_FAILURES em competition-monitor-orchestrator.service.ts):
+    // /products/:id/items (abaixo, caminho antigo) lista TODOS os concorrentes
+    // de um produto — exatamente o padrão de "varredura em lote" que o
+    // Mercado Livre passou a bloquear com 403 (PA_UNAUTHORIZED_RESULT_FROM_POLICIES)
+    // quando chamado em massa (1748 listings x ciclo de 10min). GET
+    // /items/{id}/price_to_win é escopado a UM anúncio nosso — não enumera
+    // concorrentes, só devolve se estamos ganhando/perdendo e o preço-alvo —
+    // por isso é o caminho PRIMÁRIO agora, sempre que o listing tem canal
+    // vinculado (dá pra resolver o id do nosso próprio anúncio via
+    // ChannelListingReader). Preserva o caminho antigo como fallback (listing
+    // sem canal vinculado, ou falha pontual do price_to_win) — não foi
+    // removido porque ainda alimenta a lista completa de concorrentes sob
+    // demanda (ver endpoint dedicado, fora do ciclo automático).
+    if (ctx.channelCode && accessToken) {
+      const viaPriceToWin = await this.tryFetchViaPriceToWin(ctx, accessToken);
+      if (viaPriceToWin) return viaPriceToWin;
+    }
 
     const productId = await this.resolveCatalogProductId(targetRef, ctx.skuCode, accessToken);
     if (!productId) return [];
@@ -90,6 +125,54 @@ export class MercadoLivreCatalogRadar implements CompetitionRadar {
         collectedAt,
         sourceEvidenceRef: `https://api.mercadolibre.com/products/${productId}/items`,
       }));
+  }
+
+  // Caminho primário (25/11/2026, ver comentário acima em fetchOffers).
+  // Resolve o ANÚNCIO NOSSO vinculado a este SKU/canal (ChannelListingReader
+  // — o mesmo port que o orchestrator usa para saber "nosso preço") e
+  // consulta GET /items/{id}/price_to_win para ele. Devolve null (nunca
+  // lança) sempre que não for possível seguir por aqui — sem listing
+  // vinculado, sem preço utilizável na resposta, ou qualquer erro de rede —
+  // para o chamador cair no caminho antigo sem tratar isso como falha do
+  // ciclo inteiro.
+  private async tryFetchViaPriceToWin(ctx: CompetitionFetchContext, accessToken: string): Promise<RawCompetitorOffer[] | null> {
+    const ourListing = await this.channelListings.findBySku(ctx.tenantId, ctx.channelCode as string, ctx.skuCode).catch((error) => {
+      this.logger.warn(`SKU ${ctx.skuCode}: falha ao resolver ChannelListing para price_to_win: ${(error as Error).message}`);
+      return null;
+    });
+    const itemId = ourListing?.externalId;
+    if (!itemId) return null; // sem anúncio vinculado neste canal — nada a consultar
+
+    try {
+      const result = await this.client.fetchPriceToWin(itemId, accessToken);
+      const competitorPrice = result.priceToWin ?? result.winnerPrice;
+      if (competitorPrice == null || competitorPrice <= 0) {
+        // Resposta sem preço utilizável (ex.: anúncio fora do catálogo,
+        // `status` null) — não é erro, só não dá para montar uma oferta.
+        return null;
+      }
+
+      const isWinning = result.status === 'winning' || result.status === 'sharing_first_place';
+      // price_to_win não lista TODOS os concorrentes (ver limitação
+      // conhecida registrada no comentário de topo deste arquivo) — só o
+      // preço-alvo e, quando existe, o id do anúncio vencedor. Sintetiza UMA
+      // oferta a partir disso: é o suficiente para calculateOpportunity()
+      // decidir ganhando/perdendo e o gap de preço, que é o que a tela de
+      // Oportunidades realmente usa.
+      return [
+        {
+          competitorLabel:
+            result.winnerItemId && result.winnerItemId !== itemId ? `Concorrente (anúncio ${result.winnerItemId})` : 'Concorrência (price_to_win)',
+          price: competitorPrice,
+          isBuyBoxWinner: !isWinning,
+          collectedAt: new Date(),
+          sourceEvidenceRef: `https://api.mercadolibre.com/items/${itemId}/price_to_win`,
+        },
+      ];
+    } catch (error) {
+      this.logger.warn(`SKU ${ctx.skuCode}: price_to_win falhou para o anúncio ${itemId}, caindo para o caminho antigo: ${(error as Error).message}`);
+      return null;
+    }
   }
 
   // Aceita id de produto ou de anúncio. Tenta produto primeiro (caminho

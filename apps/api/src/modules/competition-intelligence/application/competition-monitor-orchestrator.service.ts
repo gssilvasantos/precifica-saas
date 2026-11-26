@@ -201,6 +201,7 @@ export class CompetitionMonitorOrchestrator {
       tenantId: listing.tenantId,
       skuCode: listing.skuCode,
       targetRef: listing.targetRef,
+      channelCode: listing.channelCode,
     });
     if (offers.length === 0) return false; // nada coletado — não é erro, ver ManualSheetRadar
 

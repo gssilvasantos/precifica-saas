@@ -21,6 +21,13 @@ export interface CompetitionFetchContext {
   tenantId: string;
   skuCode: string;
   targetRef: string; // URL ou identificador que o radar usa para saber o que buscar (vem de MonitoredCompetitorListing)
+  // Incidente PolicyAgent (25/11/2026, ver comentário de MAX_CONSECUTIVE_FAILURES
+  // em competition-monitor-orchestrator.service.ts): o radar de Mercado Livre
+  // passou a resolver o próprio anúncio (via ChannelListingReader) para usar
+  // GET /items/{id}/price_to_win em vez de /products/{id}/items — precisa do
+  // canal pra fazer essa resolução. null/undefined = sem canal vinculado, radar
+  // cai no caminho antigo (produto de catálogo, sem price_to_win).
+  channelCode?: string | null;
 }
 
 export interface RadarHealthStatus {
